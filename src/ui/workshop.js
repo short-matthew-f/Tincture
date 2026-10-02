@@ -26,12 +26,13 @@
  * buy-grinder-kind, mixer-recipe, rush, buy-room, buy-apprentice,
  * steward-toggle, fleet-ship, fleet-route, buy-vehicle, almost, close-up,
  * close-up-reopen, locked.
- * data-coach targets: flow-meter, vats, shelf, map-window, gallery-door, mill-room,
+ * data-coach targets: flow-meter (on the big suggestion button, which is always the
+ * buyable one when anything is affordable), vats, shelf, map-window, gallery-door, mill-room,
  * close-up (plus bench, calendar, ledger-book, collect, loading-yard).
  */
 
 import {
-  h, raw, button, iconSvg, swatch, escapeHtml, lighten, safeHex, vatSvg,
+  h, raw, button, iconSvg, swatch, escapeHtml, lighten, safeHex, vatSvg, tag,
 } from './kit.js';
 import defaultFx from './fx.js';
 import defaultAudio from './audio.js';
@@ -40,7 +41,7 @@ import { ROOMS } from '../content/rooms.js';
 import {
   GRINDER_KINDS_BY_ID, VEHICLES, VEHICLES_BY_ID, RUSH_COOLDOWN_MS, MIXER,
 } from '../content/stations.js';
-import { SOURCES_BY_ID } from '../content/sources.js';
+import { SOURCES_BY_ID, MAX_SOURCES_ERA1 } from '../content/sources.js';
 import { APPRENTICES } from '../content/apprentices.js';
 import { ROUTES_BY_ID } from '../content/routes.js';
 import { getPigment } from '../content/pigments.js';
@@ -58,6 +59,16 @@ const cap1 = (s) => String(s || '').replace(/^./, (c) => c.toUpperCase());
 const NEUTRAL = '#B7BDB3';
 
 const ENTRY_COLORS = 8; // containers drawn on the scene's merge shelf
+
+/**
+ * A wait, never in seconds: "43 m", "15 h 24 m", or "under a minute". Rounds up
+ * to the next whole minute so a countdown only changes once a minute.
+ */
+export function waitText(format, ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return 'a moment';
+  if (ms <= 60e3) return 'under a minute';
+  return format.duration(Math.ceil(ms / 60e3) * 60e3);
+}
 
 // ---------------------------------------------------------------------------
 // Styles (injected once; shared with ledger.js)
@@ -77,10 +88,17 @@ export function ensureStyles() {
 .ws-pill .r { font-size: 11px; line-height: 1.1; color: var(--ink-soft); }
 .ws-gear { position: relative; }
 .ws-dot { position: absolute; top: 8px; right: 8px; width: 9px; height: 9px; border-radius: 50%; background: var(--walnut); box-shadow: 0 0 0 2px var(--paper); }
-.ws-sugg { min-height: 44px; width: 100%; }
-.ws-head .seg-value { font-size: 14px; white-space: nowrap; }
-.ws-head .meter > .seg { padding: 8px 8px; }
-.ws-sugg[aria-disabled="true"] { opacity: .55; box-shadow: 0 2px 0 rgba(0,0,0,.4); }
+.ws-head::after { content: ''; position: absolute; left: 0; right: 0; top: 100%; height: 10px; background: linear-gradient(var(--plaster), rgba(227,230,224,0)); pointer-events: none; }
+.btn.ws-sugg { min-height: 48px; width: 100%; padding: 0 14px; }
+.btn.ws-sugg[data-state="wait"] { background-color: var(--paper); color: var(--ink); box-shadow: var(--cut-sm); background-image: linear-gradient(90deg, rgba(226,176,74,.5) var(--p, 0%), rgba(226,176,74,0) var(--p, 0%)); }
+.btn.ws-sugg[aria-disabled="true"] { opacity: 1; }
+.ws-next { margin-top: -4px; font-size: 12px; line-height: 1.25; color: var(--ink-soft); text-align: center; }
+.ws-head .seg-value { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-head .meter > .seg { padding: 8px 6px 8px 8px; }
+.ws-tagpin { position: absolute; transform: translate(-50%, -50%); pointer-events: none; line-height: 1.1; }
+.ws-tagpin.l { transform: translate(0, -50%); }
+.ws-tagpin.ws-off { display: none; }
+.ws-lbl { font-family: 'Figtree', system-ui, sans-serif; font-size: 10px; font-weight: 600; fill: #5E5148; pointer-events: none; }
 .ws-body { gap: 12px; }
 .ws-scene { position: relative; margin: 0 calc(-1 * var(--gutter)); line-height: 0; }
 .ws-svg { width: 100%; height: auto; display: block; }
@@ -93,10 +111,12 @@ export function ensureStyles() {
 @keyframes ws-glow { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
 .ws-twinkle { animation: ws-twinkle 2.2s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
 @keyframes ws-twinkle { 0%, 100% { opacity: .5; transform: scale(.85); } 50% { opacity: 1; transform: scale(1.1); } }
-.ws-collect { min-height: 52px; font-size: 16px; }
+.ws-collect { min-height: 52px; font-size: 16px; gap: 8px; }
+[data-screen="workshop"] .btn.small, .ws-sheet .btn.small { min-height: 44px; }
+[data-screen="workshop"] .card > .card-title { font-family: var(--font-ui); font-weight: 600; font-size: 15px; }
 .ws-panel { padding: 8px 14px; gap: 0; }
 .ws-panel-head { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; text-align: left; }
-.ws-panel-head .t { font-family: var(--font-display); font-size: 16px; }
+.ws-panel-head .t { font-family: var(--font-ui); font-weight: 600; font-size: 15px; }
 .ws-panel-head .s { margin-left: auto; font-size: 13px; color: var(--ink-soft); text-align: right; }
 .ws-chev { transform: rotate(180deg); transition: transform 160ms var(--ease-out); color: var(--ink-soft); }
 .ws-panel.open .ws-chev { transform: rotate(-90deg); }
@@ -112,11 +132,11 @@ export function ensureStyles() {
 .ws-buy { flex-direction: column; gap: 1px; padding: 4px 10px; font-size: 12px; }
 .ws-buy .l { font-size: 12px; font-weight: 600; }
 .ws-buy .c { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
-.ws-pickbtn { display: flex; align-items: center; gap: 10px; text-align: left; min-width: 0; width: 100%; }
+.ws-pickbtn { display: flex; align-items: center; justify-content: center; gap: 10px; text-align: left; min-width: 44px; min-height: 44px; }
 .ws-claim { width: 100%; margin-top: 6px; }
-.ws-sub-title { font-family: var(--font-display); font-size: 14px; margin-top: 8px; color: var(--ink-soft); }
+.ws-sub-title { font-family: var(--font-ui); font-weight: 600; font-size: 14px; margin-top: 8px; color: var(--ink-soft); }
 .ws-chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
-.ws-almost-row { display: flex; align-items: center; gap: 10px; min-height: 36px; width: 100%; text-align: left; font-size: 14px; }
+.ws-almost-row { display: flex; align-items: center; gap: 10px; min-height: 44px; width: 100%; text-align: left; font-size: 14px; }
 .ws-almost-row .sw { width: 14px; height: 14px; border-radius: 4px; flex: 0 0 auto; }
 .ws-closed { background: var(--walnut-deep); color: var(--paper); box-shadow: 0 3px 0 rgba(0,0,0,.6); }
 .ws-sheet-wrap { position: absolute; inset: 0; z-index: 30; display: flex; align-items: flex-end; justify-content: center; }
@@ -124,7 +144,7 @@ export function ensureStyles() {
 .ws-sheet { position: relative; z-index: 1; overflow: hidden; }
 .ws-sheet-foot { display: flex; flex-direction: column; gap: 8px; flex: 0 0 auto; }
 .ws-sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.ws-sheet-title { font-family: var(--font-display); font-size: 21px; line-height: 1.15; }
+.ws-sheet-title { font-family: var(--font-ui); font-weight: 700; font-size: 20px; line-height: 1.15; }
 .ws-sheet-body { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; min-height: 0; }
 .ws-pick { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 52px; padding: 6px 8px; border-radius: 12px; background: var(--paper); box-shadow: var(--cut-sm); text-align: left; }
 .ws-pick:active { transform: translateY(2px); box-shadow: var(--cut-press); }
@@ -141,10 +161,13 @@ export function ensureStyles() {
 .ws-actions-row > .btn { flex: 1 1 0; }
 .ws-dusk { position: absolute; inset: 0; z-index: 45; pointer-events: none; background: rgba(42, 38, 34, .38); animation: ws-dusk 1.5s ease-in-out both; display: flex; align-items: center; justify-content: center; }
 .ws-dusk .shutter { position: absolute; left: 0; right: 0; top: 0; height: 34%; background: repeating-linear-gradient(#8A6A4C 0 14px, #6F5238 14px 16px); box-shadow: 0 4px 0 rgba(0,0,0,.35); animation: ws-shut 1.3s ease-in-out both; }
-.ws-dusk .cap { position: relative; padding: 10px 18px; border-radius: 999px; background: var(--paper); font-family: var(--font-display); font-size: 16px; box-shadow: var(--cut); }
+.ws-dusk .cap { position: relative; padding: 10px 18px; border-radius: 999px; background: var(--paper); font-weight: 600; font-size: 16px; box-shadow: var(--cut); }
 @keyframes ws-dusk { 0% { background: rgba(42,38,34,0); } 30%, 80% { background: rgba(42,38,34,.38); } 100% { background: rgba(42,38,34,0); } }
 @keyframes ws-shut { 0% { height: 0; } 70%, 100% { height: 34%; } }
 .ws-switch-row { display: flex; align-items: center; gap: 12px; min-height: 44px; }
+.ws-switch-row .switch { position: relative; }
+.ws-switch-row .switch::after { content: ''; position: absolute; inset: -8px -6px; }
+.ws-need { font-size: 13px; color: var(--ink-soft); }
 `;
   d.head.appendChild(s);
 }
@@ -160,14 +183,14 @@ export function ensureStyles() {
  * [data-sheet-close] (backdrop, close button) or Escape close it. Clicks are
  * stopped from bubbling so the host's own delegated handler never sees them.
  */
-export function openSheet(host, { title = '', html = '', footer = '', onAction = null, onClose = null } = {}) {
+export function openSheet(host, { title = '', html = '', footer = '', onAction = null, onClose = null, closeButton = true } = {}) {
   const d = doc();
   const wrap = d.createElement('div');
   wrap.className = 'ws-sheet-wrap';
   wrap.innerHTML = String(h`<div class="ws-sheet-back" data-sheet-close></div>
 <div class="sheet ws-sheet" role="dialog" aria-modal="true" aria-label="${title}" tabindex="-1">
 <div class="ws-sheet-head"><div class="ws-sheet-title">${title}</div>
-<button type="button" class="btn-back" data-sheet-close data-tap aria-label="Close">${iconSvg('close', { size: 18 })}</button></div>
+${closeButton ? h`<button type="button" class="btn-back" data-sheet-close data-tap aria-label="Close">${iconSvg('close', { size: 18 })}</button>` : ''}</div>
 <div class="ws-sheet-body"></div><div class="ws-sheet-foot"></div></div>`);
   const body = wrap.querySelector('.ws-sheet-body');
   const panel = wrap.querySelector('.ws-sheet');
@@ -240,12 +263,13 @@ export function closeUpFlow(ctx, host) {
   if (idle) lines.push(`${idle === 1 ? 'Your hunter heads' : `${idle} hunters head`} out on an overnight trip.`);
   if (empty) lines.push(`${empty === 1 ? 'An idle mixer gets' : `${empty} idle mixers get`} a recipe.`);
   lines.push(Number.isFinite(fillMs) && fillMs > 0
-    ? `Your vats fill in about ${ctx.format.duration(fillMs)}.`
+    ? `Your vats fill in about ${waitText(ctx.format, fillMs)}.`
     : 'Everything is set for tomorrow.');
   return new Promise((resolve) => {
     let chosen = false;
     const sheet = openSheet(host, {
       title: 'Close up shop?',
+      closeButton: false,
       html: String(h`<div class="stack stack-sm">${lines.map((l) => h`<div class="muted">${l}</div>`)}</div>
 <div class="ws-actions-row mt-2">
 ${button('Not yet', { attrs: { 'data-action': 'cu-cancel' } })}
@@ -326,8 +350,9 @@ const SHELF_SLOTS = [
   [318, 214, 10, 26, 5, '#6E4A7E'], [336, 214, 10, 26, 5, '#6E4A7E'],
 ];
 
-function tagSvg(key, x, y) {
-  return `<g class="ws-tag ws-off" data-tag="${key}" transform="translate(${x} ${y})" pointer-events="none"><rect data-tag-bg x="-26" y="-10" width="52" height="20" rx="10" fill="#F7F4EC" filter="url(#ws-cut)"/><text data-tag-text y="4" text-anchor="middle" fill="#5E5148" style="font-size:10px;font-weight:600;font-family:'Figtree',system-ui,sans-serif">10 colors</text></g>`;
+/** A hung paper tag over the scene (an HTML kit.tag, positioned in the 390 x 440 scene's percent space). */
+function tagPin(key, x, y, anchor = 'c') {
+  return `<span class="ws-tagpin ws-off${anchor === 'l' ? ' l' : ''}" data-tag="${key}" style="left:${(x / 390 * 100).toFixed(2)}%;top:${(y / 440 * 100).toFixed(2)}%"></span>`;
 }
 
 function hit(x, y, w, hgt) {
@@ -342,7 +367,7 @@ function sceneSvg() {
   }).join('');
   const labels = [0, 1, 2].map((i) => {
     const cx = 65 + i * 66;
-    return `<rect x="${cx - 23}" y="264" width="46" height="18" rx="3" fill="#F7F4EC" filter="url(#ws-cut)"/>
+    return `<rect data-vat-plate="${i}" x="${cx - 30}" y="264" width="60" height="18" rx="3" fill="#F7F4EC" filter="url(#ws-cut)"/>
 <text data-vat-label="${i}" x="${cx}" y="277" text-anchor="middle" fill="#2A2622" style="font-family:'Young Serif',Georgia,serif;font-size:10px">&#8203;</text>`;
   }).join('');
   const shelfSlots = SHELF_SLOTS.map(([x, y, w, hh, rx, fill], i) => `<rect data-shelf-slot="${i}" data-default="${fill}" x="${x}" y="${y}" width="${w}" height="${hh}" rx="${rx}" fill="${fill}"/>`).join('');
@@ -367,24 +392,25 @@ function sceneSvg() {
 </g>${hit(18, 26, 128, 104)}</g>
 
 <g class="ws-hit" data-action="open-quests" data-coach="calendar" data-tap role="button" tabindex="0" aria-label="Calendar: daily quests">
-<g filter="url(#ws-cut)" transform="translate(158 38)">
+<g filter="url(#ws-cut)" transform="translate(156 38)">
 <rect x="0" y="0" width="36" height="46" rx="3" fill="#F7F4EC"/>
 <rect x="0" y="0" width="36" height="11" rx="3" fill="#7B5236"/>
 <circle cx="9" cy="3" r="2" fill="#F7F4EC"/><circle cx="27" cy="3" r="2" fill="#F7F4EC"/>
 <g fill="#B7BDB3"><rect x="5" y="17" width="5" height="5" rx="1"/><rect x="15" y="17" width="5" height="5" rx="1"/><rect x="25" y="17" width="5" height="5" rx="1"/><rect x="5" y="26" width="5" height="5" rx="1"/><rect x="25" y="26" width="5" height="5" rx="1"/><rect x="5" y="35" width="5" height="5" rx="1"/><rect x="15" y="35" width="5" height="5" rx="1"/></g>
 <rect x="15" y="26" width="5" height="5" rx="1" fill="#2A2622"/>
 </g>
-<circle data-badge="quests" class="ws-off" cx="196" cy="40" r="5" fill="#7B5236" stroke="#F7F4EC" stroke-width="2"/>
-<rect class="ws-focus" x="154" y="34" width="46" height="54" rx="6"/></g>
+<circle data-badge="quests" class="ws-off" cx="194" cy="40" r="5" fill="#7B5236" stroke="#F7F4EC" stroke-width="2"/>
+<text class="ws-lbl" x="174" y="100" text-anchor="middle">Quests</text>
+<rect class="ws-focus" x="148" y="34" width="48" height="72" rx="6"/></g>
 
-<g class="ws-hit" data-action="open-commissions" data-coach="commissions" data-tap role="button" tabindex="0" aria-label="Commissions scroll">
-<g filter="url(#ws-cut)" transform="translate(204 40)">
+<g class="ws-hit" data-action="open-commissions" data-coach="commissions" data-tap role="button" tabindex="0" aria-label="Commissions: jobs from patrons">
+<g filter="url(#ws-cut)" transform="translate(205 40)">
 <rect x="0" y="0" width="26" height="6" rx="3" fill="#7B5236"/>
 <rect x="2" y="5" width="22" height="36" fill="#F7F4EC"/>
 <rect x="0" y="40" width="26" height="6" rx="3" fill="#7B5236"/>
 <rect x="6" y="12" width="14" height="2" fill="#B7BDB3"/><rect x="6" y="18" width="14" height="2" fill="#B7BDB3"/><rect x="6" y="24" width="9" height="2" fill="#B7BDB3"/>
 <circle cx="18" cy="32" r="4" fill="#C99A2E"/>
-</g>${hit(200, 36, 34, 56)}</g>
+</g><text class="ws-lbl" x="218" y="100" text-anchor="middle">Jobs</text>${hit(196, 34, 44, 72)}</g>
 
 <g class="ws-hit" data-action="open-album" data-coach="corkboard" data-tap role="button" tabindex="0" aria-label="Postcard board: your album">
 <g filter="url(#ws-cut)">
@@ -394,7 +420,7 @@ function sceneSvg() {
 <g transform="rotate(4 312 70)"><rect x="292" y="44" width="42" height="50" rx="2" fill="#F7F4EC"/><rect x="296" y="48" width="34" height="22" fill="#8FA77A"/><rect x="296" y="62" width="34" height="8" fill="#D39B2A"/></g>
 <g transform="rotate(-2 346 80)"><rect x="330" y="58" width="30" height="40" rx="2" fill="#F7F4EC"/><rect x="333" y="61" width="24" height="16" fill="#6E4A7E"/></g>
 <circle cx="269" cy="50" r="3" fill="#B8433A"/><circle cx="313" cy="46" r="3" fill="#3E6A9E"/><circle cx="345" cy="60" r="3" fill="#D39B2A"/>
-</g>${hit(236, 28, 134, 96)}</g>
+</g>${hit(240, 28, 130, 96)}</g>
 
 <g data-coach="vats" filter="url(#ws-cut)">${vats}
 <rect x="14" y="248" width="222" height="12" rx="3" fill="#7B5236"/>
@@ -468,12 +494,7 @@ ${hit(270, 232, 92, 128)}</g>
 <circle cx="78" cy="402" r="9" fill="#5E3E28"/><circle cx="78" cy="402" r="3.5" fill="#B98E64"/>
 </g>${hit(24, 356, 96, 62)}</g>
 
-${tagSvg('map', 82, 130)}
-${tagSvg('shelf', 311, 146)}
-${tagSvg('gallery', 316, 332)}
-${tagSvg('yard', 61, 426)}
-${tagSvg('commissions', 217, 100)}
-</svg>`;
+</svg>${tagPin('map', 82, 130)}${tagPin('shelf', 311, 146)}${tagPin('gallery', 316, 332)}${tagPin('yard', 26, 426, 'l')}${tagPin('commissions', 218, 118)}`;
 }
 
 function shell() {
@@ -483,16 +504,17 @@ function shell() {
     <h1 class="ws-title">Tincture Workshop</h1>
     <div class="ws-pill" data-ref="pill" aria-live="off">
       ${iconSvg('coin', { size: 22 })}
-      <div><div class="v num" data-ref="coins">0</div><div class="r" data-ref="rate">+0/s</div></div>
+      <div><div class="v num" data-ref="coins">0</div><div class="r" data-ref="rate">Just starting</div></div>
     </div>
     <button type="button" class="btn-back ws-gear" data-action="settings" data-tap aria-label="Settings">${raw(GEAR)}<span id="settings-dot" class="ws-dot" hidden></span></button>
   </div>
-  <div class="meter" data-coach="flow-meter" role="group" aria-label="Flow meter">
-    <div class="seg" data-seg="make"><div class="seg-label">Make</div><div class="seg-value" data-ref="segMake">0 jars/s</div></div>
+  <div class="meter" role="group" aria-label="Flow meter">
+    <div class="seg" data-seg="make"><div class="seg-label">Make</div><div class="seg-value" data-ref="segMake">-</div></div>
     <div class="seg" data-seg="store"><div class="seg-label">Store</div><div class="seg-value" data-ref="segStore">-</div></div>
-    <div class="seg" data-seg="ship"><div class="seg-label">Ship</div><div class="seg-value" data-ref="segShip">0 jars/s</div></div>
+    <div class="seg" data-seg="ship"><div class="seg-label">Ship</div><div class="seg-value" data-ref="segShip">-</div></div>
   </div>
-  <button type="button" class="btn btn-primary ws-sugg" data-action="suggestion" data-ref="sugg" data-tap>Choose a recipe</button>
+  <button type="button" class="btn btn-primary ws-sugg" data-action="suggestion" data-coach="flow-meter" data-ref="sugg" data-tap>Choose a recipe</button>
+  <div class="ws-next" data-ref="next" hidden></div>
 </div>
 <div class="screen-body ws-body" data-ref="body">
   <button type="button" class="btn btn-primary block ws-collect" data-action="collect" data-coach="collect" data-ref="collect" data-tap hidden>Collect</button>
@@ -525,7 +547,7 @@ function coinIcon(size = 12) { return iconSvg('coin', { size }); }
 function buyBtn(label, cost, attrs) {
   const s = S();
   const short = num(s.coins) < cost;
-  return button(h`<span class="l">${label}</span><span class="c">${coinIcon(12)}${fmt(cost)}</span>`, {
+  return button(h`<span class="l">${label}</span><span class="c">${coinIcon(12)}${fmt(Math.ceil(cost))}</span>`, {
     cls: 'ws-buy',
     attrs: { ...attrs, 'data-cost': String(cost), 'aria-disabled': short ? 'true' : 'false' },
   });
@@ -572,7 +594,7 @@ function panelSpec(key, s, t) {
             key: `source:${id}`,
             lead: swatch(pig?.hex ?? hexOf(id), 36),
             title: h`${def?.name ?? cap1(id)}${loan}`,
-            sub: L > 0 ? `Level ${L} · ${fmtRate(out)} raw/s` : `Found by a hunter · ${fmtRate(out)} raw/s when built`,
+            sub: L > 0 ? `Level ${L} · ${fmtRate(out)} a second` : `Found by a hunter · ${fmtRate(out)} a second when built`,
             hint: L > 0 ? milestoneHint(L) : '',
             actions: buyBtn(L > 0 ? 'Level up' : 'Build', eco().stationCost('source', L, id), { 'data-action': 'buy', 'data-kind': 'source', 'data-id': id }),
           });
@@ -606,7 +628,7 @@ function panelSpec(key, s, t) {
       const busy = ms.filter((m) => m.recipe).length;
       return {
         sig: ms.map((m) => `${m.recipe}:${m.level}:${m.accident ? 1 : 0}:${m.recipe ? nameOf(m.recipe) : ''}`).join(','),
-        summary: `${busy} of ${ms.length} busy`,
+        summary: busy === 0 ? `${ms.length} ready for a recipe` : busy === ms.length ? `${busy} busy` : `${busy} busy, ${ms.length - busy} free`,
         rows: () => ms.map((m, i) => {
           const rate = eco().stationOutput('mixer', m.level) * pm;
           const lead = m.recipe ? swatch(hexOf(m.recipe), 36) : h`<span class="swatch is-empty" style="--size:36px" aria-hidden="true"></span>`;
@@ -701,7 +723,7 @@ function panelSpec(key, s, t) {
             key: `veh:${v.id}`,
             lead: swatch('#C9A277', 36),
             title: v.name,
-            sub: `Holds ${fmt(v.capacity)} jars · ${ctx.format.duration(v.tripMs)} round trip`,
+            sub: `Holds ${fmt(v.capacity)} jars · ${waitText(ctx.format, v.tripMs)} round trip`,
             hint: v.blurb,
             actions: buyBtn(fl.length < slots ? 'Buy' : 'Swap in', v.cost, { 'data-action': 'buy-vehicle', 'data-kind': v.id }),
           })) : [row({ key: 'veh:none', title: 'Build the Loading Yard', sub: 'It gives you room for carts and wagons.' })];
@@ -717,46 +739,113 @@ function panelSpec(key, s, t) {
 // Patching: everything that changes every tick, updated in place
 // ---------------------------------------------------------------------------
 
+function storeText(full, fillMs, capTotal) {
+  if (full) return 'Full';
+  if (!Number.isFinite(fillMs)) return `Holds ${fmt(capTotal)}`;
+  const m = Math.max(0, Math.ceil(fillMs / 60e3));
+  if (m <= 1) return 'Full soon';
+  if (m < 60) return `Full in ${m} m`;
+  const hrs = Math.round(m / 60);
+  if (hrs < 48) return `Full in ${hrs} h`;
+  return `Full in ${Math.round(hrs / 24)} d`;
+}
+
 function patchHead(s, t, c) {
   const rate = eco().incomeRate(s, t);
-  const rt = ctx.format.rate(rate);
+  const rt = rate > 0 ? ctx.format.rate(rate) : 'Just starting';
   if (refs.rate.textContent !== rt) refs.rate.textContent = rt;
   patchCoins(s);
 
   const m = c.meter;
   const set = (el, v) => { if (el.textContent !== v) el.textContent = v; };
-  set(refs.segMake, `${fmtRate(m.make.rate)} jars/s`);
-  set(refs.segShip, `${fmtRate(m.ship.rate)} jars/s`);
+  const anyRecipe = (s.stations.mixers || []).some((x) => x && x.recipe);
+  set(refs.segMake, m.make.rate > 0 ? `${fmtRate(m.make.rate)} jars/s` : anyRecipe ? 'Warming up' : 'Pick a recipe');
+  set(refs.segShip, m.ship.rate > 0 ? `${fmtRate(m.ship.rate)} jars/s` : 'Standing by');
   const full = sim().storage.isFull(s);
   const fillMs = sim().storage.fillTimeMs(s);
-  set(refs.segStore, full ? 'Full' : Number.isFinite(fillMs) ? `Full in ${ctx.format.duration(fillMs).replace(/(\d) ([dhms])/g, '$1$2')}` : `Holds ${fmt(c.cap.total)}`);
+  set(refs.segStore, storeText(full, fillMs, c.cap.total));
   for (const k of ['make', 'store', 'ship']) {
     const seg = root.querySelector(`[data-seg="${k}"]`);
     const on = m.weakest === k;
     if (seg.classList.contains('weakest') !== on) seg.classList.toggle('weakest', on);
   }
 
-  // Suggestion button.
-  const sg = m.suggestion;
+  // Suggestion button: always something she can tap when anything is affordable.
   const b = refs.sugg;
-  const info = suggestionInfo(sg, s);
+  const info = suggestionInfo(m.suggestion, s);
   set(b, info.text);
-  b.setAttribute('aria-disabled', info.short ? 'true' : 'false');
-  b.dataset.kind = sg?.kind || '';
-  b.dataset.index = sg?.index != null ? String(sg.index) : '';
-  b.dataset.id = sg?.id || '';
-  b.dataset.cost = String(sg?.cost || 0);
+  if (b.dataset.state !== info.state) b.dataset.state = info.state;
+  b.setAttribute('aria-disabled', info.state === 'wait' ? 'true' : 'false');
+  const primary = info.state === 'go' && !(Math.floor(num(s.pendingCollect)) >= 1);
+  if (b.classList.contains('btn-primary') !== primary) { b.classList.toggle('btn-primary', primary); b.classList.toggle('btn-paper', !primary); }
+  b.style.setProperty('--p', `${Math.round(info.progress * 100)}%`);
+  const o = info.act;
+  b.dataset.kind = o?.kind || '';
+  b.dataset.index = o?.index != null ? String(o.index) : '';
+  b.dataset.id = o?.id || '';
+  b.dataset.cost = String(o?.cost || 0);
+  const nx = refs.next;
+  if (nx.textContent !== info.next) nx.textContent = info.next;
+  if (nx.hidden !== !info.next) nx.hidden = !info.next;
 }
 
+const NOUN = { grinder: 'the grinder', mixer: 'a mixer', vat: 'a vat', shop: 'the shop', fleet: 'the fleet', cellar: 'the cellar', room: 'a room' };
+
+function nounFor(o) {
+  if (o.kind === 'source') return o.id && SOURCES_BY_ID[o.id] ? `the ${SOURCES_BY_ID[o.id].name}` : 'a source';
+  return NOUN[o.kind] || 'the workshop';
+}
+
+/** The cheapest upgrade she can buy right now (skips sources the slots would refuse). */
+function cheapestAffordable(s) {
+  const coins = num(s.coins);
+  const srcs = s.stations.sources || {};
+  const built = Object.values(srcs).filter((x) => num(x.level) > 0).length;
+  let best = null;
+  for (const o of eco().upgradeOptions(s)) {
+    if (!(o.cost <= coins)) continue;
+    if (o.kind === 'source' && !(num(srcs[o.id]?.level) > 0) && built >= MAX_SOURCES_ERA1) continue;
+    if (!best || o.cost < best.cost) best = o;
+  }
+  return best;
+}
+
+/** "Level up the Ochre Pit for 7". */
+function levelUpText(o, s) {
+  const c = fmt(Math.ceil(o.cost));
+  const st = s.stations;
+  switch (o.kind) {
+    case 'source': {
+      const name = SOURCES_BY_ID[o.id]?.name ?? cap1(o.id);
+      return num(st.sources[o.id]?.level) > 0 ? `Level up the ${name} for ${c}` : `Build the ${name} for ${c}`;
+    }
+    case 'grinder': return `Level up the ${(GRINDER_KINDS_BY_ID[st.grinders[o.index]?.kind]?.name ?? 'grinder').toLowerCase()} for ${c}`;
+    case 'mixer': return `Level up Mixer ${o.index + 1} for ${c}`;
+    case 'vat': return `Level up Vat ${o.index + 1} for ${c}`;
+    case 'shop': return `Level up the shop counter for ${c}`;
+    case 'fleet': return `Level up the ${(VEHICLES_BY_ID[st.fleet[o.index]?.kind]?.name ?? 'vehicle').toLowerCase()} for ${c}`;
+    case 'cellar': return `Level up the cellar for ${c}`;
+    default: return `Level up for ${c}`;
+  }
+}
+
+/**
+ * What the big button says and does. The flow meter's suggestion when she can
+ * afford it; otherwise the cheapest upgrade she CAN afford, with the suggestion
+ * as a quiet "Next:" line; otherwise a quiet progress button toward it.
+ */
 function suggestionInfo(sg, s) {
-  if (!sg) return { text: 'Everything is humming', short: false };
-  if (sg.kind === 'assign' || !(sg.cost > 0)) return { text: sg.label || 'Choose a recipe', short: false };
-  const noun = {
-    source: sg.id && SOURCES_BY_ID[sg.id] ? SOURCES_BY_ID[sg.id].name : 'a source',
-    grinder: 'the grinder', mixer: 'mixers', vat: 'vats', shop: 'the shop', fleet: 'the fleet', cellar: 'the cellar', room: 'a room',
-  }[sg.kind] || 'the workshop';
-  const short = num(s.coins) < sg.cost;
-  return { text: short ? `Needs ${fmt(sg.cost)} to upgrade ${noun}` : `Upgrade ${noun} for ${fmt(sg.cost)}`, short };
+  if (!sg) return { text: 'Everything is humming', state: 'go', progress: 0, next: '', act: null };
+  if (sg.kind === 'assign' || !(sg.cost > 0)) return { text: sg.label || 'Choose a recipe', state: 'go', progress: 0, next: '', act: sg };
+  const coins = num(s.coins);
+  const cost = Math.ceil(sg.cost);
+  if (coins >= sg.cost) return { text: `Upgrade ${nounFor(sg)} for ${fmt(cost)}`, state: 'go', progress: 0, next: '', act: sg };
+  const more = fmt(Math.max(1, Math.ceil(sg.cost - coins)));
+  const alt = cheapestAffordable(s);
+  if (alt) {
+    return { text: levelUpText(alt, s), state: 'go', progress: 0, next: `Next: ${nounFor(sg)} for ${fmt(cost)} (${more} more)`, act: alt };
+  }
+  return { text: `${more} more coins to upgrade ${nounFor(sg)}`, state: 'wait', progress: clamp01(coins / sg.cost), next: '', act: sg };
 }
 
 function patchCoins(s) {
@@ -776,30 +865,70 @@ function patchCollect(s) {
   const show = pending >= 1;
   if (b.hidden === show) b.hidden = !show;
   if (show) {
-    const label = `Collect ${fmt(pending)}`;
-    if (b.textContent !== label) b.textContent = label;
+    const label = `Collect ${fmt(pending)} coins`;
+    if (b.dataset.label !== label) {
+      b.dataset.label = label;
+      b.innerHTML = String(h`${coinIcon(20)}<span>${label}</span>`);
+    }
   }
 }
 
-function setTag(key, text) {
+/** Hang (or take down) a paper tag over a scene object. `lock` tags carry the lock icon. */
+function setTag(key, text, lock = true) {
   const g = root.querySelector(`[data-tag="${key}"]`);
   if (!g) return;
   const on = !!text;
   g.classList.toggle('ws-off', !on);
-  if (!on) return;
-  const tx = g.querySelector('[data-tag-text]');
-  if (tx.textContent !== text) {
-    tx.textContent = text;
-    const w = Math.max(44, Math.round(text.length * 5.8 + 18));
-    const bg = g.querySelector('[data-tag-bg]');
-    bg.setAttribute('width', String(w));
-    bg.setAttribute('x', String(-w / 2));
+  if (!on) { delete g.dataset.text; return; }
+  const sig = `${lock ? 1 : 0}|${text}`;
+  if (g.dataset.text !== sig) {
+    g.dataset.text = sig;
+    g.innerHTML = String(tag(text, { icon: lock ? 'lock' : null }));
   }
+}
+
+const moreColors = (n) => `${n} more color${n === 1 ? '' : 's'}`;
+
+/** The goal each locked scene object names, in the "N more" voice ('' when open). */
+function lockGoals(s) {
+  const sm = sim();
+  const colors = sm.discoveredCount(s);
+  const phase = s.phase ?? 1;
+  const rooms = s.rooms || [];
+  const goals = { map: '', shelf: '', gallery: '', commissions: '', yard: '', yardLock: true };
+  if (!sm.hunters.unlocked(s)) goals.map = moreColors(Math.max(1, 10 - colors));
+  if (!sm.shelf.unlocked(s)) goals.shelf = moreColors(Math.max(1, 5 - colors));
+  const wing = rooms.includes('gallery-wing') || s.gallery?.unlocked;
+  if (!wing) goals.gallery = colors < 20 ? moreColors(20 - colors) : phase < 2 ? 'Mill Room first' : 'Add the Gallery Wing';
+  const yardOwned = rooms.includes('loading-yard');
+  const fl = s.stations.fleet || [];
+  if (!yardOwned) goals.yard = colors < 30 ? moreColors(30 - colors) : phase < 2 ? 'Mill Room first' : 'Add the Loading Yard';
+  else if (fl.length === 0) { goals.yard = 'Add a cart'; goals.yardLock = false; }
+  else { goals.yard = `${fl.filter((v) => !(num(v.arrivesAt) > 0)).length} ready`; goals.yardLock = false; }
+  if (phase < 3) goals.commissions = colors < 30 ? moreColors(30 - colors) : 'Loading Yard first';
+  return goals;
+}
+
+/** A vat's color name on one or two short lines (the plate is about 60 px wide). */
+function vatLabelLines(name) {
+  const clip = (x, n) => (x.length > n ? `${x.slice(0, n - 1)}…` : x);
+  if (name.length <= 10) return [name];
+  const words = name.split(' ');
+  if (words.length > 1) {
+    let best = null;
+    for (let k = 1; k < words.length; k++) {
+      const a = words.slice(0, k).join(' ');
+      const b2 = words.slice(k).join(' ');
+      const score = Math.max(a.length, b2.length);
+      if (!best || score < best.score) best = { a, b: b2, score };
+    }
+    return [clip(best.a, 11), clip(best.b, 11)];
+  }
+  return [clip(name, 11)];
 }
 
 function patchScene(s, t) {
   const sm = sim();
-  const colors = sm.discoveredCount(s);
 
   // Display vats.
   for (let i = 0; i < 3; i++) {
@@ -817,11 +946,16 @@ function patchScene(s, t) {
       const svg = art.querySelector('svg');
       if (svg) svg.setAttribute('aria-hidden', 'true');
     }
-    let name = v.color ? nameOf(v.color) : 'Choose';
-    if (name.length > 9) name = `${name.slice(0, 8)}…`;
-    if (lab.textContent !== name) {
-      lab.textContent = name;
-      lab.style.fontSize = name.length > 7 ? '8.5px' : '10px';
+    const full = v.color ? nameOf(v.color) : 'Choose';
+    if (lab.dataset.full !== full) {
+      lab.dataset.full = full;
+      const lines = vatLabelLines(full);
+      const plate = root.querySelector(`[data-vat-plate="${i}"]`);
+      const cx = Number(lab.getAttribute('x'));
+      lab.setAttribute('y', lines.length > 1 ? '274' : '277');
+      lab.style.fontSize = lines.length > 1 ? '9px' : '10px';
+      lab.innerHTML = lines.map((ln, k) => `<tspan x="${cx}" dy="${k ? 10 : 0}">${escapeHtml(ln)}</tspan>`).join('');
+      plate.setAttribute('height', lines.length > 1 ? '28' : '18');
     }
   }
 
@@ -858,20 +992,13 @@ function patchScene(s, t) {
   const hint = root.querySelector('[data-shelf-hint]');
   hint.classList.toggle('ws-off', !(shelfOpen && sm.shelf.hints(s).length > 0));
 
-  // Locked tags (paper tags naming the goal).
-  setTag('map', sm.hunters.unlocked(s) ? '' : '10 colors');
-  setTag('shelf', shelfOpen ? '' : '5 colors');
-  const wing = (s.rooms || []).includes('gallery-wing') || s.gallery?.unlocked;
-  setTag('gallery', wing ? '' : colors < 20 ? '20 colors' : 'Gallery Wing');
-  const yardOwned = (s.rooms || []).includes('loading-yard');
-  const fl = s.stations.fleet || [];
-  let yardText = '';
-  if (!yardOwned) yardText = (s.phase ?? 1) >= 2 || colors >= 20 ? 'Loading Yard' : '30 colors';
-  else if (fl.length === 0) yardText = 'Add a cart';
-  else yardText = `${fl.filter((v) => !(num(v.arrivesAt) > 0)).length} ready`;
-  setTag('yard', yardText);
-  const phase3 = (s.phase ?? 1) >= 3;
-  setTag('commissions', phase3 ? '' : 'Later on');
+  // Locked things stay visible: one paper-tag shape (kit.tag) naming the goal.
+  const goals = lockGoals(s);
+  setTag('map', goals.map);
+  setTag('shelf', goals.shelf);
+  setTag('gallery', goals.gallery);
+  setTag('yard', goals.yard, goals.yardLock);
+  setTag('commissions', goals.commissions);
 
   // Badges.
   root.querySelector('[data-badge="quests"]').classList.toggle('ws-off', !(sm.quests.questsReady(s) > 0));
@@ -925,7 +1052,7 @@ function patchPanels(s, t) {
     if (rb) {
       const readyAt = num(m.rushedAt) + RUSH_COOLDOWN_MS;
       const cooling = num(m.rushedAt) > 0 && t < readyAt;
-      const label = !m.recipe ? 'Rush' : cooling ? `Rush in ${ctx.format.countdown(readyAt - t)}` : 'Rush';
+      const label = !m.recipe ? 'Rush' : cooling ? (readyAt - t <= 60e3 ? 'Rush soon' : `Rush in ${waitText(ctx.format, readyAt - t)}`) : 'Rush';
       if (rb.textContent !== label) rb.textContent = label;
       rb.setAttribute('aria-disabled', !m.recipe || cooling ? 'true' : 'false');
     }
@@ -933,7 +1060,7 @@ function patchPanels(s, t) {
   (s.stations.fleet || []).forEach((v, i) => {
     const el = root.querySelector(`[data-veh-status="${i}"]`);
     if (!el) return;
-    const label = num(v.arrivesAt) > 0 ? `Out, back in ${ctx.format.countdown(v.arrivesAt - t)}` : 'Idle';
+    const label = num(v.arrivesAt) > 0 ? `Out, back in ${waitText(ctx.format, v.arrivesAt - t)}` : 'Idle';
     if (el.textContent !== label) el.textContent = label;
   });
 }
@@ -950,11 +1077,12 @@ function patchRooms(s) {
   const sig = r ? `${r.id}|${need}|${lockedPhase ? 1 : 0}` : 'none';
   setSection('rooms', root.querySelector('[data-sec="rooms"]'), sig, () => {
     if (!r) return '';
-    const req = need > 0 ? `${need} more color${need === 1 ? '' : 's'} to open` : lockedPhase ? `Opens in phase ${r.phase}` : 'Ready to open';
-    const blocked = need > 0 || lockedPhase;
+    // The lock is a paper tag naming the goal; the button only exists once the room can open.
+    const goal = need > 0 ? moreColors(need) : lockedPhase ? (r.phase >= 3 ? 'Loading Yard first' : 'Mill Room first') : '';
+    const hint = goal ? `Opens for ${fmt(r.cost)} coins` : 'Ready when you are';
     return h`<div class="card" data-coach="rooms"><div class="card-title">Next room</div>
-<div class="ws-row" style="border-top:0;padding:4px 0" data-row="room:${r.id}"${r.id === 'mill-room' ? raw(' data-coach="mill-room"') : ''}><div class="ws-main"><div class="ws-t serif" style="font-family:var(--font-display);font-size:17px">${r.name}</div><div class="ws-s">${r.blurb}</div><div class="ws-hint">${req}</div></div>
-<div class="ws-actions">${buyBtn(blocked ? 'Open soon' : 'Open', r.cost, { 'data-action': 'buy-room', 'data-id': r.id, 'data-lock': blocked ? '1' : '0' })}</div></div></div>`;
+<div class="ws-row" style="border-top:0;padding:4px 0" data-row="room:${r.id}"${r.id === 'mill-room' ? raw(' data-coach="mill-room"') : ''}><div class="ws-main"><div class="ws-t serif" style="font-family:var(--font-display);font-size:17px">${r.name}</div><div class="ws-s">${r.blurb}</div><div class="ws-hint">${hint}</div></div>
+<div class="ws-actions">${goal ? tag(goal) : buyBtn('Open', r.cost, { 'data-action': 'buy-room', 'data-id': r.id, 'data-lock': '0' })}</div></div></div>`;
   });
 }
 
@@ -971,7 +1099,7 @@ ${avail.map((a) => row({
     key: `apprentice:${a.id}`,
     title: a.name,
     sub: a.blurb,
-    actions: a.cost > 0 ? buyBtn('Hire', a.cost, { 'data-action': 'buy-apprentice', 'data-id': a.id }) : button('Hire (free)', { small: true, variant: 'primary', attrs: { 'data-action': 'buy-apprentice', 'data-id': a.id } }),
+    actions: a.cost > 0 ? buyBtn('Hire', a.cost, { 'data-action': 'buy-apprentice', 'data-id': a.id }) : button('Hire (free)', { small: true, attrs: { 'data-action': 'buy-apprentice', 'data-id': a.id } }),
   }))}</div>`;
   });
 }
@@ -986,14 +1114,14 @@ function patchCloseUp(s) {
   setSection('closeup', root.querySelector('[data-sec="closeup"]'), sig, () => {
     if (!on) return '';
     return button(closedInfo ? '' : 'Close up shop', {
-      variant: 'primary', block: true, cls: `tall ${closedInfo ? 'ws-closed' : ''}`,
+      variant: closedInfo ? 'primary' : 'wood', block: true, cls: `tall ${closedInfo ? 'ws-closed' : ''}`,
       attrs: { 'data-action': closedInfo ? 'close-up-reopen' : 'close-up', 'data-coach': 'close-up', 'data-closeup-btn': '1' },
     });
   });
   const b = root.querySelector('[data-closeup-btn]');
   if (b && closedInfo) {
     const fill = sim().storage.fillTimeMs(s);
-    const label = Number.isFinite(fill) && fill > 0 ? `Shop closed. Vats fill in ${ctx.format.duration(fill)}` : 'Shop closed. Everything is set for tomorrow';
+    const label = Number.isFinite(fill) && fill > 0 ? `Shop closed. Vats fill in ${waitText(ctx.format, fill)}` : 'Shop closed. Everything is set for tomorrow';
     if (b.textContent !== label) b.textContent = label;
   }
 }
@@ -1234,11 +1362,11 @@ function shipSheetHtml(ss) {
   const d = route ? sim().shipping.currentDemand(s, ss.routeId, t) : null;
   stock.sort((a, b) => ((b.fam === d?.family ? 2 : 0) + (route && (route.any || route.palette.includes(b.fam)) ? 1 : 0))
     - ((a.fam === d?.family ? 2 : 0) + (route && (route.any || route.palette.includes(a.fam)) ? 1 : 0)) || b.price - a.price);
-  return h`<div class="hint">${VEHICLES_BY_ID[v.kind]?.name} holds ${fmt(capJ)} jars · ${ctx.format.duration(sim().economy.vehicleTripMs(v))} round trip</div>
+  return h`<div class="hint">${VEHICLES_BY_ID[v.kind]?.name} holds ${fmt(capJ)} jars · ${waitText(ctx.format, sim().economy.vehicleTripMs(v))} round trip</div>
 ${route ? h`<div class="ws-banner">${demandText(ss.routeId, t)}</div>` : ''}
 <div class="ws-sub-title" style="margin-top:0">Route</div>
 ${routes.map((r) => pickRow({ action: 'ship-route', attrs: { 'data-route': r.id }, lead: swatch(r.any ? '#B7BDB3' : '#9A6A47', 30), title: r.name, sub: r.blurb, on: r.id === ss.routeId }))}
-<div class="ws-sub-title">Cargo · ${fmt(loaded)} of ${fmt(capJ)} jars</div>
+<div class="ws-sub-title">Cargo · ${fmt(loaded)} jars loaded${capJ - loaded > 0 ? `, room for ${fmt(capJ - loaded)} more` : ', a full load'}</div>
 ${stock.length ? stock.map((c) => {
     const n = ss.picks[c.id] || 0;
     const wanted = route && (route.any || route.palette.includes(c.fam)) ? (c.fam === d?.family ? 'Wanted now' : 'Wanted') : '';
@@ -1354,7 +1482,7 @@ function openYardSheet() {
   if (!(s.rooms || []).includes('loading-yard')) {
     const colors = sim().discoveredCount(s);
     const r = ROOMS.find((x) => x.id === 'loading-yard');
-    toast(colors < r.colorsRequired ? `${r.colorsRequired - colors} more colors and the Loading Yard can open` : 'The Loading Yard is waiting in the rooms list below.');
+    toast(colors < r.colorsRequired ? `${moreColors(r.colorsRequired - colors)} and the Loading Yard can open` : 'The Loading Yard is waiting in the rooms list below.');
     return;
   }
   const routes = sim().shipping.availableRoutes(s, t);
@@ -1365,7 +1493,7 @@ ${fl.length ? fl.map((v, i) => {
     return pickRow({
       action: busy ? 'yard-busy' : 'yard-ship', attrs: { 'data-vehicle': String(i) }, lead: swatch('#9A6A47', 36),
       title: `${def?.name ?? 'Vehicle'} · Level ${v.level}`,
-      sub: busy ? `Out, back in ${ctx.format.countdown(v.arrivesAt - t)}` : `Idle · holds ${fmt(eco().vehicleCapacity(v))} jars`,
+      sub: busy ? `Out, back in ${waitText(ctx.format, v.arrivesAt - t)}` : `Idle · holds ${fmt(eco().vehicleCapacity(v))} jars`,
       right: busy ? '' : h`<span class="chip">Ship</span>`,
     });
   }) : h`<div class="muted">No vehicles yet. Buy a cart in the Fleet panel below.</div>`}`;
@@ -1478,7 +1606,7 @@ function doRush(el) {
   const i = Number(el.dataset.mixer);
   if (el.getAttribute('aria-disabled') === 'true') {
     const m = S().stations.mixers[i];
-    toast(m && m.recipe ? 'Mixer is catching its breath. Rush again soon.' : 'Pick a recipe first, then rush it.');
+    toast(m && m.recipe ? rushWait(m) : 'Pick a recipe first, then rush it.');
     return;
   }
   const res = act(sim().factory.rush, { mixer: i });
@@ -1489,7 +1617,13 @@ function doRush(el) {
     fx().squash(root.querySelector(`[data-row="mixer:${i}"]`));
     toast(`Rushed ${fmt(res.jars)} jars`, { hex: hexOf(S().stations.mixers[i].recipe) });
   } else if (res && res.reason === 'full') toast('The vats are full, so there is no room for more yet.');
-  else toast('Mixer is catching its breath. Rush again soon.');
+  else toast(rushWait(S().stations.mixers[i]));
+}
+
+/** "Rush again in 4 m": a gentle minutes-only note. */
+function rushWait(m) {
+  const left = num(m && m.rushedAt) + RUSH_COOLDOWN_MS - now();
+  return left > 0 ? `Mixer is catching its breath. Rush again in ${waitText(ctx.format, left)}.` : 'Mixer is ready. Rush again.';
 }
 
 function doClaim(el) {
@@ -1519,12 +1653,12 @@ function onClick(e) {
     case 'collect': doCollect(); break;
     case 'suggestion': doSuggestion(el); break;
     case 'open-map':
-      if (!sim().hunters.unlocked(S())) lockedToast(`Hunters set out once you have ${10 - sim().discoveredCount(S())} more colors`);
+      if (!sim().hunters.unlocked(S())) lockedToast(`Hunters set out once you have ${moreColors(10 - sim().discoveredCount(S()))}`);
       else ctx.navigate('map', {});
       break;
     case 'open-album': ctx.navigate('album', {}); break;
     case 'open-shelf':
-      if (!sim().shelf.unlocked(S())) lockedToast(`${5 - sim().discoveredCount(S())} more colors and the Merge Shelf opens`);
+      if (!sim().shelf.unlocked(S())) lockedToast(`${moreColors(5 - sim().discoveredCount(S()))} and the Merge Shelf opens`);
       else ctx.navigate('shelf', {});
       break;
     case 'open-bench': ctx.navigate('bench', {}); break;
@@ -1533,14 +1667,14 @@ function onClick(e) {
       const wing = (s.rooms || []).includes('gallery-wing') || s.gallery?.unlocked;
       if (!wing) {
         const need = 20 - sim().discoveredCount(s);
-        lockedToast(need > 0 ? `${need} more colors and the Gallery Wing can open` : 'The Gallery Wing is waiting in the rooms list below');
+        lockedToast(need > 0 ? `${moreColors(need)} and the Gallery Wing can open` : 'The Gallery Wing is waiting in the rooms list below');
       } else ctx.navigate('gallery', {});
       break;
     }
     case 'open-quests': ctx.navigate('quests', {}); break;
     case 'open-ledger': ctx.navigate('ledger', {}); break;
     case 'open-commissions':
-      if ((S().phase ?? 1) < 3) lockedToast('Commissions arrive as your workshop grows');
+      if ((S().phase ?? 1) < 3) lockedToast(`Commissions open at 30 colors with the Loading Yard${sim().discoveredCount(S()) < 30 ? `: ${moreColors(30 - sim().discoveredCount(S()))} to go` : ''}`);
       else ctx.navigate('commissions', {});
       break;
     case 'open-yard': openYardSheet(); break;
@@ -1568,8 +1702,8 @@ function onClick(e) {
       const s = S();
       const r = ROOMS.find((x) => x.id === el.dataset.id);
       const need = r ? r.colorsRequired - sim().discoveredCount(s) : 0;
-      if (need > 0) { toast(`${need} more color${need === 1 ? '' : 's'} and this room opens`); break; }
-      if (r && (s.phase ?? 1) < r.phase) { toast(`The ${r.name} opens once your workshop reaches phase ${r.phase}`); break; }
+      if (need > 0) { toast(`${moreColors(need)} and this room opens`); break; }
+      if (r && (s.phase ?? 1) < r.phase) { toast(`The ${r.name} opens after the ${r.phase >= 3 ? 'Loading Yard' : 'Mill Room'}`); break; }
       if (r && r.cost > num(s.coins)) { needMore(r.cost); break; }
       const res = act(sim().factory.buyRoom, { id: el.dataset.id });
       if (res && res.ok) { afterBuy('', { milestone: true }); toast(`${r.name} is open`); sigs.rooms = ''; }

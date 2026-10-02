@@ -24,7 +24,7 @@ import { h, raw, button, iconSvg, swatch, backButton, safeHex } from './kit.js';
 import defaultFx from './fx.js';
 import defaultAudio from './audio.js';
 import defaultHaptics from './haptics.js';
-import { ensureStyles, closeUpFlow } from './workshop.js';
+import { ensureStyles, closeUpFlow, waitText } from './workshop.js';
 
 const num = (x, d = 0) => (Number.isFinite(x) ? x : d);
 const doc = () => (typeof document !== 'undefined' ? document : null);
@@ -38,9 +38,11 @@ function ensureLedgerStyles() {
 .ld-body { gap: 14px; }
 .ld-page { position: relative; background: var(--paper); border-radius: 6px 6px 18px 18px; padding: 20px 16px 14px; box-shadow: 0 4px 0 rgba(42,38,34,.24); display: flex; flex-direction: column; gap: 4px; }
 .ld-titlerow { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-.ld-title { font-family: var(--font-display); font-size: 26px; line-height: 1.15; }
+.ld-title { font-family: var(--font-ui); font-weight: 700; font-size: 22px; line-height: 1.2; }
+.ld-title.is-name { font-family: var(--font-display); font-weight: 400; font-size: 26px; line-height: 1.15; }
 .ld-away { font-size: 13px; font-weight: 600; color: var(--walnut); }
 .ld-lede { font-size: 14px; color: var(--ink-soft); }
+.ld-warm { margin-top: 10px; padding: 14px 2px 4px; border-top: 1px dashed #CFC6B8; font-size: 15px; line-height: 1.35; color: var(--ink); }
 .ld-lines { margin-top: 12px; display: flex; flex-direction: column; }
 .ld-line { min-height: 58px; border-top: 1px dashed #CFC6B8; display: flex; align-items: center; gap: 12px; padding: 8px 2px; text-align: left; width: 100%; transition: opacity 160ms; }
 .ld-line:active { transform: translateY(1px); }
@@ -48,14 +50,18 @@ function ensureLedgerStyles() {
 .ld-tile { width: 34px; height: 34px; border-radius: 9px; box-shadow: 0 2px 0 rgba(42,38,34,.25); flex: 0 0 auto; display: flex; align-items: center; justify-content: center; color: var(--paper); }
 .ld-line .tt { font-size: 15px; font-weight: 600; line-height: 1.25; }
 .ld-line .ss { font-size: 13px; color: var(--ink-soft); display: flex; align-items: center; gap: 4px; flex-wrap: wrap; margin-top: 2px; }
-.ld-line .aa { font-size: 13px; font-weight: 600; color: var(--walnut); flex: 0 0 auto; }
-.ld-line .grow { display: flex; flex-direction: column; }
+.ld-line .aa { display: inline-flex; align-items: center; gap: 2px; min-height: 32px; padding: 0 6px 0 12px; border-radius: 999px; background: var(--plaster); box-shadow: 0 2px 0 var(--shadow-soft); font-size: 13px; font-weight: 600; color: var(--walnut); flex: 0 0 auto; }
+.ld-line .aa svg { transform: rotate(180deg); width: 14px; height: 14px; }
+.ld-line.done .aa { background: transparent; box-shadow: none; }
+.ld-line .grow { display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
+.ld-line .nx { font-size: 13px; color: var(--walnut); margin-top: 2px; }
 .ld-empty { padding: 14px 2px 6px; border-top: 1px dashed #CFC6B8; color: var(--ink-soft); font-size: 14px; }
 .ld-chip { display: inline-block; width: 16px; height: 16px; border-radius: 5px; box-shadow: 0 1px 0 rgba(42,38,34,.25); }
-.ld-stamp { position: absolute; right: 14px; bottom: 16px; width: 206px; height: auto; transform: rotate(-12deg); pointer-events: none; animation: ld-stamp 420ms var(--ease-out) both; }
-@keyframes ld-stamp { 0% { opacity: 0; transform: rotate(-12deg) scale(1.7); } 70% { opacity: 1; transform: rotate(-12deg) scale(.98); } 100% { opacity: 1; transform: rotate(-12deg) scale(1); } }
+.ld-stamp { display: block; align-self: center; margin: 14px 0 4px; width: 206px; max-width: 100%; height: auto; transform: rotate(-6deg); pointer-events: none; animation: ld-stamp 420ms var(--ease-out) both; }
+@keyframes ld-stamp { 0% { opacity: 0; transform: rotate(-6deg) scale(1.7); } 70% { opacity: 1; transform: rotate(-6deg) scale(.98); } 100% { opacity: 1; transform: rotate(-6deg) scale(1); } }
 .ld-almost { display: flex; flex-direction: column; gap: 4px; }
-.ld-almost button { display: flex; align-items: center; gap: 10px; min-height: 36px; width: 100%; text-align: left; font-size: 14px; }
+.ld-almost button { display: flex; align-items: center; gap: 10px; min-height: 44px; width: 100%; text-align: left; font-size: 14px; }
+[data-screen="ledger"] .card > .card-title { font-family: var(--font-ui); font-weight: 600; font-size: 15px; }
 .ld-almost .sw { width: 14px; height: 14px; border-radius: 4px; flex: 0 0 auto; }
 .ld-bottom { display: flex; flex-direction: column; gap: 10px; margin-top: auto; padding-top: 6px; }
 .ld-bottom .ws-closed { background: var(--walnut-deep); color: var(--paper); box-shadow: 0 3px 0 rgba(0,0,0,.6); }
@@ -63,25 +69,51 @@ function ensureLedgerStyles() {
   d.head.appendChild(s);
 }
 
+// action: the small pill on the right. next: the next step, so every line lands with
+// its result (the title) AND where it leads (this line). rank: results first, chores after.
 const ICON_STYLE = {
-  jar: { hex: '#D39B2A', action: 'Got it' },
-  coin: { hex: '#C99A2E', action: 'Got it' },
-  cart: { hex: '#9A6A47', action: 'Open' },
-  hunter: { hex: '#6E4A7E', action: 'Open' },
-  postcard: { hex: '#6E4A7E', action: 'Open' },
-  order: { hex: '#DE7A2E', action: 'View' },
-  vial: { hex: '#8FA77A', action: 'Merge' },
-  canvas: { hex: '#2F8A8A', action: 'Open' },
-  collector: { hex: '#D98A8F', action: 'View' },
-  swatch: { hex: '#D39B2A', action: 'View' },
-  sparkle: { hex: '#E2B04A', action: 'Claim' },
-  tube: { hex: '#8FA77A', action: 'Purify' },
-  quest: { hex: '#3E6A9E', action: 'Claim' },
-  event: { hex: '#3E6A9E', action: 'Claim' },
-  pin: { hex: '#B8433A', action: 'Open' },
-  commission: { hex: '#3E6A9E', action: 'Open' },
-  room: { hex: '#7B5236', action: 'View' },
+  jar: { hex: '#D39B2A', action: 'Got it', rank: 0, next: 'Safe in your vats, ready to sell or ship.' },
+  coin: { hex: '#C99A2E', action: 'Got it', rank: 0, next: 'Already in your purse. A good time for an upgrade.' },
+  cart: { hex: '#9A6A47', action: 'Open', rank: 0, next: 'The cart is back. Send the next load from the Fleet.' },
+  hunter: { hex: '#6E4A7E', action: 'Open', rank: 1, next: 'See what they found, then send them out again.' },
+  postcard: { hex: '#6E4A7E', action: 'Open', rank: 1, next: 'Open it and pin it to the board.' },
+  swatch: { hex: '#D39B2A', action: 'View', rank: 1, next: 'Look them over in your catalog.' },
+  collector: { hex: '#D98A8F', action: 'View', rank: 2, next: 'See the offer in the gallery.' },
+  canvas: { hex: '#2F8A8A', action: 'Open', rank: 2, next: 'Start painting it in the gallery.' },
+  order: { hex: '#DE7A2E', action: 'View', rank: 3, next: 'Pick one on the board to fill.' },
+  vial: { hex: '#8FA77A', action: 'Merge', rank: 3, next: 'Merge a matching pair on the shelf.' },
+  sparkle: { hex: '#E2B04A', action: 'Claim', rank: 3, next: 'Tap it at the mixer to claim.' },
+  tube: { hex: '#8FA77A', action: 'Purify', rank: 3, next: 'A short puzzle brings back the full price.' },
+  quest: { hex: '#3E6A9E', action: 'Claim', rank: 3, next: 'Claim it for Seals, keepsakes you can spend on boosts.' },
+  event: { hex: '#3E6A9E', action: 'Claim', rank: 3, next: 'Claim it for Seals, keepsakes you can spend on boosts.' },
+  pin: { hex: '#B8433A', action: 'Open', rank: 3, next: 'Open it to see where to find it.' },
+  commission: { hex: '#3E6A9E', action: 'Open', rank: 3, next: 'Open the commission to deliver.' },
+  room: { hex: '#7B5236', action: 'View', rank: 3, next: 'Have a look at the new room.' },
 };
+
+/** "3 days", "5 hours", "1 day 4 hours": words, not abbreviations. */
+function awayWords(ms) {
+  const mins = Math.max(1, Math.round(ms / 60e3));
+  const d = Math.floor(mins / 1440);
+  const hr = Math.floor((mins % 1440) / 60);
+  const m = mins % 60;
+  const u = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+  if (d > 0) return hr > 0 ? `${u(d, 'day')} ${u(hr, 'hour')}` : u(d, 'day');
+  if (hr > 0) return m > 0 && hr < 6 ? `${u(hr, 'hour')} ${u(m, 'minute')}` : u(hr, 'hour');
+  return u(m, 'minute');
+}
+
+/** Results first, chores after; stable within each group. */
+function ordered(list) {
+  return list.map((ln, i) => ({ ln, i, r: (ICON_STYLE[ln.icon] || { rank: 3 }).rank }))
+    .sort((a, b) => a.r - b.r || a.i - b.i).map((x) => x.ln);
+}
+
+/** Sim copy tuned for the page: a pile of vials is something to merge, not a chore list. */
+function lineText(ln) {
+  const m = /^(\d+) vials waiting on the shelf$/.exec(ln.text || '');
+  return m ? `${m[1]} vials ready to merge` : ln.text;
+}
 
 // ---------------------------------------------------------------------------
 // Module state
@@ -148,14 +180,15 @@ function lineHtml(ln, i) {
   const isDone = done.has(i);
   const sub = lineSub(ln);
   const coins = ln.icon === 'coin' && num(summary.coinsEarned) >= 1;
+  const text = lineText(ln);
   const title = coins
     ? h`Earned <span data-roll class="num">${fmt(Math.round(summary.coinsEarned))}</span> Coins while you were away`
-    : ln.text;
+    : text;
   const action = isDone ? 'Done' : isInfo(ln) ? 'Got it' : st.action;
-  return h`<button type="button" class="ld-line${isDone ? ' done' : ''}" data-action="ledger-line" data-i="${i}" data-tap aria-label="${ln.text}${isDone ? ', done' : ''}">
+  return h`<button type="button" class="ld-line${isDone ? ' done' : ''}" data-action="ledger-line" data-i="${i}" data-tap aria-label="${text}${isDone ? ', done' : ''}">
 <span class="ld-tile" style="background:${safeHex(lineHex(ln))}">${isDone ? iconSvg('check', { size: 18 }) : ''}</span>
-<span class="grow"><span class="tt">${title}</span>${sub ? h`<span class="ss">${sub}</span>` : ''}</span>
-<span class="aa">${action}</span></button>`;
+<span class="grow"><span class="tt">${title}</span>${sub ? h`<span class="ss">${sub}</span>` : ''}${st.next ? h`<span class="nx">${st.next}</span>` : ''}</span>
+<span class="aa">${action}${isDone ? '' : iconSvg('back', { size: 14 })}</span></button>`;
 }
 
 function stampSvg() {
@@ -182,24 +215,31 @@ function almostHtml() {
 
 function build() {
   const away = num(summary.away);
-  const awayText = away >= 60e3 ? `You were away ${ctx.format.duration(away)}` : '';
+  const awayText = away >= 60e3 ? `You were away ${awayWords(away)}` : '';
   const fill = sim().storage.fillTimeMs(S());
   const closeLabel = closedInfo
-    ? (Number.isFinite(fill) && fill > 0 ? `Shop closed. Vats fill in ${ctx.format.duration(fill)}` : 'Shop closed. Everything is set for tomorrow')
+    ? (Number.isFinite(fill) && fill > 0 ? `Shop closed. Vats fill in ${waitText(ctx.format, fill)}` : 'Shop closed. Everything is set for tomorrow')
     : 'Close up shop';
+  // One title at a time: the nav says "Welcome back" after an absence, and the card carries
+  // the ledger's name; otherwise the nav is the name and the card says something warm.
+  const named = away >= 60e3;
+  const cardTitle = named ? 'Morning Ledger' : lines.length ? 'Waiting for you' : 'All tended';
+  const calm = !lines.length;
+  const caughtUp = stamped || calm;
   return h`
 <div class="screen-head">${backButton('Back to the workshop')}<div class="titles"><div class="title">${away >= 60e3 ? 'Welcome back' : 'Morning Ledger'}</div></div><div class="spacer"></div></div>
 <div class="screen-body ld-body" data-ref="body">
   <div class="ld-page" data-ref="page">
-    <div class="ld-titlerow"><div class="ld-title">Morning Ledger</div></div>
+    <div class="ld-titlerow"><div class="ld-title${named ? ' is-name' : ''}">${cardTitle}</div></div>
     ${awayText ? h`<div class="ld-away">${awayText}</div>` : ''}
-    <div class="ld-lede">${lines.length ? 'Here is what is waiting. Each line is a tap.' : 'Nothing new yet. The workshop is humming along.'}</div>
-    <div class="ld-lines">${lines.length ? lines.map(lineHtml) : h`<div class="ld-empty">All quiet for now.</div>`}</div>
+    ${calm ? '' : h`<div class="ld-lede">${named ? 'Here is what the workshop got up to. Tap a line to look closer.' : 'A few little things are waiting. Tap a line to look closer.'}</div>`}
+    <div class="ld-lines">${calm ? h`<div class="ld-warm">Nothing needs you right now. The workshop is humming along on its own, and your vats keep filling while you rest.</div>` : lines.map(lineHtml)}</div>
+    ${stamped && !calm ? h`<div class="ld-warm" data-warm>Everything is tended. Your vats keep filling while you rest.</div>` : ''}
     ${stamped ? stampSvg() : ''}
   </div>
   ${almostHtml()}
   <div class="ld-bottom">
-    ${button(closeLabel, { variant: 'primary', block: true, cls: `tall${closedInfo ? ' ws-closed' : ''}`, attrs: { 'data-action': closedInfo ? 'ledger-close-up-reopen' : 'ledger-close-up', 'data-coach': 'close-up-ledger' } })}
+    ${button(closeLabel, { variant: caughtUp || closedInfo ? 'primary' : 'wood', block: true, cls: `tall${closedInfo ? ' ws-closed' : ''}`, attrs: { 'data-action': closedInfo ? 'ledger-close-up-reopen' : 'ledger-close-up', 'data-coach': 'close-up-ledger' } })}
     ${button('Back to the workshop', { block: true, attrs: { 'data-action': 'ledger-back' } })}
   </div>
 </div>`;
@@ -321,7 +361,7 @@ const screen = {
     visible = true;
     const pending = S().ledger && S().ledger.pending;
     summary = (params && params.summary) || pending || liveSummary();
-    lines = Array.isArray(summary.lines) ? summary.lines.slice() : [];
+    lines = Array.isArray(summary.lines) ? ordered(summary.lines) : [];
     done = new Set();
     stamped = false;
     rolled = false;
@@ -345,7 +385,7 @@ const screen = {
     const b = root.querySelector('[data-coach="close-up-ledger"]');
     if (b && closedInfo) {
       const fill = sim().storage.fillTimeMs(S());
-      const label = Number.isFinite(fill) && fill > 0 ? `Shop closed. Vats fill in ${ctx.format.duration(fill)}` : 'Shop closed. Everything is set for tomorrow';
+      const label = Number.isFinite(fill) && fill > 0 ? `Shop closed. Vats fill in ${waitText(ctx.format, fill)}` : 'Shop closed. Everything is set for tomorrow';
       if (b.textContent !== label) b.textContent = label;
     }
     checkCaughtUp();
