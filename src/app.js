@@ -10,6 +10,12 @@
  * that is missing or fails to load gets a "Coming soon" placeholder, so one
  * broken screen never takes the app down.
  *
+ * Toasts: app.js sets overlay's toast gate (hold while a coach mark, a
+ * ceremony or a puzzle board is up; drop "X joins your catalog" while naming
+ * shows X) and sends domain-event news as kind 'info' so it collapses into one
+ * slip. Naming ceremonies queue at most MAX_QUEUED_NAMINGS deep; the rest keep
+ * their catalog names and one line says so.
+ *
  * Debug handle: window.tincture = {game, ctx, router, version, debug: {advance(ms), discover(colorId)}}.
  */
 
@@ -54,6 +60,8 @@ export const SCREEN_IDS = Object.freeze([
 
 /** Screens that are ceremonies: one at a time, others wait in a queue. */
 const CEREMONY_IDS = new Set(['naming', 'phase-beat', 'onboarding']);
+/** News toasts wait behind these (nothing blocks a ceremony or a puzzle board). */
+const NEWS_WAITS_FOR = new Set([...CEREMONY_IDS, 'grading', 'purify', 'packing']);
 
 const TITLES = {
   workshop: 'Workshop', ledger: 'Morning Ledger', orders: 'Orders', matching: 'Matching', bench: 'Mixing Bench',
@@ -82,6 +90,7 @@ function makeFormat(game) {
     num: (n) => fmt.formatNumber(n, notation()),
     duration: (ms) => fmt.formatDuration(ms),
     countdown: (ms) => fmt.formatCountdown(ms),
+    until: (ms) => fmt.formatUntil(ms),
     rate: (perSec) => fmt.formatRate(perSec, notation()),
     pct: (x) => fmt.pct(x),
     dayKey: fmt.dayKey,
@@ -202,7 +211,7 @@ async function boot() {
     root: document.getElementById('app'),
     tabbar: document.getElementById('tabbar'),
     overlay,
-    onChange: () => setTimeout(pumpCeremonies, 0),
+    onChange: () => setTimeout(() => { overlay.placeToasts(); pumpCeremonies(); }, 0),
     tabDots: (state) => {
       const a = sim.hunters.mapAttention(state, game.now());
       return { map: a.choices + a.hauls > 0 };
@@ -218,6 +227,10 @@ async function boot() {
   // --- ceremonies -----------------------------------------------------------
   const ceremonyQueue = [];
   let pendingLedger = null; // a return that arrived while a ceremony was on screen
+  // Many colors at once (a big board, a hunter's haul): name the first few one
+  // by one, and let the rest keep their catalog names with one quiet line.
+  const MAX_QUEUED_NAMINGS = 3;
+  let quietlyNamed = 0;
 
   function ceremonyActive() {
     const top = router.current();
@@ -226,6 +239,11 @@ async function boot() {
 
   function pumpCeremonies() {
     if (ceremonyActive()) return;
+    if (quietlyNamed && !ceremonyQueue.some((c) => c.screen === 'naming')) {
+      const n = quietlyNamed;
+      quietlyNamed = 0;
+      overlay.toast(n === 1 ? 'One more new color is waiting in your catalog' : `${n} more new colors are waiting in your catalog`, { kind: 'info' });
+    }
     if (pendingLedger) {
       const summary = pendingLedger;
       pendingLedger = null;
@@ -238,6 +256,10 @@ async function boot() {
 
   function queueCeremony(screen, params) {
     if (screen === 'naming' && ceremonyQueue.some((c) => c.screen === 'naming' && c.params.colorId === params.colorId)) return;
+    if (screen === 'naming' && ceremonyQueue.filter((c) => c.screen === 'naming').length >= MAX_QUEUED_NAMINGS) {
+      quietlyNamed++;
+      return;
+    }
     ceremonyQueue.push({ screen, params });
     pumpCeremonies();
   }
@@ -256,9 +278,25 @@ async function boot() {
         audio.stamp();
         haptics.medium();
         break;
-      default: queueCeremony('phase-beat', p); break;
+      // A custom beat must say what changed; a bare one is never shown.
+      default: if (p.title) queueCeremony('phase-beat', p); break;
     }
   }
+
+  // --- toasts: where and when ------------------------------------------------
+  // Hold every toast while a coach mark is up (onboarding suspends the visible
+  // ones when a mark appears), hold news behind ceremonies and puzzle boards,
+  // and drop "X joins your catalog" while the naming screen is showing X.
+  overlay.setToastGate(({ text, kind }) => {
+    if (router.isOpen('naming') && (kind === 'discovery' || /\bjoins (your|the) catalog\b/i.test(text))) return 'drop';
+    if (document.querySelector('#coach-layer .coach-tag')) return 'hold';
+    const top = router.current();
+    if (!top) return 'show';
+    if (CEREMONY_IDS.has(top.id)) return 'hold';
+    if (kind !== 'action' && NEWS_WAITS_FOR.has(top.id)) return 'hold';
+    return 'show';
+  });
+  const news = (text, opts = {}) => overlay.toast(text, { ...opts, kind: 'info' });
 
   // --- domain events -> feel ------------------------------------------------
   const quiet = (meta) => !!(meta && meta.catchUp);
@@ -305,14 +343,14 @@ async function boot() {
   game.on('postcard', (p, meta) => {
     if (quiet(meta)) return;
     const card = content.getPostcard && content.getPostcard(p.id);
-    overlay.toast(p.duplicate ? 'A postcard you already have: turned into Seals' : `A postcard: ${card ? card.title : 'news from afar'}`);
+    news(p.duplicate ? 'A postcard you already have: turned into Seals' : `A postcard: ${card ? card.title : 'news from afar'}`);
   });
 
   game.on('setComplete', (p, meta) => {
     if (quiet(meta)) return;
     const r = content.getRegion && content.getRegion(p.region);
     audio.chord([0.45, 0.6, 0.75, 0.9], 0.8);
-    overlay.toast(`Postcard set complete${r ? `: ${r.name}` : ''}`);
+    news(`Postcard set complete${r ? `: ${r.name}` : ''}`);
   });
 
   game.on('allCaughtUp', () => celebrate('allCaughtUp'));
@@ -320,13 +358,13 @@ async function boot() {
   game.on('storageFull', () => {
     if (once.has('storageFull')) return;
     once.add('storageFull');
-    overlay.toast('The vats are full: a good moment to collect, ship or sell.', { ms: 3200 });
+    news('The vats are full: a good moment to collect, ship or sell.', { ms: 3200 });
   });
 
   game.on('saveFailed', () => {
     if (once.has('saveFailed')) return;
     once.add('saveFailed');
-    overlay.toast('This device is out of space, so saving is paused. Export a save from Settings.', { ms: 4000 });
+    news('This device is out of space, so saving is paused. Export a save from Settings.', { ms: 4000 });
   });
 
   game.on('comingSoon', () => {
@@ -337,15 +375,15 @@ async function boot() {
     });
   });
 
-  game.on('golden', (p, meta) => { if (!quiet(meta)) overlay.toast('A golden vial landed on the shelf', { hex: '#E2B04A' }); });
+  game.on('golden', (p, meta) => { if (!quiet(meta)) news('A golden vial landed on the shelf', { hex: '#E2B04A' }); });
   game.on('accident', (p, meta) => {
     if (quiet(meta)) return;
     audio.bell();
-    overlay.toast('A happy accident in the mixers');
+    news('A happy accident in the mixers');
   });
-  game.on('questDone', (p, meta) => { if (!quiet(meta)) overlay.toast('A quest is ready to claim'); });
-  game.on('weeklyDone', (p, meta) => { if (!quiet(meta)) overlay.toast('The weekly quest is complete'); });
-  game.on('eventStep', (p, meta) => { if (!quiet(meta)) overlay.toast('A new event reward is ready'); });
+  game.on('questDone', (p, meta) => { if (!quiet(meta)) news('A quest is ready to claim'); });
+  game.on('weeklyDone', (p, meta) => { if (!quiet(meta)) news('The weekly quest is complete'); });
+  game.on('eventStep', (p, meta) => { if (!quiet(meta)) news('A new event reward is ready'); });
   game.on('commissionDone', (p, meta) => {
     if (quiet(meta)) return;
     // The Commissions screen runs its own "Commission complete!" ceremony; never a second one.
@@ -353,15 +391,15 @@ async function boot() {
     const c = content.getCommission && content.getCommission(p.id);
     audio.chord([0.4, 0.55, 0.7, 0.85], 1);
     haptics.success();
-    overlay.toast(`Commission complete${c ? `: ${c.name || c.title || ''}` : ''}`);
+    news(`Commission complete${c ? `: ${c.name || c.title || ''}` : ''}`);
   });
   game.on('sourceUnlocked', (p, meta) => {
     if (quiet(meta)) return;
     const src = content.SOURCES && content.SOURCES.find((s) => s.id === p.sourceId);
-    overlay.toast(`A new pigment source: ${src ? src.name : nameOf(p.sourceId)}`, { hex: hexOf(src && src.pigment) });
+    news(`A new pigment source: ${src ? src.name : nameOf(p.sourceId)}`, { hex: hexOf(src && src.pigment) });
   });
-  game.on('collector', (p, meta) => { if (!quiet(meta)) overlay.toast('A collector is visiting the Gallery'); });
-  game.on('scoutChoice', (p, meta) => { if (!quiet(meta)) overlay.toast('A hunter sent word: a choice is waiting on the map'); });
+  game.on('collector', (p, meta) => { if (!quiet(meta)) news('A collector is visiting the Gallery'); });
+  game.on('scoutChoice', (p, meta) => { if (!quiet(meta)) news('A hunter sent word: a choice is waiting on the map'); });
 
   game.on('return', (summary) => {
     const s = game.state;
@@ -373,6 +411,7 @@ async function boot() {
   game.on('import', (state) => {
     applySettings(state.settings, { audio, haptics });
     ceremonyQueue.length = 0;
+    quietlyNamed = 0;
     pendingLedger = null;
     router.navigate('workshop');
   });
@@ -410,7 +449,7 @@ async function boot() {
   registerSW({
     onUpdateReady: () => {
       document.documentElement.dataset.updateReady = 'on';
-      overlay.toast('Update ready. Restart from Settings.', { ms: 3600 });
+      news('Update ready. Restart from Settings.', { ms: 3600 });
     },
   });
 

@@ -1,7 +1,8 @@
 /**
  * overlay.js: toasts, modals and bottom sheets on #toasts / #modal.
  *
- * Owns: toast(text, {hex, ms, action}), modal({...}) -> Promise, sheet({...})
+ * Owns: toast(text, {hex, ms, action, kind}), setToastGate(fn),
+ * suspendToasts(), clearToasts(), placeToasts(), modal({...}) -> Promise, sheet({...})
  * -> Promise, isOpen(), dismissTop(), closeAll(), and injectStyle(id, css) for
  * the app-level UI modules (naming, phase-beat, onboarding) that keep their
  * small styles next to their code. Implements docs/UI-CONTRACT.md `ctx.toast`,
@@ -14,8 +15,6 @@
  */
 
 import { h, raw, escapeHtml, safeHex } from './kit.js';
-
-const MAX_TOASTS = 3;
 
 const doc = () => (typeof document !== 'undefined' ? document : null);
 
@@ -31,7 +30,7 @@ export function injectStyle(id, css) {
 
 injectStyle('overlay-style', `
 .toast { display: inline-flex; align-items: center; gap: 8px; }
-.toast .toast-dot { width: 14px; height: 14px; border-radius: 50%; flex: 0 0 auto; box-shadow: 0 0 0 1.5px rgba(247,244,236,.7); }
+.toast .toast-dot { width: 14px; height: 14px; border-radius: 50%; flex: 0 0 auto; box-shadow: 0 0 0 1.5px rgba(42,38,34,.18); }
 .sheet .modal-title { font-family: var(--font-display); font-size: 22px; line-height: 1.15; }
 .sheet .actions { display: flex; gap: 10px; }
 .sheet .actions.stacked { flex-direction: column; }
@@ -42,6 +41,36 @@ injectStyle('overlay-style', `
 // ---------------------------------------------------------------------------
 // Toasts
 // ---------------------------------------------------------------------------
+//
+// Rules (docs/UX-AUDIT.md "Toasts and modals", Top 12 #6):
+//  - a small paper slip just below the visible screen's head (measured on every
+//    toast, so a tall head or a sticky sub-head is never covered);
+//  - at most MAX_TOASTS on screen, the oldest leaves first; a tap dismisses;
+//  - the same text within DEDUPE_MS shows once (its timer refreshes);
+//  - informational toasts (kind 'info', the app's domain events) collapse into
+//    one slip: a second one within DEDUPE_MS joins the first as a sentence;
+//  - a gate (setToastGate, set by app.js) may hold a toast (a coach mark, a
+//    ceremony or a puzzle is up) or drop it (a discovery while the naming
+//    screen already shows it). Held toasts show once the gate opens; held
+//    action feedback older than HOLD_ACTION_MS is stale and dropped.
+
+const MAX_TOASTS = 2;
+const DEFAULT_MS = 2400;
+const DEDUPE_MS = 3000;
+const HOLD_ACTION_MS = 4000;
+const MAX_HELD = 3;
+
+let gate = null;          // fn({text, kind}) -> 'show' | 'hold' | 'drop'
+const held = [];          // [{text, opts, at}]
+let heldTimer = null;
+const recent = new Map(); // text -> last shown at (ms)
+
+const nowMs = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now());
+
+/** setToastGate(fn): fn({text, kind}) -> 'show' | 'hold' | 'drop'. null clears it. */
+export function setToastGate(fn) {
+  gate = typeof fn === 'function' ? fn : null;
+}
 
 function toastsEl() {
   const d = doc();
@@ -56,6 +85,23 @@ function toastsEl() {
   return el;
 }
 
+/** Put the toast host just under the visible screen's head (never over it). */
+function placeHost(host) {
+  const d = doc();
+  let y = null;
+  try {
+    const top = d.querySelector('#app > .screen.is-top:not([hidden])')
+      || [...d.querySelectorAll('#app > .screen:not([hidden])')].pop();
+    const head = top && top.querySelector('.screen-head');
+    if (head) {
+      const r = head.getBoundingClientRect();
+      if (r.height > 0 && r.bottom > 0) y = r.bottom + 8;
+    }
+  } catch (e) { /* measuring is best effort */ }
+  if (y !== null) host.style.setProperty('--toast-top', `${Math.round(y)}px`);
+  else host.style.removeProperty('--toast-top');
+}
+
 function removeToast(t) {
   if (!t || t._leaving) return;
   t._leaving = true;
@@ -64,19 +110,88 @@ function removeToast(t) {
   setTimeout(() => t.remove(), 170);
 }
 
-/**
- * toast(text, {hex, ms=2400, action:{label, onClick}}) -> {dismiss}.
- * Small paper toast just below the screen head (style.css #toasts: head height +
- * safe area, so it never covers the back button or title); at most 3 stacked
- * (the oldest leaves first); a tap dismisses it.
- */
-export function toast(text, { hex = null, ms = 2400, action = null } = {}) {
+function liveToasts(host) {
+  return [...host.querySelectorAll('.toast')].filter((x) => !x._leaving);
+}
+
+function arm(t, ms) {
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => removeToast(t), Math.max(800, ms));
+}
+
+const sentence = (x) => {
+  const v = String(x).trim();
+  return /[.!?…]$/.test(v) ? v : `${v}.`;
+};
+
+function judge(text, kind) {
+  if (!gate) return 'show';
+  try { return gate({ text: String(text), kind }) || 'show'; } catch (e) { return 'show'; }
+}
+
+function pumpHeld() {
+  clearTimeout(heldTimer);
+  heldTimer = null;
+  const now = nowMs();
+  while (held.length) {
+    const item = held[0];
+    const kind = item.opts.kind || 'action';
+    if (kind === 'action' && now - item.at > HOLD_ACTION_MS) { held.shift(); continue; }
+    const verdict = judge(item.text, kind);
+    if (verdict === 'hold') break;
+    held.shift();
+    if (verdict === 'drop') continue;
+    showToast(item.text, item.opts);
+  }
+  if (held.length) heldTimer = setTimeout(pumpHeld, 400);
+}
+
+function hold(text, opts) {
+  const at = nowMs();
+  const same = held.find((x) => x.text === String(text));
+  if (same) same.at = at;
+  else held.push({ text: String(text), opts, at });
+  while (held.length > MAX_HELD) held.shift();
+  if (!heldTimer) heldTimer = setTimeout(pumpHeld, 400);
+}
+
+function showToast(text, opts) {
+  const { hex = null, ms = DEFAULT_MS, action = null, kind = 'action' } = opts || {};
   const host = toastsEl();
   if (!host) return { dismiss() {} };
+  const str = String(text);
+  const now = nowMs();
+  placeHost(host);
+  const live = liveToasts(host);
+
+  // The same words within a few seconds: one slip, its timer refreshed.
+  const twin = live.find((x) => x._text === str || (x._parts && x._parts.includes(str)));
+  if (twin) { arm(twin, ms); recent.set(str, now); return { dismiss: () => removeToast(twin) }; }
+  if (!action && now - (recent.get(str) || -1e9) < DEDUPE_MS) return { dismiss() {} };
+  recent.set(str, now);
+  for (const [k, at] of recent) if (now - at > DEDUPE_MS) recent.delete(k);
+
+  // Informational news collapses into one slip ("A quest is ready. A postcard: ...").
+  if (kind === 'info' && !action) {
+    const info = live.find((x) => x._kind === 'info' && now - x._at < DEDUPE_MS && x._parts.length < 3);
+    if (info) {
+      info._parts.push(str);
+      info._at = now;
+      const span = info.querySelector('[data-toast-text]');
+      if (span) span.textContent = info._parts.map(sentence).join(' ');
+      arm(info, ms + 600);
+      return { dismiss: () => removeToast(info) };
+    }
+  }
+
   const t = doc().createElement('div');
   t.className = 'toast';
   t.setAttribute('role', 'status');
-  t.innerHTML = String(h`${hex ? raw(`<span class="toast-dot" style="background:${safeHex(hex)}"></span>`) : ''}<span>${text}</span>${action ? h`<button type="button" class="btn btn-paper small" data-tap>${action.label}</button>` : ''}`);
+  t._text = str;
+  t._parts = [str];
+  t._kind = kind;
+  t._at = now;
+  t.innerHTML = String(h`${hex ? raw(`<span class="toast-dot" style="background:${safeHex(hex)}"></span>`) : ''}<span data-toast-text>${str}</span>${action ? h`<button type="button" class="btn btn-paper small" data-tap>${action.label}</button>` : ''}`);
   if (action) {
     const b = t.querySelector('button');
     b.addEventListener('click', (e) => {
@@ -87,10 +202,57 @@ export function toast(text, { hex = null, ms = 2400, action = null } = {}) {
   }
   t.addEventListener('click', () => removeToast(t)); // a tap anywhere on a toast dismisses it
   host.appendChild(t);
-  const live = [...host.querySelectorAll('.toast')].filter((x) => !x._leaving);
-  while (live.length > MAX_TOASTS) removeToast(live.shift());
-  t._timer = setTimeout(() => removeToast(t), Math.max(800, ms));
+  const all = liveToasts(host);
+  while (all.length > MAX_TOASTS) removeToast(all.shift());
+  arm(t, ms);
   return { dismiss: () => removeToast(t) };
+}
+
+/**
+ * toast(text, {hex, ms=2400, action:{label, onClick}, kind='action'|'info'|'discovery'}) -> {dismiss}.
+ * `kind` (optional): 'action' is direct feedback to a tap (the default),
+ * 'info' is news from the world (collapses with other news), 'discovery' is a
+ * color joining the catalog (dropped while the naming screen shows it).
+ */
+export function toast(text, opts = {}) {
+  const o = opts || {};
+  const kind = o.kind || 'action';
+  const verdict = judge(text, kind);
+  if (verdict === 'drop') return { dismiss() {} };
+  if (verdict === 'hold') {
+    hold(text, { ...o, kind });
+    return { dismiss() { const i = held.findIndex((x) => x.text === String(text)); if (i >= 0) held.splice(i, 1); } };
+  }
+  return showToast(text, { ...o, kind });
+}
+
+/**
+ * suspendToasts(): take the visible toasts off screen (a coach mark is about
+ * to appear). News ('info') goes back in the held queue and shows when the
+ * gate opens; action feedback is stale by then and simply leaves.
+ */
+export function suspendToasts() {
+  const host = toastsEl();
+  if (!host) return;
+  for (const t of liveToasts(host)) {
+    if (t._kind === 'info') for (const part of t._parts) hold(part, { kind: 'info' });
+    removeToast(t);
+  }
+}
+
+/** placeToasts(): move the toast stack under the (new) visible screen's head. */
+export function placeToasts() {
+  const host = doc() && doc().getElementById('toasts');
+  if (host && liveToasts(host).length) placeHost(host);
+}
+
+/** clearToasts(): remove every toast, visible and held. */
+export function clearToasts() {
+  held.length = 0;
+  clearTimeout(heldTimer);
+  heldTimer = null;
+  const host = toastsEl();
+  if (host) for (const t of liveToasts(host)) removeToast(t);
 }
 
 // ---------------------------------------------------------------------------
@@ -231,4 +393,4 @@ export function closeAll() {
 
 export { escapeHtml };
 
-export default { toast, modal, sheet, isOpen, dismissTop, closeAll, onOverlayChange, injectStyle };
+export default { toast, setToastGate, suspendToasts, clearToasts, placeToasts, modal, sheet, isOpen, dismissTop, closeAll, onOverlayChange, injectStyle };

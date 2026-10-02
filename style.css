@@ -3,8 +3,10 @@
  *
  * Owns: tokens, reset, typography, the app frame (#app, .screen, #tabbar,
  * #toasts, #modal, #fx-layer) and every shared component (.card, .btn, .tag,
- * .swatch, .chip, .sheet, .modal, .toast, .meter, .row, .grid, .switch, .seg,
- * .progress). Implements DESIGN.md "Art direction > Tokens", "Interaction
+ * .swatch, .chip, .strip, .sheet, .modal, .toast, .meter, .row, .grid, .switch,
+ * .seg, .progress). Touch floors (DESIGN.md "Accessibility", 44 pt): .btn 44
+ * (small too), .chip 40 drawn with a 44 hit area, .switch and .seg-control 44.
+ * Screen-injected styles may override these; keep them at or above the floor. Implements DESIGN.md "Art direction > Tokens", "Interaction
  * feel > Motion rules" and "UX, notifications and accessibility".
  *
  * Rules of the look: warm paper, walnut, ink; a crisp straight-down cut shadow
@@ -220,13 +222,27 @@ noscript {
   justify-content: center;
   gap: 3px;
   color: var(--ink-soft);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   position: relative;
 }
 .tab svg { transition: transform 120ms var(--ease-out); }
 .tab:active svg, .tab.pressed svg { transform: translateY(2px); }
 .tab[aria-current="page"], .tab.active { color: var(--ink); font-weight: 700; }
+/* Selected is more than a bold weight: the icon fills softly and a short ink
+ * bar sits on the tab's top edge (a second cue for colorblind and low vision). */
+.tab[aria-current="page"] svg, .tab.active svg { fill: rgba(42, 38, 34, 0.14); }
+.tab[aria-current="page"]::before, .tab.active::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 28px;
+  height: 3px;
+  margin-left: -14px;
+  border-radius: 0 0 3px 3px;
+  background: var(--ink);
+}
 .tab .dot {
   position: absolute;
   top: 10px;
@@ -257,6 +273,8 @@ noscript {
 .card.is-tap:active, .card.pressed { transform: translateY(2px); box-shadow: var(--cut-press); }
 .card.is-locked { opacity: 0.8; }
 .card > .card-title { font-family: var(--font-display); font-size: 16px; }
+/* Section labels are UI, not names: Figtree (the serif is for names only). */
+.section-label, .card > .card-title.section-label { font-family: var(--font-ui); font-weight: 700; font-size: 15px; }
 
 .stack { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .stack-sm { gap: 6px; }
@@ -305,10 +323,11 @@ noscript {
   transition: transform 120ms var(--ease-out), box-shadow 120ms var(--ease-out), opacity 120ms;
 }
 .btn-primary { background: var(--ink); color: var(--paper); box-shadow: 0 3px 0 #000; }
-.btn-paper { background: var(--paper); color: var(--ink); }
+.btn-paper { background: var(--paper); color: var(--ink); box-shadow: inset 0 0 0 1.5px rgba(42, 38, 34, 0.14), 0 3px 0 var(--shadow); }
+.btn-paper:active, .btn-paper.pressed { box-shadow: inset 0 0 0 1.5px rgba(42, 38, 34, 0.14), var(--cut-press); }
 .btn-wood { background: var(--walnut); color: var(--paper); }
 .btn.block { display: flex; width: 100%; }
-.btn.small { min-height: 36px; padding: 0 12px; font-size: 13px; border-radius: 10px; }
+.btn.small { min-height: var(--tap); padding: 0 14px; font-size: 14px; border-radius: 10px; }
 .btn.tall { min-height: 52px; font-size: 16px; }
 .btn:active, .btn.pressed, .pressed {
   transform: translateY(2px);
@@ -382,8 +401,8 @@ noscript {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 32px;
-  padding: 0 12px;
+  min-height: 40px;
+  padding: 0 14px;
   border-radius: 999px;
   background: var(--paper);
   color: var(--ink);
@@ -392,12 +411,38 @@ noscript {
   box-shadow: 0 2px 0 var(--shadow-soft);
   white-space: nowrap;
 }
-button.chip { min-height: var(--tap); }
+/* Tappable chips draw at 40 and take taps across a 44 band. */
+button.chip, [data-tap].chip { position: relative; }
+button.chip::before, [data-tap].chip::before { content: ''; position: absolute; inset: -2px 0; }
 .chip.is-on, .chip[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
 .chip.coins { padding: 5px 12px 5px 8px; min-height: 0; font-size: 16px; font-weight: 700; }
 .chip .sub { font-size: 12px; font-weight: 400; color: var(--ink-soft); }
 .chip.is-on .sub, .chip[aria-pressed="true"] .sub { color: inherit; opacity: 0.8; }
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* ------------------------------------------------------------------ strips */
+
+/* kit.fadeStrip(): one scrolling row (page tabs, chip rows, an event track).
+ * Items snap; the right edge fades so a clipped item reads as "more this way";
+ * the trailing spacer lets the last item scroll clear of the fade. */
+.strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  scroll-padding-inline: 2px;
+  scrollbar-width: none;
+  padding: 4px 2px 6px;
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
+}
+.strip::-webkit-scrollbar { display: none; }
+.strip > * { flex: 0 0 auto; scroll-snap-align: start; }
+.strip::after { content: ''; flex: 0 0 24px; height: 1px; }
 
 /* -------------------------------------------------------------- flow meter */
 
@@ -466,8 +511,8 @@ button.chip { min-height: var(--tap); }
 }
 .switch[aria-checked="true"] { background: var(--ink); }
 .switch[aria-checked="true"]::after { transform: translateX(20px); }
-/* 44px touch target without growing the visual */
-.switch::before { content: ''; position: absolute; inset: -6px -4px; }
+/* A 48 px tall touch band without growing the visual (32 + 2 x 8). */
+.switch::before { content: ''; position: absolute; inset: -8px -6px; }
 
 /* Segmented control: <div class="seg-control"><button aria-pressed>..</button>.. */
 .seg-control {
@@ -479,7 +524,7 @@ button.chip { min-height: var(--tap); }
 }
 .seg-control > button {
   flex: 1 1 0;
-  min-height: 38px;
+  min-height: var(--tap);
   padding: 0 10px;
   border-radius: 10px;
   font-size: 13px;
@@ -504,8 +549,8 @@ button.chip { min-height: var(--tap); }
   appearance: none;
   -webkit-appearance: none;
   flex: 0 0 auto;
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   margin: 0;
   border-radius: 7px;
   background: var(--paper);
@@ -532,10 +577,11 @@ button.chip { min-height: var(--tap); }
 
 /* ----------------------------------------------------------- toasts, modal */
 
-/* Toasts sit just below the screen head so they never cover the back button or the title. */
+/* Toasts sit just below the visible screen's head (overlay.js measures it into
+ * --toast-top), so they never cover the back button, the title or head controls. */
 #toasts {
   position: fixed;
-  top: calc(var(--head-h) + 10px + var(--safe-top));
+  top: var(--toast-top, calc(var(--head-h) + 10px + var(--safe-top)));
   left: 0;
   right: 0;
   z-index: 40;
@@ -546,22 +592,25 @@ button.chip { min-height: var(--tap); }
   pointer-events: none;
   padding: 0 var(--gutter);
 }
+/* A small paper slip: quieter than any pigment on screen. A tap dismisses it. */
 .toast {
   max-width: min(420px, 100%);
-  padding: 10px 16px;
-  border-radius: 999px;
-  background: var(--ink);
-  color: var(--paper);
+  min-height: 40px;
+  padding: 9px 16px;
+  border-radius: 12px;
+  background: var(--paper);
+  color: var(--ink);
   font-size: 14px;
   font-weight: 600;
+  line-height: 1.3;
   text-align: center;
-  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.35);
+  box-shadow: inset 0 0 0 1.5px rgba(42, 38, 34, 0.12), 0 3px 0 var(--shadow);
   pointer-events: auto;
   cursor: pointer;
   animation: toast-in 220ms var(--ease-out) both;
 }
 .toast.is-leaving { animation: toast-out 160ms ease-in both; }
-.toast .btn { min-height: 32px; margin-left: 8px; }
+.toast .btn { margin-left: 8px; }
 
 #modal {
   position: fixed;

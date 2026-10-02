@@ -108,24 +108,28 @@ function segRow(key, label, hint, options, current) {
   </div>`;
 }
 
+/**
+ * The update row: version, one calm line, and one full-size button under it
+ * (Check for updates, or Restart once an update is waiting). Every status is
+ * good news or a gentle "try later"; the game always keeps working.
+ */
 function updateBlock() {
   const u = ui.update;
   const ready = u.status === 'update-ready' || isUpdateReady();
+  const newer = u.latest && u.latest !== APP_VERSION ? u.latest : '';
   let line = '';
-  if (ready) line = 'Update ready';
-  else if (u.status === 'checking') line = 'Checking…';
-  else if (u.status === 'up-to-date') line = 'Up to date';
-  else if (u.status === 'downloading') line = 'Downloading the update…';
-  else if (u.status === 'offline') line = "You're offline";
-  else if (u.status === 'unsupported') line = 'Updates are not available in this browser';
-  return h`<div class="setting stacked">
-    <div class="row between">
-      <div class="grow"><div class="label">Version ${APP_VERSION}</div>
-        <div class="hint" data-update-line aria-live="polite">${line || 'Tincture updates itself quietly when you restart.'}</div></div>
-      ${ready
-        ? button('Restart', { variant: 'primary', small: true, attrs: { 'data-action': 'apply-update' } })
-        : button('Check for updates', { small: true, attrs: { 'data-action': 'check-update' }, disabled: u.status === 'checking' })}
-    </div>
+  if (ready) line = newer ? `Update ready: version ${newer}. Restart whenever you like; your game is saved.` : 'Update ready. Restart whenever you like; your game is saved.';
+  else if (u.status === 'checking') line = 'Checking for a newer Tincture…';
+  else if (u.status === 'up-to-date') line = 'Up to date: this is the newest Tincture.';
+  else if (u.status === 'downloading') line = 'A new version is on its way. It will be ready in a moment.';
+  else if (u.status === 'offline') line = 'No connection right now. Tincture plays fine offline; check again later.';
+  else if (u.status === 'unsupported') line = 'This browser keeps Tincture as it is, so there is nothing to check.';
+  return h`<div class="setting stacked st-update">
+    <div><div class="label">Version ${APP_VERSION}</div>
+      <div class="hint" data-update-line aria-live="polite">${line || 'Tincture updates itself quietly when you restart.'}</div></div>
+    ${ready
+      ? button('Restart to update', { variant: 'primary', block: true, attrs: { 'data-action': 'apply-update' } })
+      : button(u.status === 'checking' ? 'Checking…' : 'Check for updates', { block: true, attrs: { 'data-action': 'check-update' }, disabled: u.status === 'checking' || u.status === 'unsupported' })}
   </div>`;
 }
 
@@ -160,30 +164,30 @@ function body(settings) {
 
   return h`
   <div class="card">
-    <div class="card-title">Feel</div>
+    <div class="card-title section-label">Feel</div>
     ${toggleRow('sound', 'Sound', 'Soft notes for every color', s.sound !== false)}
     ${toggleRow('haptics', 'Haptics', canVibrate ? 'Gentle taps on supported phones' : 'This device does not offer vibration', s.haptics !== false)}
-    ${segRow('reducedMotion', 'Reduced motion', 'Swaps movement for short fades; keeps sound and haptics',
-      [['system', 'Follow phone'], ['on', 'On'], ['off', 'Off']], s.reducedMotion || 'system')}
+    ${segRow('reducedMotion', 'Reduced motion', 'Swaps movement for short fades and keeps sound and haptics. Auto follows your phone.',
+      [['system', 'Auto'], ['on', 'On'], ['off', 'Off']], s.reducedMotion || 'system')}
   </div>
 
   <div class="card">
-    <div class="card-title">Reading and playing</div>
+    <div class="card-title section-label">Reading and playing</div>
     ${toggleRow('colorblind', 'Colorblind aids', 'Adds symbols to grading tiles and patterns to tubes and crates', !!s.colorblind)}
     ${segRow('notation', 'Number style', null, [['short', '1.2K'], ['sci', '1.2e3']], s.notation || 'short')}
   </div>
 
   <div class="card">
-    <div class="card-title">Daily quests</div>
-    <div class="hint">Untick any kind of quest you would rather not be offered.</div>
+    <div class="card-title section-label">Daily quests</div>
+    <div class="hint">Untick any kind of quest you would rather not see. The rest keep coming.</div>
     ${quests.length
       ? quests.map((q) => h`<label class="check"><input type="checkbox" data-quest="${q.id}" ${raw(disabled.has(q.id) ? '' : 'checked')}><span class="grow">${q.label}</span></label>`)
       : h`<div class="hint">Quest types appear here once quests are unlocked.</div>`}
   </div>
 
   <div class="card">
-    <div class="card-title">Notifications</div>
-    <div class="hint">Off by default. Never about quests, events or anything else.</div>
+    <div class="card-title section-label">Notifications</div>
+    <div class="hint">Off unless you turn them on, and only ever about these two things.</div>
     ${toggleRow('notifyHunters', 'Your hunters are back', null, !!s.notifyHunters)}
     ${toggleRow('notifyVats', 'Your vats are full', null, !!s.notifyVats)}
     ${!notifSupported ? h`<div class="hint">Notifications are not available in this browser.</div>` : ''}
@@ -191,16 +195,16 @@ function body(settings) {
   </div>
 
   <div class="card">
-    <div class="card-title">App</div>
+    <div class="card-title section-label">App</div>
     ${updateBlock()}
     ${ui.canInstall ? h`<div class="setting">
       <div class="grow"><div class="label">Add to home screen</div><div class="hint">Opens full screen and works offline</div></div>
-      ${button('Add', { small: true, attrs: { 'data-action': 'install' } })}
+      ${button('Add', { attrs: { 'data-action': 'install' } })}
     </div>` : ''}
   </div>
 
   <div class="card">
-    <div class="card-title">Your save</div>
+    <div class="card-title section-label">Your save</div>
     <div class="hint">Everything is stored on this device. Export a copy to keep it safe or move to another phone.</div>
     <div class="row wrap">
       ${button('Export save', { icon: 'check', attrs: { 'data-action': 'export' } })}
@@ -212,7 +216,7 @@ function body(settings) {
     <hr class="divider">
     <div class="row between">
       <div class="grow"><div class="label">Reset game</div><div class="hint">Begin again with an empty workshop</div></div>
-      ${ui.confirm === 'reset' ? '' : button('Reset…', { small: true, attrs: { 'data-action': 'reset' } })}
+      ${ui.confirm === 'reset' ? '' : button('Reset…', { attrs: { 'data-action': 'reset' } })}
     </div>
     ${confirmBlock('reset')}
   </div>

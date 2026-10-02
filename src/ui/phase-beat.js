@@ -13,7 +13,11 @@
  *   {title, lines:[a, b], art}            anything else (custom beat)
  * A papercut room silhouette, a title, two lines and Continue. Skippable: tap
  * anywhere on the backdrop or Continue. Continue pops the screen (ctx.back);
- * the app queues further ceremonies after it.
+ * the app queues further ceremonies after it. A request that says nothing
+ * (no kind, no title) is never shown: the screen closes itself at once.
+ *
+ * Voice (the first-session story): warm, specific, second person, present
+ * tense, the way the map says "The window opens soon".
  */
 
 import { h, raw, button } from './kit.js';
@@ -35,55 +39,73 @@ let ctx = null;
 let currentBeat = null;
 
 const ROOM_ADDS = {
-  mixerSlots: ['mixer slot', 'mixer slots'],
-  vatSlots: ['vat slot', 'vat slots'],
-  grinderSlots: ['grinder slot', 'grinder slots'],
-  fleetSlots: ['cart bay', 'cart bays'],
+  grinderSlots: ['grinder', 'grinders'],
+  mixerSlots: ['mixer', 'mixers'],
+  vatSlots: ['vat', 'vats'],
+  fleetSlots: ['cart', 'carts'],
   walls: ['gallery wall', 'gallery walls'],
 };
+const WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];
+const count = (n, one, many) => `${WORDS[n] || n} more ${n === 1 ? one : many}`;
 
-function roomLines(room) {
+/** "There is room for one more grinder and one more mixer." */
+export function roomLines(room) {
   const adds = (room && room.adds) || {};
   const bits = [];
   for (const [k, [one, many]] of Object.entries(ROOM_ADDS)) {
     const n = Number(adds[k]) || 0;
-    if (n > 0) bits.push(`+${n} ${n === 1 ? one : many}`);
+    if (n > 0) bits.push(count(n, one, many));
   }
-  if (Number(adds.cellarMult) > 1) bits.push(`${adds.cellarMult}x cellar storage`);
-  return bits.length ? bits.join(', ') : 'More room to work.';
+  const list = bits.length > 1 ? `${bits.slice(0, -1).join(', ')} and ${bits[bits.length - 1]}` : bits[0];
+  const cellar = Number(adds.cellarMult) > 1 ? `Your cellar holds ${adds.cellarMult} times as much.` : '';
+  if (!list) return cellar || 'More room for you to work.';
+  return `There is room for ${list}.${cellar ? ` ${cellar}` : ''}`;
 }
+
+const ROOM_SECOND = {
+  'mill-room': 'A second grinder keeps your mixers fed, so the vats fill faster.',
+  'mixing-hall': 'More mixers means more colors filling your vats at once.',
+  'gallery-wing': 'Paint with every color you make, and hang it for Harbor Town to see.',
+  cellar: 'Your vats can fill all night while you are away.',
+  'loading-yard': 'Your carts carry color down the routes, and commissions come calling.',
+  'long-hall': 'More walls, more visitors, more of your work on show.',
+  atelier: 'A bright room for your finest mixing.',
+  rotunda: 'The grandest walls in town, and every one of them is yours to fill.',
+};
 
 /** Build {kicker, title, lines, art, hex} for a beat request. */
 export function beatFor(params = {}, content = {}) {
   const p = params || {};
   if (p.kind === 'phase') {
     if (Number(p.phase) === 2) {
-      return { kicker: 'Phase 2', title: 'The business outgrows the bench', art: 'factory',
-        lines: ['Carts, routes and apprentices are ready to help.', 'Hunters can set out, and the Gallery door opens soon.'] };
+      return { kicker: 'A new chapter', title: 'Your business outgrows the bench', art: 'factory',
+        lines: ['Carts, routes and apprentices are ready to help you.', 'Your hunters can set out, and the Gallery door opens soon.'] };
     }
     if (Number(p.phase) === 3) {
-      return { kicker: 'Phase 3', title: 'Commissions come calling', art: 'atelier',
-        lines: ['Big projects ask for many colors at once.', 'Renovate is open whenever you want a fresh start with Heritage.'] };
+      return { kicker: 'A new chapter', title: 'Commissions come calling', art: 'atelier',
+        lines: ['Harbor Town brings you big projects that ask for many colors at once.', 'Renovate is open too, whenever you want a fresh start with Heritage.'] };
     }
-    return { kicker: 'A new chapter', title: 'Your workshop grows', art: 'bench', lines: ['New work is waiting.', ''] };
+    return { kicker: 'A new chapter', title: 'Your workshop grows', art: 'bench', lines: ['New work is waiting for you.'] };
   }
   if (p.kind === 'room') {
     const room = (content.getRoom && content.getRoom(p.id)) || (content.ROOMS || []).find((r) => r.id === p.id) || { name: 'A new room' };
-    return { kicker: 'New room', title: `${room.name} opens`, art: p.id === 'gallery-wing' || p.id === 'long-hall' || p.id === 'rotunda' ? 'gallery' : 'room',
-      lines: [roomLines(room), 'Fresh space for the next idea.'] };
+    return { kicker: 'A new room', title: `The ${room.name.replace(/^The /, '')} opens`, art: p.id === 'gallery-wing' || p.id === 'long-hall' || p.id === 'rotunda' ? 'gallery' : 'room',
+      lines: [roomLines(room), ROOM_SECOND[p.id] || 'Fresh space for your next idea.'] };
   }
   if (p.kind === 'milestone') {
     const n = Number(p.colors) || 10;
     return { kicker: 'Catalog milestone', title: `${n} colors in your catalog`, art: 'catalog',
-      lines: ['+2% to all income, for good.', 'Every 10 colors adds another 2%.'] };
+      lines: ['Your income grows by 2%, for good.', 'Every 10 colors you find adds another 2%.'] };
   }
   if (p.kind === 'renovate') {
     const hgt = Number(p.heritage) || 0;
     return { kicker: 'Renovated', title: 'A fresh coat of paint', art: 'bench',
-      lines: [hgt > 0 ? `+${hgt} Heritage: every coin counts for more.` : 'A clean start with everything you love kept.',
-        'Your catalog, hunters, postcards and Gallery stayed with you.'] };
+      lines: [hgt > 0 ? `+${hgt} Heritage: every coin you earn counts for more.` : 'A clean start, with everything you love kept.',
+        'Your catalog, hunters, postcards and Gallery stay with you.'] };
   }
-  return { kicker: p.kicker || '', title: p.title || 'Something new', art: p.art || 'room', lines: (p.lines || []).slice(0, 2) };
+  const lines = (p.lines || []).filter(Boolean).slice(0, 2);
+  if (!p.title) return null; // nothing to say: never show a bare "Something new"
+  return { kicker: p.kicker || '', title: p.title, art: p.art || 'room', lines };
 }
 
 /** Papercut room silhouette: walls, floor, window, and a few props per kind. */
@@ -144,7 +166,9 @@ const screen = {
   },
 
   show(params = {}) {
-    currentBeat = { ...beatFor(params, (ctx && ctx.content) || {}), hex: params.hex };
+    const beat = beatFor(params, (ctx && ctx.content) || {});
+    if (!beat) { currentBeat = null; if (ctx && ctx.back) setTimeout(() => ctx.back(), 0); return; }
+    currentBeat = { ...beat, hex: params.hex };
     draw();
     if (ctx) {
       try { ctx.audio.chord([0.45, 0.6, 0.75], 0.6); } catch (e) { /* ignore */ }

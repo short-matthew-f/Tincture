@@ -21,6 +21,13 @@
  * including re-navigating to the top screen with new params; it does NOT run
  * again when an overlay above it closes (that calls reveal/render).
  *
+ * Home tabs (UX-AUDIT Top 12 #7): every overlay lives under one tab
+ * (HOME_TABS; settings and the ceremonies follow the screen below them). The
+ * tab bar lights the top screen's home tab, not the base of the stack, so
+ * Orders -> Shelf lights the Workshop. Back pops to wherever she came from;
+ * an overlay opened with nothing below it sits on its home tab, so back lands
+ * there.
+ *
  * `tabDots(state)` -> {tabId: true}: a pure read run on every render; flagged
  * tabs get a small walnut `.dot` (the map: a scouting choice or an unread haul).
  *
@@ -31,8 +38,24 @@
 export const TABS = Object.freeze(['workshop', 'orders', 'puzzles', 'map', 'catalog']);
 
 /** Screens that always hide the tab bar (their own bottom controls need the room). */
-export const FULLSCREEN_IDS = Object.freeze(['matching', 'bench', 'commissions', 'grading', 'purify', 'packing',
+export const FULLSCREEN_IDS = Object.freeze(['matching', 'grading', 'purify', 'packing',
   'paint', 'naming', 'phase-beat']);
+
+/**
+ * Where each overlay lives: the tab lit while it is on top, and the base it
+ * sits on when opened with nothing below. Missing ids (settings, phase-beat,
+ * onboarding) follow the screen below them; anything else unknown is Workshop.
+ */
+export const HOME_TABS = Object.freeze({
+  shelf: 'workshop', bench: 'workshop', ledger: 'workshop', gallery: 'workshop', paint: 'workshop',
+  album: 'workshop', quests: 'workshop', heritage: 'workshop',
+  commissions: 'orders', matching: 'orders',
+  grading: 'puzzles', purify: 'puzzles', packing: 'puzzles',
+  hunter: 'map',
+  naming: 'catalog',
+});
+/** Overlays without a home of their own: they light whatever is below them. */
+const FOLLOW_IDS = new Set(['settings', 'phase-beat', 'onboarding']);
 
 export function createRouter({
   screens, root = null, tabbar = null, onChange = null, overlay = null, afterRender = null,
@@ -42,6 +65,16 @@ export function createRouter({
   const errorsAt = new Map(); // screen id -> last logged error time
 
   const isTab = (id) => tabs.includes(id);
+  /** homeOf(id) -> the tab id it lives under, or null when it follows the screen below. */
+  const homeOf = (id) => (isTab(id) ? id : FOLLOW_IDS.has(id) ? null : (HOME_TABS[id] && tabs.includes(HOME_TABS[id]) ? HOME_TABS[id] : home));
+  /** The tab to light: the top screen's home, walking down past screens that follow. */
+  function litTab() {
+    for (let i = stack.length - 1; i >= 0; i--) {
+      const h = homeOf(stack[i].id);
+      if (h) return h;
+    }
+    return home;
+  }
   const entry = (id) => screens[id];
   const mod = (id) => (entry(id) && entry(id).module) || {};
 
@@ -91,9 +124,9 @@ export function createRouter({
       }
     }
     void ids;
-    // Tab bar: current tab + hidden for fullscreen overlays.
+    // Tab bar: the top screen's home tab + hidden for fullscreen overlays.
     if (tabbar) {
-      const base = stack[0] ? stack[0].id : home;
+      const base = litTab();
       tabbar.querySelectorAll('[data-tab]').forEach((b) => {
         if (b.dataset.tab === base) b.setAttribute('aria-current', 'page');
         else b.removeAttribute('aria-current');
@@ -187,7 +220,7 @@ export function createRouter({
     }
     const at = stack.findIndex((s) => s.id === id);
     if (at >= 0) stack.splice(at, 1); // bring an open screen to the top
-    if (!stack.length) stack.push({ id: home, params: {} });
+    if (!stack.length) stack.push({ id: homeOf(id) || home, params: {} });
     stack.push({ id, params: p });
     changed(id);
     safe(id, 'show', p);
@@ -288,6 +321,8 @@ export function createRouter({
     stack: () => stack.map((s) => ({ id: s.id, params: s.params })),
     isOpen: (id) => stack.some((s) => s.id === id),
     isTab,
+    homeOf,
+    litTab,
     requestRender,
     renderNow,
     visibleIds,

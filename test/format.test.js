@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  formatNumber, formatDuration, formatCountdown, formatRate, isoWeekKey, dayKey, pct,
+  formatNumber, formatDuration, formatCountdown, formatUntil, formatRate, isoWeekKey, dayKey, pct,
 } from '../src/format.js';
 
 test('formatNumber below 1000', () => {
@@ -86,4 +86,19 @@ test('pct', () => {
   assert.equal(pct(0.025), '+2.5%');
   assert.equal(pct(0), '0%');
   assert.equal(pct(2), '+200%');
+});
+
+test('formatUntil: minutes only, rounded up, never seconds', () => {
+  assert.equal(formatUntil(0), 'now');
+  assert.equal(formatUntil(-5), 'now');
+  assert.equal(formatUntil(NaN), 'now');
+  assert.equal(formatUntil(1), 'under a minute');
+  assert.equal(formatUntil(59e3), 'under a minute');
+  assert.equal(formatUntil(60e3), 'about 1 m');
+  assert.equal(formatUntil(8 * 60e3 + 50e3), 'about 9 m');
+  assert.equal(formatUntil(59 * 60e3 + 1), 'about 1 h');
+  assert.equal(formatUntil(2 * 3600e3 + 9 * 60e3 + 1e3), 'about 2 h 10 m');
+  assert.equal(formatUntil(3 * 3600e3), 'about 3 h');
+  assert.equal(formatUntil(3 * 86400e3 + 4 * 3600e3), 'about 3 d 4 h');
+  assert.ok(!/s\b/.test(formatUntil(43 * 60e3 + 5e3)));
 });

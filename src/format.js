@@ -86,6 +86,25 @@ export function formatCountdown(ms) {
   return durationFromSeconds(Math.ceil(ms / 1000));
 }
 
+/**
+ * formatUntil(ms) -> a calm, minute-level "how long until": "now" (<= 0),
+ * "under a minute", "about 9 m", "about 2 h 10 m", "about 3 d 4 h". Rounds UP
+ * to the whole minute and never shows seconds, so nothing on screen ticks
+ * (DESIGN.md: countdown copy never pressures; the map's "opens soon" voice).
+ */
+export function formatUntil(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return 'now';
+  if (ms < 60e3) return 'under a minute';
+  const mins = Math.ceil(ms / 60e3);
+  if (mins < 60) return `about ${mins} m`;
+  const hours = Math.floor(mins / 60);
+  const m = mins % 60;
+  if (hours < 24) return `about ${hours} h${m ? ` ${m} m` : ''}`;
+  const d = Math.floor(hours / 24);
+  const hr = hours % 24;
+  return `about ${d} d${hr ? ` ${hr} h` : ''}`;
+}
+
 /** formatRate(perSec, notation) -> "+38/s" (negative: "-3/s"; tiny: "+<0.1/s"). */
 export function formatRate(perSec, notation = 'short') {
   if (!Number.isFinite(perSec) || perSec === 0) return '+0/s';

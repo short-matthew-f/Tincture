@@ -12,6 +12,8 @@
  * If show() is called while a ceremony is already on screen, the new payload
  * waits in a local queue (belt and braces). Emits on the game bus:
  *   'named'      {colorId, name}            when she keeps or types a name
+ * (no "joins your catalog" toast: the card says it; app.js also drops such
+ * toasts from other screens while this one is open)
  *   'namingDone' {colorId, named:boolean}   when the ceremony closes
  * The dim is this screen's own translucent backdrop (fx.dim's layer sits above
  * #app, so it would dim the card too).
@@ -89,6 +91,19 @@ function suggestionFor(p) {
   return p.name || (contentColor(p.colorId) || {}).name || 'New Color';
 }
 
+/** "Your first color" for the first color she makes beyond the three primaries. */
+function kickerFor(colorId) {
+  try {
+    const d = ctx.game.state.catalog.discovered || {};
+    const made = Object.keys(d).filter((id) => {
+      const c = contentColor(id);
+      return c ? c.tier !== 'primary' : !['madder', 'ochre', 'woad'].includes(id);
+    });
+    if (made.length === 1 && made[0] === colorId) return 'Your first color';
+  } catch (e) { /* the plain kicker is fine */ }
+  return 'A new color';
+}
+
 function nameHtml(text, animate) {
   const chars = [...String(text)];
   const step = Math.min(LETTER_MS, Math.floor(REVEAL_MAX_MS / Math.max(1, chars.length)));
@@ -103,13 +118,13 @@ function draw() {
   let inner;
   if (active.stage === 'reveal') {
     inner = h`
-      <div class="naming-kicker">A new color</div>
+      <div class="naming-kicker">${kickerFor(p.colorId)}</div>
       <div class="naming-swatch" style="background:${hex}"></div>
       ${nameHtml(active.suggestion, true)}
       <div class="naming-skip">Tap to continue</div>`;
   } else if (active.stage === 'prompt') {
     inner = h`
-      <div class="naming-kicker">A new color</div>
+      <div class="naming-kicker">${kickerFor(p.colorId)}</div>
       <div class="naming-swatch" style="background:${hex};animation:none"></div>
       ${nameHtml(active.suggestion, false)}
       <div class="naming-lines">
@@ -126,7 +141,7 @@ function draw() {
       <div class="naming-swatch" style="background:${hex};animation:none;width:96px;height:96px"></div>
       <label class="sr-only" for="naming-input">Color name</label>
       <input id="naming-input" class="naming-input" type="text" maxlength="24" autocomplete="off" autocapitalize="words" spellcheck="false" value="${active.draft}">
-      <div class="naming-note" role="status">${active.note || 'Letters, spaces, hyphens and apostrophes.'}</div>
+      <div class="naming-note" role="status">${active.note || 'Any name you like: letters, spaces, hyphens and apostrophes.'}</div>
       <div class="naming-actions">
         ${button('Save this name', { variant: 'primary', block: true, attrs: { 'data-action': 'save' } })}
         ${button('Use the suggestion', { block: true, attrs: { 'data-action': 'keep' } })}
@@ -178,7 +193,7 @@ function commit(name) {
   if (res && res.ok) {
     active.named = true;
     ctx.game.emit('named', { colorId: p.colorId, name: res.name });
-    try { ctx.toast(`${res.name} joins your catalog`, { hex: p.hex }); } catch (e) { /* ignore */ }
+    // No "joins your catalog" toast: this card already said it, with the swatch.
     finish();
     return true;
   }

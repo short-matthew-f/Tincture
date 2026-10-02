@@ -289,6 +289,7 @@ try {
   await page.click(`${sec('naming')} [data-action="save"]`);
   await wait(900);
   must(await S(() => window.tincture.game.state.catalog.discovered.orange.name === 'Harbor Sunset'), 'she named her orange "Harbor Sunset"');
+  check(await page.locator('#toasts .toast', { hasText: 'joins your catalog' }).count() === 0, 'no "joins your catalog" toast repeats the naming card');
   check(await S(() => window.tincture.game.state.orders.filledCount >= 1), 'the first order counts as filled');
   await step('named');
   await page.click(`${sec('matching')} [data-action="back-orders"]`);
@@ -304,6 +305,15 @@ try {
   await waitTop('grading');
   must(await S(() => !!window.tincture.game.state.activePuzzles.grading
     && window.tincture.game.state.activePuzzles.grading.tier === 'relaxed'), 'a Relaxed grading board is on the table');
+  check(await S(() => {
+    const b = window.tincture.game.state.activePuzzles.grading;
+    return !b.event && (!b.shape || b.shape === 'rect');
+  }), 'the first board is a plain rectangle in her own colors (no event palette or frame)');
+  check(await S(() => {
+    const head = document.querySelector('#app > section[data-screen="grading"] .screen-head');
+    const hb = head ? head.getBoundingClientRect().bottom : 0;
+    return [...document.querySelectorAll('#toasts .toast')].every((t) => t.getBoundingClientRect().top >= hb - 1);
+  }), 'no toast covers the grading head');
   await step('grading-board');
   for (let guard = 0; guard < 80; guard++) {
     const mv = await S(() => {
@@ -407,6 +417,9 @@ try {
   // She fills one more: the first match order, mixed from its recipe.
   const next = await S(() => window.tincture.game.state.orders.open.find((o) => o.kind === 'match' && Array.isArray(o.recipe)));
   if (next) {
+    // The orders beat ("Harbor Town has noticed you") may be up: she reads it first.
+    const okOrders = page.locator('#coach-layer [data-coach-action="ok"]');
+    if (await okOrders.count()) { await step('orders-beat'); await okOrders.first().click(); await wait(250); }
     const coinsBeforeOrder = await S(() => window.tincture.game.state.coins);
     await page.click(`${sec('orders')} [data-action="open-match"][data-order="${next.id}"]`);
     await waitTop('matching');
@@ -432,14 +445,28 @@ try {
   await step('mill-room');
 
   // ---------------------------------------------------------------- 8:00-9:00 map window, gallery door, Close up shop
-  for (let i = 0; i < 6; i++) {
+  // Each beat waits half a minute after the one before, then shows as a mark on
+  // its target (the map window and the Gallery door sit at the top of the scene).
+  const seenMarks = new Set();
+  for (let i = 0; i < 8; i++) {
     const o = await onboarding();
     if (o.done || o.step >= 7) break;
     await advance(31e3);
-    await wait(400);
+    await wait(250);
+    const st = (await onboarding()).step;
+    if (st >= 6) await S(() => { const b = document.querySelector('#app > section[data-screen="workshop"] .screen-body'); if (b) b.scrollTop = 0; });
+    await wait(300);
+    if (await page.locator('#coach-layer .coach-tag').count()) {
+      const pointing = (await page.locator('#coach-layer .coach-ring').count()) > 0;
+      seenMarks.add(`${st}:${pointing ? 'mark' : 'card'}`);
+      const beat = { 5: 'orders-beat', 5.5: 'mill-room-beat', 6: 'map-window', 6.5: 'gallery-door' }[st];
+      if (beat && !seenMarks.has(`${st}:shot`)) { seenMarks.add(`${st}:shot`); await step(`coach-${beat}`); }
+    }
     const ok = page.locator('#coach-layer [data-coach-action="ok"]');
     if (await ok.count()) { await ok.first().click(); await wait(300); }
   }
+  check(seenMarks.has('6:mark'), `the map window beat points at the window (${[...seenMarks].join(', ')})`);
+  check(seenMarks.has('6.5:mark'), 'the Gallery door beat points at the door');
   const ob7 = await onboarding();
   must(ob7.step === 7 && !ob7.done, 'onboarding reached "Close up shop"');
   await advance(31e3);
@@ -542,7 +569,8 @@ try {
   // ---------------------------------------------------------------- every screen opens and closes
   for (const id of ALL_SCREENS) {
     if (id === 'onboarding') continue; // the welcome card is a ceremony checked at boot
-    const params = id === 'naming' ? { colorId: 'orange', suggestedName: 'Harbor Sunset' } : {};
+    const params = id === 'naming' ? { colorId: 'orange', suggestedName: 'Harbor Sunset' }
+      : id === 'phase-beat' ? { kind: 'room', id: 'mill-room' } : {};
     await S(([x, p]) => window.tincture.ctx.navigate(x, p), [id, params]);
     await wait(350);
     const visible = await S((x) => {

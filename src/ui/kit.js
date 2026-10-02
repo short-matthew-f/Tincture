@@ -2,7 +2,8 @@
  * kit.js: tiny HTML helpers for Tincture's DOM + inline-SVG UI.
  *
  * Owns: the `h` escaping template tag, `raw`, `el`, the small component
- * builders (`card`, `button`, `tag`, `swatch`, `backButton`, `progressBar`),
+ * builders (`card`, `button`, `tag`, `lockTag`, `fadeStrip`, `swatch`,
+ * `backButton`, `progressBar`),
  * and the shared SVG art: `containerSvg` (the five Merge Shelf containers from
  * docs/prototypes/Style.dc.html), `vatSvg` (display vats from Main.dc.html) and
  * `iconSvg`. Implements ARCHITECTURE.md "UI > kit.js" and DESIGN.md "Art
@@ -133,6 +134,25 @@ export function tag(text, { icon = 'lock', cls = '' } = {}) {
   return h`<span class="tag ${cls}">${icon ? iconSvg(icon, { size: 12 }) : ''}${text}</span>`;
 }
 
+/**
+ * lockTag(text, {cls}) -> the one lock-tag shape for locked things that stay
+ * visible ("4 more colors, and the window opens"). Same as tag(text, {icon:'lock'}).
+ */
+export function lockTag(text, { cls = '' } = {}) {
+  return tag(text, { icon: 'lock', cls });
+}
+
+/**
+ * fadeStrip(innerHtml, {cls, label}) -> a horizontally scrolling `.strip` row
+ * (chips, page tabs, an event track). Children scroll-snap; the right edge
+ * fades so a clipped item reads as "more this way", and a trailing spacer lets
+ * the last item scroll clear of the fade (style.css `.strip`).
+ */
+export function fadeStrip(innerHtml, { cls = '', label = '' } = {}) {
+  const a = label ? ` role="group" aria-label="${escapeHtml(label)}"` : '';
+  return h`<div class="strip ${cls}"${raw(a)}>${innerHtml}</div>`;
+}
+
 /** swatch(hex, size=40) -> rounded color chip. `size` in px. */
 export function swatch(hex, size = 40, { cls = '', label = '' } = {}) {
   const a = label ? ` role="img" aria-label="${escapeHtml(label)}"` : ' aria-hidden="true"';
@@ -175,6 +195,14 @@ const STROKE_ICONS = {
 const FILLED_ICONS = {
   coin: ['0 0 22 22', '<circle cx="11" cy="11" r="10" fill="#C99A2E"/><circle cx="11" cy="11" r="6.5" fill="none" stroke="#8C6512" stroke-width="1.5"/>'],
   star: ['0 0 24 24', '<path d="M12 2.5 l2.7 5.8 l6.3 0.8 l-4.6 4.3 l1.2 6.3 l-5.6 -3.1 l-5.6 3.1 l1.2 -6.3 l-4.6 -4.3 l6.3 -0.8 z" fill="#E2B04A" stroke="#8C6512" stroke-width="1.2" stroke-linejoin="round"/>'],
+  // Seals (quests, events): a wax seal, a wobbly disc with a pressed ring and a mark.
+  seal: ['0 0 24 24', '<path d="M12 2.2 C14 2.2 14.8 3.4 16.6 3.9 C18.6 4.4 19.9 5.4 20.4 7.4 C20.9 9.2 21.8 10.1 21.8 12 C21.8 13.9 20.9 14.8 20.4 16.6 C19.9 18.6 18.6 19.6 16.6 20.1 C14.8 20.6 14 21.8 12 21.8 C10 21.8 9.2 20.6 7.4 20.1 C5.4 19.6 4.1 18.6 3.6 16.6 C3.1 14.8 2.2 13.9 2.2 12 C2.2 10.1 3.1 9.2 3.6 7.4 C4.1 5.4 5.4 4.4 7.4 3.9 C9.2 3.4 10 2.2 12 2.2 Z" fill="#9E4436" stroke="#5E2A22" stroke-width="1.1" stroke-linejoin="round"/><circle cx="12" cy="12" r="6" fill="none" stroke="#6E2E25" stroke-width="1.4"/><path d="M12 8.6 L13.1 11 L15.4 12 L13.1 13 L12 15.4 L10.9 13 L8.6 12 L10.9 11 Z" fill="#C46A5A"/>'],
+  // Heritage (Renovate): a small house whose arch carries a gold keystone.
+  heritage: ['0 0 24 24', '<path d="M3 11.2 L12 3.6 L21 11.2 V20.4 H3 Z" fill="#A87449" stroke="#5E3E28" stroke-width="1.3" stroke-linejoin="round"/><path d="M8.6 20.4 V15.4 A3.4 3.4 0 0 1 15.4 15.4 V20.4 Z" fill="#F7F4EC" stroke="#5E3E28" stroke-width="1.1"/><path d="M10.9 10.4 H13.1 L12.7 13 H11.3 Z" fill="#E2B04A" stroke="#8C6512" stroke-width="0.8" stroke-linejoin="round"/>'],
+  // Essence (Casks): a paper star set in a gold disc, so it never reads as the plain star.
+  essence: ['0 0 24 24', '<circle cx="12" cy="12" r="10" fill="#E2B04A" stroke="#8C6512" stroke-width="1.2"/><path d="M12 5.6 l1.8 3.8 l4.1 0.5 l-3 2.8 l0.8 4.1 l-3.7 -2 l-3.7 2 l0.8 -4.1 l-3 -2.8 l4.1 -0.5 z" fill="#FFF6DF" stroke="#8C6512" stroke-width="0.9" stroke-linejoin="round"/>'],
+  // Reputation (orders): a ribbon rosette with two tails.
+  reputation: ['0 0 24 24', '<path d="M8.6 13.4 L5.8 21.6 L8.9 20.4 L10.6 22.6 L12.4 15.6 Z M15.4 13.4 L18.2 21.6 L15.1 20.4 L13.4 22.6 L11.6 15.6 Z" fill="#3E6A9E" stroke="#26476E" stroke-width="0.9" stroke-linejoin="round"/><path d="M12 1.6 L13.7 3.1 L15.9 2.6 L16.6 4.8 L18.8 5.5 L18.3 7.7 L19.8 9.4 L18.3 11.1 L18.8 13.3 L16.6 14 L15.9 16.2 L13.7 15.7 L12 17.2 L10.3 15.7 L8.1 16.2 L7.4 14 L5.2 13.3 L5.7 11.1 L4.2 9.4 L5.7 7.7 L5.2 5.5 L7.4 4.8 L8.1 2.6 L10.3 3.1 Z" fill="#3E6A9E" stroke="#26476E" stroke-width="0.9" stroke-linejoin="round"/><circle cx="12" cy="9.4" r="4.2" fill="#E2B04A" stroke="#8C6512" stroke-width="0.9"/>'],
 };
 
 /** Names accepted by iconSvg. */
