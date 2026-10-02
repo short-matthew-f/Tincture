@@ -12,20 +12,29 @@
  *
  * Exports `postcardArt(card, {width})` for hunter.js and the Backpack.
  * Opens with params `{regionId}` or `{cardId}` (selects that set and highlights the card).
- * data-actions: tab, flip.
+ * Cards still to find are quiet, unlabeled hue silhouettes; an empty album points to the Map.
+ * data-actions: tab, flip, go-map.
  */
 
-import { h, raw, backButton, progressBar, safeHex, lighten, darken } from './kit.js';
+import { h, raw, backButton, button, progressBar, fadeStrip, lockTag, iconSvg, safeHex, lighten, darken } from './kit.js';
+import { FAMILY_HEX } from './map.js';
 
 const INK = '#2A2622';
 const GOLD = '#C99A2E';
 const GOLD_DEEP = '#8C6512';
 
 const CSS = `
-.al-tabs { display:flex; gap:8px; overflow-x:auto; padding:2px 2px 8px; margin:0 -2px; scrollbar-width:none; flex:0 0 auto; }
-.al-tabs::-webkit-scrollbar { display:none; }
-.al-tabs .chip { flex:0 0 auto; }
-.al-tabs .chip .sub { font-size:11px; }
+section[data-screen="album"] .screen-head .title { font-family:var(--font-ui); font-weight:600; }
+.al-tabs { flex:0 0 auto; }
+.al-tabs .chip { flex:0 0 auto; min-height:44px; }
+.al-tabs .chip .sub { font-size:12px; }
+.al-inline { display:inline-block; vertical-align:-3px; }
+.al-h { font-family:var(--font-ui); font-weight:600; font-size:16px; line-height:1.25; }
+.al-empty { align-items:center; text-align:center; gap:10px; }
+.al-empty .tag { white-space:normal; }
+.al-grid.is-quiet { grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; }
+.al-grid.is-quiet .al-card { height:78px; }
+.al-grid.is-quiet .al-sil { border-radius:10px; }
 .al-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
 .al-card { position:relative; perspective:900px; height:182px; border-radius:12px; outline-offset:3px; }
 .al-inner { position:relative; width:100%; height:100%; transform-style:preserve-3d; transition:transform 600ms var(--ease-in-out); }
@@ -48,12 +57,9 @@ const CSS = `
   font-size:12px; font-weight:700; text-align:center; box-shadow:0 2px 0 rgba(0,0,0,.35); }
 .al-new { position:absolute; left:6px; top:6px; z-index:2; padding:1px 8px; border-radius:4px 8px 8px 4px; background:var(--glow); color:var(--glow-ink);
   box-shadow:0 0 0 1.5px var(--glow-ring), 0 2px 0 var(--shadow); font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; }
-.al-lost { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; height:100%; border-radius:12px;
-  background:rgba(247,244,236,.55); box-shadow:inset 0 0 0 2px rgba(42,38,34,.18); border:0; }
-.al-lost .q { font-family:var(--font-display); font-size:44px; line-height:1; color:rgba(42,38,34,.28); }
-.al-lost .hint { opacity:.8; }
+.al-lost { display:block; height:100%; border-radius:12px; background:rgba(247,244,236,.55); box-shadow:inset 0 0 0 2px rgba(42,38,34,.14); border:0; overflow:hidden; }
+.al-sil { display:block; width:100%; height:100%; }
 .al-card.is-rare .al-lost { box-shadow:inset 0 0 0 2.5px var(--gold); background:rgba(251,241,212,.5); }
-.al-card.is-rare .al-lost .q { color:rgba(140,101,18,.5); }
 .al-card.is-lost { perspective:none; }
 .al-wall { display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:10px; background:#FBF1D4; box-shadow:inset 0 0 0 1.5px var(--gold); }
 .al-hl .al-face { animation:al-flash 1.4s ease-out 1; }
@@ -207,13 +213,36 @@ function setList(state) {
   return out;
 }
 
+/** "in the Meadow", "on the Coast": where a set's cards are found. */
+const ON_THE = new Set(['coast', 'glacier', 'reef', 'hilltop', 'glacier-pass']);
+const AT_THE = new Set(['lantern-bridge', 'night-market']);
+function whereLine(region) {
+  const prep = ON_THE.has(region.id) ? 'on' : AT_THE.has(region.id) ? 'at' : 'in';
+  return `${prep} the ${region.name}`;
+}
+
+/** A card still to find: a soft, unlabeled silhouette in the card's own hues (a postage-stamp outline, no text). */
+function silhouette(card) {
+  const sc = card.scene || {};
+  const sky = lighten(safeHex(sc.sky, '#DCE8EE'), 0.45);
+  const land = lighten(safeHex(sc.land, '#8FAA6A'), 0.45);
+  const v = (Math.max(1, card.n || 1) - 1) % 4;
+  const rare = !!card.rare;
+  return raw(`<svg class="al-sil" viewBox="0 0 160 130" preserveAspectRatio="xMidYMid slice" role="img" aria-label="${rare ? 'A gold-stamped card to find' : 'A card to find'}">
+<rect width="160" height="130" fill="${sky}" opacity=".75"/>
+<path d="${FAR[v]}" fill="${darken(land, 0.06)}" opacity=".7"/>
+<path d="${NEAR[(v + 1) % 4]}" fill="${land}" opacity=".85"/>
+<rect x="118" y="10" width="32" height="38" rx="2" fill="#F7F4EC" fill-opacity=".7" stroke="${rare ? GOLD : INK}" stroke-opacity="${rare ? '.8' : '.25'}" stroke-width="${rare ? 2.4 : 1.6}" stroke-dasharray="${rare ? '0' : '3 2.5'}"/>
+</svg>`);
+}
+
 function cardHtml(state, card, sessionStart) {
   const rec = state.album && state.album.cards[card.id];
   const count = rec ? rec.count : 0;
   const rare = !!card.rare;
   const hl = highlightId === card.id ? ' al-hl' : '';
   if (count <= 0) {
-    return h`<div class="al-card is-lost ${rare ? 'is-rare' : ''}"><div class="al-lost" role="img" aria-label="${rare ? 'A gold-stamped card, not found yet' : 'A card not found yet'}"><span class="q">?</span><span class="hint">${rare ? 'Gold-stamped' : 'Not found yet'}</span></div></div>`;
+    return h`<div class="al-card is-lost ${rare ? 'is-rare' : ''}"><div class="al-lost">${silhouette(card)}</div></div>`;
   }
   const isNew = rec.at >= sessionStart && !seenNew.has(card.id);
   const rm = ctx.fx.isReducedMotion();
@@ -229,6 +258,21 @@ function cardHtml(state, card, sessionStart) {
     </div></div>`;
 }
 
+function totalOwned(state) {
+  return Object.values((state && state.album && state.album.cards) || {}).filter((x) => x.count > 0).length;
+}
+
+function emptyAlbumHtml(state) {
+  const U = ctx.sim.HUNTERS_UNLOCK_COLORS;
+  const on = ctx.sim.hunters.unlocked(state);
+  return h`<div class="card al-empty" data-empty>
+    <div class="al-h">Hunters bring postcards home</div>
+    <div class="hint">${on ? 'Send one from the Map, and the first card lands here.' : 'Your first hunters arrive soon, and every trip can bring a card home.'}</div>
+    ${on ? button('Go to the Map', { variant: 'primary', attrs: { 'data-action': 'go-map' } })
+    : lockTag(`Hunters arrive at ${U} colors: ${Math.max(0, U - ctx.sim.discoveredCount(state))} more`)}
+  </div>`;
+}
+
 function build(state) {
   const C = ctx.content;
   const sets = setList(state);
@@ -242,23 +286,28 @@ function build(state) {
   const bonus = Math.round(ctx.sim.SET_HAUL_BONUS * 100);
   const noHunters = !ctx.sim.hunters.unlocked(state);
   const extras = cards.reduce((n, c) => n + Math.max(0, ownedCount(state, c.id) - 1), 0);
+  const empty = totalOwned(state) === 0;
+  const quiet = owned === 0;
 
-  return h`<div class="al-tabs" role="tablist" aria-label="Postcard sets">${sets.map((s) => {
+  return h`${empty ? emptyAlbumHtml(state) : ''}
+    ${fadeStrip(sets.map((s) => {
       const cs = C.cardsForRegion(s.id);
       const o = cs.filter((c) => ownedCount(state, c.id) > 0).length;
-      return h`<button type="button" class="chip" role="tab" data-action="tab" data-set-id="${s.id}" aria-pressed="${String(s.id === tabId)}" aria-selected="${String(s.id === tabId)}" data-tap>${s.region.name}${s.event ? h` <span class="sub">event</span>` : ''} <span class="sub">${o}/${cs.length}</span></button>`;
-    })}</div>
+      return h`<button type="button" class="chip" data-action="tab" data-set-id="${s.id}" aria-pressed="${String(s.id === tabId)}" data-tap>${s.region.name}${s.event ? h` <span class="sub">event</span>` : ''}${o > 0 ? h` <span class="sub">${o}/${cs.length}</span>` : ''}</button>`;
+    }), { cls: 'al-tabs', label: 'Postcard sets' })}
     <div class="card">
       <div class="row between"><div><div class="h2">${cur.region.name}</div>
-        <div class="hint">${cur.event ? `${cur.event.name} set · ` : ''}${owned} of ${cards.length} cards</div></div>
+        ${cur.event ? h`<div class="hint">${cur.event.name} set</div>` : ''}</div>
         ${done ? h`<span class="chip is-on">Set complete</span>` : ''}</div>
-      ${progressBar(cards.length ? owned / cards.length : 0, { label: `${cur.region.name} set` })}
+      ${quiet ? '' : progressBar(cards.length ? owned / cards.length : 0, { label: `${cur.region.name} set` })}
       ${done
         ? h`<div class="al-wall">${wallBadge()}<div><div class="semi small">On your workshop wall</div><div class="hint">+${bonus}% haul in the ${cur.region.name}, for good.</div></div></div>`
-        : h`<div class="hint">${plural(left, 'more card')} to finish this set: +${bonus}% haul in the ${cur.region.name} and a spot on the workshop wall.${noHunters && owned === 0 ? ' Postcards arrive with your hunters.' : ''}</div>`}
+        : quiet
+          ? h`<div class="hint">${plural(left, 'card')} to find ${whereLine(cur.region)}.${noHunters ? ' Postcards arrive with your hunters.' : ''}</div>`
+          : h`<div class="hint">${plural(left, 'more card')} to finish this set: +${bonus}% haul in the ${cur.region.name} and a spot on the workshop wall.</div>`}
     </div>
-    <div class="al-grid">${cards.map((c) => cardHtml(state, c, sessionStart))}</div>
-    <div class="hint center">${extras > 0 ? `Extra copies turn into ${ctx.sim.DUPLICATE_SEALS} Seals each, so nothing is wasted.` : 'Longer trips find more cards, and gold-stamped ones come from long trips.'}</div>`;
+    <div class="al-grid ${quiet ? 'is-quiet' : ''}">${cards.map((c) => cardHtml(state, c, sessionStart))}</div>
+    <div class="hint center">${extras > 0 ? h`Extra copies turn into ${ctx.sim.DUPLICATE_SEALS} ${iconSvg('seal', { size: 14, cls: 'al-inline' })} Seals each, so nothing is wasted.` : 'Longer trips find more cards, and gold-stamped ones come from long trips.'}</div>`;
 }
 
 function paint(state, force = false) {
@@ -298,6 +347,7 @@ function onClick(e) {
   const a = el.getAttribute('data-action');
   if (a === 'tab') { tabId = el.getAttribute('data-set-id'); paint(ctx.game.state, true); bodyEl.scrollTop = 0; }
   else if (a === 'flip') flip(el);
+  else if (a === 'go-map') ctx.navigate('map');
 }
 
 const screen = {
@@ -307,7 +357,7 @@ const screen = {
     root = rootEl;
     ctx = context;
     injectStyle();
-    root.innerHTML = String(h`<div class="screen-head">${backButton('Back')}
+    root.innerHTML = String(h`<div class="screen-head">${backButton('Back to the map')}
       <div class="titles"><div class="title">Postcard album</div><div class="subtitle"></div></div><span class="spacer"></span></div>
       <div class="screen-body" data-album-body></div>`);
     bodyEl = root.querySelector('[data-album-body]');
@@ -335,8 +385,8 @@ const screen = {
     paint(state, true);
     const sub = root.querySelector('.screen-head .subtitle');
     if (sub) {
-      const total = Object.values(state.album ? state.album.cards : {}).filter((x) => x.count > 0).length;
-      sub.textContent = `${plural(total, 'card')} collected`;
+      const total = totalOwned(state);
+      sub.textContent = total > 0 ? `${plural(total, 'card')} collected` : 'Your collection starts here';
     }
     if (highlightId) {
       requestAnimationFrame(() => {
@@ -353,8 +403,8 @@ const screen = {
     paint(state);
     const sub = root.querySelector('.screen-head .subtitle');
     if (sub) {
-      const total = Object.values((state || ctx.game.state).album.cards).filter((x) => x.count > 0).length;
-      sub.textContent = `${plural(total, 'card')} collected`;
+      const total = totalOwned(state || ctx.game.state);
+      sub.textContent = total > 0 ? `${plural(total, 'card')} collected` : 'Your collection starts here';
     }
   },
 };

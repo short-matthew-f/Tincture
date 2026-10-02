@@ -15,13 +15,13 @@
  * Contract notes (docs/UI-CONTRACT.md): one delegated click listener on the
  * section, `data-action` attributes, every tappable carries `data-tap`.
  * data-actions on this screen: open-hunter, region, hire, answer-choice,
- * dismiss-backpack, open-card, open-album, open-quests.
+ * dismiss-backpack, send-again, open-card, open-album, open-quests.
  * The Send sheet lives in its own host appended to <body> (data-actions:
  * close-sheet, pick-region, pick-hunter, pick-duration, send-go), so it works
  * from any screen. `data-coach="map"` sits on the map window.
  */
 
-import { h, raw, button, tag, swatch, iconSvg, safeHex, lighten, darken } from './kit.js';
+import { h, raw, button, tag, lockTag, swatch, iconSvg, safeHex, lighten, darken } from './kit.js';
 
 // ---------------------------------------------------------------------------
 // Shared constants
@@ -63,7 +63,7 @@ const CSS = `
 .mp-art { position:absolute; inset:0; width:100%; height:100%; }
 .mp-banner { position:absolute; left:50%; bottom:-14px; transform:translateX(-50%); z-index:4; width:max-content; max-width:92%;
   padding:8px 16px 9px; border-radius:6px 12px 12px 6px; background:var(--paper); box-shadow:var(--cut), inset 0 0 0 1.5px rgba(42,38,34,.15);
-  font-family:var(--font-display); font-size:16px; text-align:center; line-height:1.25; }
+  font-family:var(--font-ui); font-weight:600; font-size:16px; text-align:center; line-height:1.25; }
 .mp-banner::before { content:''; position:absolute; left:8px; top:50%; width:6px; height:6px; margin-top:-3px; border-radius:50%; background:var(--plaster); box-shadow:inset 0 0 0 1px var(--plaster-line); }
 .mp-win.is-sleepy { margin-bottom:18px; }
 .mp-banner small { display:block; margin-top:2px; font-family:var(--font-ui); font-size:12px; color:var(--ink-soft); }
@@ -79,6 +79,17 @@ const CSS = `
 .mp-pin .tag { font-size:10px; min-height:18px; padding:2px 7px 2px 14px; }
 .mp-pin .tag::before { left:5px; width:4px; height:4px; margin-top:-2px; }
 .mp-pin .tag svg { width:10px; height:10px; }
+section[data-screen="map"] .screen-head .title { font-family:var(--font-ui); font-weight:600; }
+.mp-h { font-family:var(--font-ui); font-weight:600; font-size:18px; line-height:1.2; }
+.mp-hn { font-family:var(--font-display); font-weight:400; font-size:17px; line-height:1.25; }
+.mp-headslot { flex:0 0 auto; display:flex; align-items:center; }
+.mp-legend { gap:8px; }
+.mp-legend-row { display:flex; align-items:center; justify-content:space-between; gap:10px; min-height:34px; }
+.mp-legend-row .mp-rn { font-family:var(--font-display); font-size:16px; line-height:1.2; display:flex; align-items:center; gap:8px; min-width:0; }
+.mp-legend-row .tag { flex:0 1 auto; white-space:normal; }
+.mp-hire-foot { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.mp-hire .btn { flex:0 0 auto; }
+.mp-back-actions { display:flex; justify-content:flex-end; }
 .mp-badge { position:absolute; right:-5px; top:-5px; min-width:18px; height:18px; padding:0 4px; border-radius:9px;
   background:var(--ink); color:var(--paper); font-size:11px; font-weight:700; line-height:18px; text-align:center; }
 .mp-section { display:flex; align-items:baseline; justify-content:space-between; gap:8px; margin-top:6px; }
@@ -90,8 +101,6 @@ const CSS = `
 .mp-status { font-size:13px; color:var(--ink-soft); }
 .mp-status.is-radio { color:var(--glow-ink); font-weight:700; }
 .mp-hire { flex-direction:row; align-items:center; gap:12px; }
-.mp-hire.is-greyed { opacity:.62; }
-.mp-hire.is-greyed .btn { opacity:.6; }
 .mp-cost { display:inline-flex; align-items:center; gap:5px; font-weight:700; }
 .mp-backpack { background: var(--paper); }
 .mp-backpack.is-drop { animation: mp-drop 500ms var(--ease-out) both; }
@@ -102,24 +111,25 @@ const CSS = `
   background:var(--plaster); font-size:11.5px; font-weight:600; }
 .mp-find.is-new { background:var(--glow); box-shadow:inset 0 0 0 1.5px var(--glow-ring); }
 .mp-find.is-gold { box-shadow:inset 0 0 0 1.5px var(--gold); background:#FBF1D4; }
-button.mp-find { min-height:32px; }
-.mp-backpack .h2 { font-size:18px; }
+button.mp-find { min-height:44px; padding:4px 12px 4px 8px; font-size:12px; }
+.mp-find .icon { flex:0 0 auto; }
 .mp-sheet-host { position:absolute; inset:0; z-index:55; display:flex; align-items:flex-end; justify-content:center;
   background:rgba(42,38,34,.45); animation: fade-in 160ms ease-out both; }
 .mp-sheet { min-height:0; }
 .mp-sheet .mp-x { position:absolute; right:12px; top:10px; }
-.mp-sheet-title { font-family:var(--font-display); font-size:22px; line-height:1.15; }
+.mp-sheet .chip { min-height:44px; }
+.mp-sheet-title { font-family:var(--font-ui); font-weight:600; font-size:16px; line-height:1.15; color:var(--ink-soft); }
+.mp-sheet-title .mp-rname { display:block; font-family:var(--font-display); font-weight:400; font-size:24px; color:var(--ink); }
 .mp-label { font-size:12px; font-weight:700; letter-spacing:.3px; text-transform:uppercase; color:var(--ink-soft); }
 .mp-dur { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
 .mp-dur > button { display:flex; flex-direction:column; align-items:center; gap:2px; padding:10px 4px; min-height:92px;
   border-radius:12px; background:var(--paper); box-shadow:0 2px 0 var(--shadow-soft), inset 0 0 0 1.5px rgba(42,38,34,.15);
   font-size:12px; color:var(--ink-soft); }
-.mp-dur > button b { font-family:var(--font-display); font-weight:400; font-size:17px; color:var(--ink); }
+.mp-dur > button b { font-family:var(--font-ui); font-weight:700; font-size:17px; color:var(--ink); }
 .mp-dur > button[aria-pressed="true"] { background:var(--ink); color:var(--paper); box-shadow:0 2px 0 #000; }
 .mp-dur > button[aria-pressed="true"] b { color:var(--paper); }
-.mp-sil { display:inline-grid; place-items:center; width:34px; height:34px; border-radius:10px; flex:0 0 auto;
-  background:rgba(42,38,34,.1); box-shadow:inset 0 0 0 1.5px rgba(42,38,34,.28); color:var(--ink-soft);
-  font-family:var(--font-display); font-size:16px; }
+.mp-sil { display:inline-block; width:34px; height:34px; border-radius:10px; flex:0 0 auto;
+  background:rgba(42,38,34,.1); box-shadow:inset 0 0 0 1.5px rgba(42,38,34,.28); }
 .mp-pal { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
 .mp-pal .mp-p { display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:600; }
 .mp-hl { animation: mp-flash 1.4s ease-out 1; }
@@ -415,18 +425,41 @@ function regionOpen(ctx, state, region) {
   return !!(state.hunters && state.hunters.regionsUnlocked || []).includes(region.id);
 }
 
-/** What a locked region needs, as a positive paper-tag line (or null when open). */
-function regionGoal(ctx, state, region) {
+/**
+ * What a locked region needs, in the "N more" voice, for a paper tag (or null when open):
+ * {text, more, later}. `more` is the number of colors still to find (for ordering).
+ */
+export function regionLock(ctx, state, region) {
   if (regionOpen(ctx, state, region)) return null;
-  if ((region.era ?? 1) > (state.era ?? 1)) return 'Coming in a later update';
+  if ((region.era ?? 1) > (state.era ?? 1)) return { text: 'Coming in a later update', more: Infinity, later: true };
+  const count = colorsCount(ctx, state);
+  const U = ctx.sim.HUNTERS_UNLOCK_COLORS;
   const u = region.unlock || {};
-  if (u.type === 'colors') {
-    const need = fin(u.n) - colorsCount(ctx, state);
-    if (need > 0) return need <= 5 ? `${plural(need, 'more color')}` : `${u.n} colors to open`;
+  const own = u.type === 'colors' ? fin(u.n) : 0;
+  const n = Math.max(own, huntersOn(ctx, state) ? 0 : U);
+  if (n > count) return { text: `Opens at ${n} colors: ${n - count} more`, more: n - count, later: false };
+  if (u.type === 'event' || region.kind === 'event') return { text: 'Opens with its weekly event', more: 0, later: false };
+  return { text: 'Opens soon', more: 0, later: false };
+}
+
+/**
+ * hireInfo(ctx, state, def) -> {kind, can, text, icon}: the paper-tag line for a hunter who has
+ * not joined yet ("Joins at 25 colors: 9 more", "Hire for 400 coins"), and whether Hire is live.
+ * Shared with hunter.js.
+ */
+export function hireInfo(ctx, state, def) {
+  const chk = ctx.sim.hunters.canHire(state, { hunterId: def.id });
+  const cost = def.hireCost ?? 0;
+  if (chk.ok) return { kind: 'ready', can: true, cost, text: cost > 0 ? `Hire for ${ctx.format.num(cost)} coins` : 'Joins free', icon: cost > 0 ? 'coin' : null };
+  if (chk.reason === 'hired') return { kind: 'hired', can: false, cost, text: '', icon: null };
+  if (!huntersOn(ctx, state)) {
+    const U = ctx.sim.HUNTERS_UNLOCK_COLORS;
+    return { kind: 'locked', can: false, cost, text: `Arrives at ${U} colors: ${Math.max(0, U - colorsCount(ctx, state))} more`, icon: 'lock' };
   }
-  if (!huntersOn(ctx, state)) return `Hunters arrive at ${ctx.sim.HUNTERS_UNLOCK_COLORS} colors`;
-  if (u.type === 'event' || region.kind === 'event') return 'Opens with its weekly event';
-  return 'Opens soon';
+  if (chk.reason === 'full') return { kind: 'full', can: false, cost, text: 'Your team is full', icon: null };
+  if (chk.reason === 'colors') return { kind: 'colors', can: false, cost, text: `Joins at ${def.hireColors} colors: ${chk.need} more`, icon: 'lock' };
+  if (chk.reason === 'coins') return { kind: 'coins', can: false, cost, text: `Hire for ${ctx.format.num(cost)} coins: ${ctx.format.num(Math.max(1, Math.ceil(cost - fin(state.coins))))} more`, icon: 'coin' };
+  return { kind: 'locked', can: false, cost, text: 'Joins soon', icon: 'lock' };
 }
 
 function eventRegion(ctx, state) {
@@ -459,6 +492,18 @@ function postcardOdds(ctx, hunter, regionId, duration) {
 // Trip status (shared with hunter.js)
 // ---------------------------------------------------------------------------
 
+/** Time left at minute granularity, never seconds: "25 m", "2 h 10 m", "1 d 3 h". */
+export function roughTime(ms) {
+  const mins = Math.max(1, Math.ceil(fin(ms) / 60e3));
+  if (mins < 60) return `${mins} m`;
+  const hrs = Math.floor(mins / 60);
+  const m = mins % 60;
+  if (hrs < 24) return m ? `${hrs} h ${m} m` : `${hrs} h`;
+  const d = Math.floor(hrs / 24);
+  const hh = hrs % 24;
+  return hh ? `${d} d ${hh} h` : `${d} d`;
+}
+
 /** HTML for a status line from tripsSummary(). Countdown spans carry data-until for the 1 s updater. */
 export function tripStatusHtml(ctx, item, { withRegion = true } = {}) {
   if (!item || item.state !== 'out') return h`<span class="mp-status">Home and ready</span>`;
@@ -468,8 +513,8 @@ export function tripStatusHtml(ctx, item, { withRegion = true } = {}) {
     return h`<span class="mp-status is-radio pulse">Radioed in: choice waiting</span>${where}`;
   }
   const ms = item.remainingMs;
-  const txt = ms > 0 ? `Back in ${ctx.format.countdown(ms)}` : 'Just arriving';
-  return h`<span class="mp-status"><span data-until="${item.returnsAt}" data-prefix="Back in ">${txt}</span></span>${where}`;
+  const txt = ms > 0 ? `Back in about ${roughTime(ms)}` : 'Just arriving';
+  return h`<span class="mp-status"><span data-until="${item.returnsAt}" data-prefix="Back in about ">${txt}</span></span>${where}`;
 }
 
 /** Update every countdown span / trip progress bar under `root` from the live clock. */
@@ -479,7 +524,7 @@ export function tickCountdowns(root, ctx) {
   root.querySelectorAll('[data-until]').forEach((el) => {
     const until = Number(el.getAttribute('data-until'));
     const ms = until - now;
-    const txt = ms > 0 ? `${el.getAttribute('data-prefix') || ''}${ctx.format.countdown(ms)}` : 'Just arriving';
+    const txt = ms > 0 ? `${el.getAttribute('data-prefix') || ''}${roughTime(ms)}` : 'Just arriving';
     if (el.textContent !== txt) el.textContent = txt;
   });
   root.querySelectorAll('[data-from]').forEach((el) => {
@@ -520,7 +565,7 @@ export function haulChips(ctx, state, haul) {
   }
   for (const p of haul.postcards || []) {
     const t = postcardTitle(ctx, p.id);
-    const extra = p.duplicate ? h` <span class="muted">+${p.seals} Seals</span>` : p.setComplete ? h` <span class="muted">set complete!</span>` : '';
+    const extra = p.duplicate ? h` <span class="muted">+${p.seals} ${iconSvg('seal', { size: 13 })} Seals</span>` : p.setComplete ? h` <span class="muted">set complete!</span>` : '';
     chips.push(h`<button type="button" class="mp-find ${p.rare ? 'is-gold' : ''}" data-action="open-card" data-card-id="${p.id}" data-tap>${iconSvg('pin', { size: 14 })}Postcard: ${t}${extra}</button>`);
   }
   if (haul.vial) chips.push(h`<span class="mp-find">${swatch(hexOfColor(ctx, haul.vial), 16)}A vial of ${nameOfColor(ctx, state, haul.vial)}</span>`);
@@ -557,13 +602,20 @@ function whatsLeft(ctx, state, region) {
   return { wilds, total: cards.length, owned, left: cards.length - owned };
 }
 
+/** "Back in about 25 m" for the next hunter due home. */
+function nextHomeLine(roster, now) {
+  const due = roster.filter((x) => x.state === 'out' && x.trip && Number.isFinite(x.trip.returnsAt)).map((x) => x.trip.returnsAt - now);
+  if (!due.length) return 'Pick a region and come back when someone is free.';
+  return `The next one is home in about ${roughTime(Math.max(0, Math.min(...due)))}.`;
+}
+
 function sheetHtml(ctx, state) {
   const s = sheet;
   const C = ctx.content;
   const region = C.getRegion(s.regionId);
   const now = ctx.game.now();
   const open = regionOpen(ctx, state, region);
-  const goal = regionGoal(ctx, state, region);
+  const lock = regionLock(ctx, state, region);
   const roster = (state.hunters && state.hunters.roster) || [];
   const home = roster.filter((x) => x.state !== 'out');
   const hunter = home.find((x) => x.id === s.hunterId) || null;
@@ -579,7 +631,7 @@ function sheetHtml(ctx, state) {
   const hunterPicker = !open ? '' : home.length
     ? h`<div class="stack stack-sm"><div class="mp-label">Who goes?</div>
         <div class="chips">${home.map((x) => h`<button type="button" class="chip" data-action="pick-hunter" data-hunter-id="${x.id}" aria-pressed="${String(x.id === s.hunterId)}" data-tap>${hunterPortrait(x.id, { size: 24, trait: x.trait })}${x.name} <span class="sub">Lv ${x.level}</span></button>`)}</div></div>`
-    : h`<div class="card flat tight"><div class="semi">Everyone is out exploring</div><div class="hint">They will be home soon. Pick a region and come back when someone is free.</div></div>`;
+    : h`<div class="card flat tight"><div class="semi">Everyone is out exploring</div><div class="hint">${nextHomeLine(roster, now)}</div></div>`;
 
   const noWilds = !left.wilds.some((w) => !w.known);
   const durations = !open ? '' : h`<div class="stack stack-sm"><div class="mp-label">How long?</div>
@@ -604,17 +656,17 @@ function sheetHtml(ctx, state) {
   const leftBlock = h`<div class="stack stack-sm"><div class="mp-label">What is left here</div>
     ${left.wilds.length ? h`<div class="mp-pal">${left.wilds.map((w) => (w.known
       ? h`<span class="mp-p">${swatch(hexOfColor(ctx, w.id), 34)}<span>${nameOfColor(ctx, state, w.id)}</span></span>`
-      : h`<span class="mp-sil" role="img" aria-label="An undiscovered hue">?</span>`))}</div>
+      : h`<span class="mp-sil" role="img" aria-label="A hue still to find"></span>`))}</div>
       <div class="hint">${noWilds ? 'Every hidden hue here is yours.' : `${plural(left.wilds.filter((w) => !w.known).length, 'hidden hue')} still to find.`}</div>` : h`<div class="hint">No hidden hues here, just postcards.</div>`}
-    <div class="hint">${left.left > 0 ? `${plural(left.left, 'postcard')} still to find (${left.owned} of ${left.total}).` : `You have the whole set of ${left.total}. Extras turn into Seals.`}</div></div>`;
+    <div class="hint">${left.left > 0 ? `${plural(left.left, 'postcard')} to find here${left.owned > 0 ? `, ${left.owned} already in your album` : ''}.` : `You have the whole set of ${left.total}. Extras turn into Seals.`}</div></div>`;
 
   let cta;
-  if (!open) cta = h`<div class="row center" style="justify-content:center">${tag(goal || 'Opens soon', { icon: 'lock' })}</div>`;
-  else if (!hunter) cta = button('No one is home yet', { block: true, disabled: true, variant: 'primary' });
+  if (!open) cta = h`<div class="row center" style="justify-content:center">${lockTag(lock ? lock.text : 'Opens soon')}</div>`;
+  else if (!hunter) cta = '';
   else cta = button(`Send ${hunter.name}`, { block: true, variant: 'primary', attrs: { 'data-action': 'send-go' } });
 
   return h`<button type="button" class="btn-back mp-x" data-action="close-sheet" data-tap aria-label="Close">${iconSvg('close', { size: 20 })}</button>
-    <div class="stack stack-sm"><div class="mp-sheet-title">${open ? 'Send to the ' : ''}${region.name}</div>
+    <div class="stack stack-sm"><div class="mp-sheet-title">${open ? 'Send to the' : 'On the map'}<span class="mp-rname">${region.name}</span></div>
       <div class="hint">${region.blurb}</div></div>
     ${regionPicker}${hunterPicker}${durations}${palette}${leftBlock}${cta}`;
 }
@@ -687,7 +739,7 @@ function doSend(ctx) {
     const ms = Math.max(0, res.returnsAt - ctx.game.now());
     closeSheet();
     ctx.audio.thunk(0.6);
-    ctx.toast(`${hunter ? hunter.name : 'Your hunter'} sets off for the ${region.name}. Back in ${ctx.format.duration(ms)}.`);
+    ctx.toast(`${hunter ? hunter.name : 'Your hunter'} sets off for the ${region.name}. Back in about ${roughTime(ms)}.`);
   } else {
     ctx.toast('That hunter is not free right now.');
     paintSheet(ctx);
@@ -737,23 +789,25 @@ function backpackHtml(state, items) {
   if (!items.length) return '';
   const latest = Math.max(...items.map((x) => x.lastHaul.at));
   return h`<div class="card mp-backpack ${latest > droppedAt ? 'is-drop' : ''}" data-coach="backpack" data-latest="${latest}">
-    <div class="row between"><div class="row gap-2"><span class="h2">Backpack</span><span class="hint">${plural(items.length, 'new return')}</span></div>
-      ${button('Got it', { small: true, attrs: { 'data-action': 'dismiss-backpack' } })}</div>
+    <div class="row between"><div class="row gap-2"><span class="mp-h">Backpack</span><span class="hint">${items.length === 1 ? '1 new return' : `${items.length} new returns`}</span></div>
+      ${button('Got it', { attrs: { 'data-action': 'dismiss-backpack' } })}</div>
     ${items.map((x) => {
       const region = ctx.content.getRegion(x.lastHaul.region);
+      const home = x.state !== 'out';
+      const again = home && region && regionOpen(ctx, state, region) ? region.id : '';
       return h`<div class="mp-haul"><div class="row gap-2">${hunterPortrait(x.id, { size: 36, trait: x.trait })}
-        <div class="grow"><div class="semi">${x.name} is back${region ? h` from the ${region.name}` : ''}</div></div></div>
-        ${haulChips(ctx, state, x.lastHaul)}</div>`;
+        <div class="grow"><div class="semi">${x.name} is back${region ? h` from the ${region.name}` : ''}</div><div class="hint">Here is what came home.</div></div></div>
+        ${haulChips(ctx, state, x.lastHaul)}
+        <div class="mp-back-actions">${home
+    ? button('Send again', { attrs: { 'data-action': 'send-again', 'data-hunter-id': x.id, 'data-region-id': again } })
+    : h`<span class="hint">${x.name} is already out exploring again.</span>`}</div></div>`;
     })}
   </div>`;
 }
 
 function pinHtml(state, region, outByRegion, isEventPin) {
   const open = regionOpen(ctx, state, region);
-  const goal = regionGoal(ctx, state, region);
-  const hOn = huntersOn(ctx, state);
-  // Behind the "hunters arrive" banner the Meadow and event pins need no second tag.
-  const showTag = !open && !(!hOn && (region.unlock.type === 'hunters' || region.kind === 'event')) && goal;
+  const lock = regionLock(ctx, state, region);
   const x = Math.max(15, Math.min(85, region.mapPos.x));
   const y = Math.max(7, Math.min(88, region.mapPos.y));
   const out = outByRegion[region.id] || 0;
@@ -761,10 +815,12 @@ function pinHtml(state, region, outByRegion, isEventPin) {
   const disc = isEventPin
     ? h`<span class="mp-disc">${pennantSvg(ev ? ev.palette : [], 46)}</span>`
     : h`<span class="mp-disc">${open ? glyph(region.id) : iconSvg('lock', { size: 20 })}${out ? h`<span class="mp-badge" aria-label="${plural(out, 'hunter')} out here">${out}</span>` : ''}</span>`;
+  // Locked pins show only the lock and the name; their paper tags sit in the legend below the map
+  // so nothing overlaps or clips at the edge of the frame.
   return h`<button type="button" class="mp-pin ${open ? '' : 'is-locked'} ${isEventPin ? 'is-event' : ''}" style="left:${x}%;top:${y}%"
-      data-action="region" data-region-id="${region.id}" data-tap aria-label="${region.name}${open ? '' : ', ' + (goal || 'locked')}">
+      data-action="region" data-region-id="${region.id}" data-tap aria-label="${region.name}${open ? '' : ', ' + (lock ? lock.text : 'locked')}">
       ${disc}<span class="mp-name">${region.name}</span>
-      ${isEventPin ? h`<span class="tag">This week</span>` : ''}${showTag ? tag(goal.startsWith('Coming') ? 'Coming later' : goal) : ''}</button>`;
+      ${isEventPin ? h`<span class="tag">This week</span>` : ''}</button>`;
 }
 
 function mapHtml(state) {
@@ -774,24 +830,46 @@ function mapHtml(state) {
   const ev = eventRegion(ctx, state);
   const pins = ctx.content.REGIONS.filter((r) => r.kind !== 'event').map((r) => pinHtml(state, r, outBy, false));
   if (ev && hOn) pins.push(pinHtml(state, ev, outBy, true));
+  const more = Math.max(0, ctx.sim.HUNTERS_UNLOCK_COLORS - colorsCount(ctx, state));
   return h`<div class="mp-win ${hOn ? '' : 'is-sleepy'}" data-coach="map"><div class="mp-view ${hOn ? '' : 'is-sleepy'}">${raw(MAP_ART)}${pins}</div>
-    ${hOn ? '' : h`<div class="mp-banner">Hunters arrive at ${ctx.sim.HUNTERS_UNLOCK_COLORS} colors<small>${plural(Math.max(0, ctx.sim.HUNTERS_UNLOCK_COLORS - colorsCount(ctx, state)), 'more color')}, and the window opens.</small></div>`}</div>`;
+    ${hOn ? '' : h`<div class="mp-banner">Hunters arrive at ${ctx.sim.HUNTERS_UNLOCK_COLORS} colors<small>${more} more, and the window opens.</small></div>`}</div>`;
+}
+
+/** The locked places with their paper tags, nearest goal first (kept off the illustration so nothing overlaps). */
+function legendHtml(state) {
+  const C = ctx.content;
+  const hOn = huntersOn(ctx, state);
+  const evRegion = eventRegion(ctx, state);
+  const locked = C.REGIONS
+    .filter((r) => r.kind !== 'event' || (!hOn && evRegion && r.id === evRegion.id))
+    .map((r) => ({ r, lock: regionLock(ctx, state, r) }))
+    .filter((x) => x.lock);
+  if (!locked.length) return '';
+  const soon = locked.filter((x) => !x.lock.later).sort((a, b) => a.lock.more - b.lock.more);
+  const later = locked.filter((x) => x.lock.later);
+  const shown = soon.slice(0, 3);
+  return h`<div class="card mp-legend" data-legend>
+    <div class="mp-h">Next places to open</div>
+    ${shown.map((x) => h`<div class="mp-legend-row"><span class="mp-rn">${x.r.name}</span>${lockTag(x.lock.text)}</div>`)}
+    ${later.length ? h`<div class="mp-legend-row"><span class="mp-rn">${later.map((x) => x.r.name).join(' and ')}</span>${lockTag('Coming in a later update')}</div>` : ''}
+    ${soon.length > shown.length ? h`<div class="hint">More places open as your catalog grows.</div>` : ''}
+  </div>`;
 }
 
 function rosterHtml(state, trips) {
   if (!trips.length) return '';
   const C = ctx.content;
-  return h`<div class="mp-section"><h2 class="h2">Your hunters</h2><span class="hint">${trips.filter((x) => x.state === 'home').length} home</span></div>
+  return h`<div class="mp-section"><h2 class="mp-h">Your hunters</h2><span class="hint">${trips.filter((x) => x.state === 'home').length} home</span></div>
     ${trips.map((t) => {
       const choice = t.state === 'out' && t.choicePending;
       return h`<div class="card is-tap mp-hunter" role="button" tabindex="0" data-action="open-hunter" data-hunter-id="${t.hunterId}" data-tap data-hunter-row="${t.hunterId}">
         ${hunterPortrait(t.hunterId, { size: 54, trait: t.trait })}
         <div class="grow stack stack-sm" style="gap:3px">
-          <div class="row gap-2 wrap"><span class="h3">${t.name}</span><span class="chip mp-chip">${traitName(C, t.trait)}</span><span class="mp-lv">Lv ${t.level}</span></div>
+          <div class="row gap-2 wrap"><span class="mp-hn">${t.name}</span><span class="chip mp-chip">${traitName(C, t.trait)}</span><span class="mp-lv">Lv ${t.level}</span></div>
           <div>${tripStatusHtml(ctx, t)}</div>
           ${t.state === 'out' && !choice ? tripBar(t) : ''}
         </div>
-        ${choice ? button('Answer', { small: true, attrs: { 'data-action': 'answer-choice', 'data-hunter-id': t.hunterId } }) : iconSvg('back', { size: 18, cls: 'mp-fwd' })}
+        ${choice ? button('Answer', { attrs: { 'data-action': 'answer-choice', 'data-hunter-id': t.hunterId } }) : iconSvg('back', { size: 18, cls: 'mp-fwd' })}
       </div>`;
     })}`;
 }
@@ -801,26 +879,21 @@ function hireHtml(state) {
   const roster = (state.hunters && state.hunters.roster) || [];
   const rest = C.HUNTERS.filter((d) => !roster.some((x) => x.id === d.id));
   if (!rest.length) return '';
-  const hOn = huntersOn(ctx, state);
-  return h`<div class="mp-section"><h2 class="h2">Join the team</h2><span class="hint">${roster.length} of ${C.MAX_ROSTER}</span></div>
+  const room = Math.max(0, C.MAX_ROSTER - roster.length);
+  return h`<div class="mp-section"><h2 class="mp-h">Join the team</h2><span class="hint">${room > 0 ? `Room for ${plural(room, 'hunter')}` : 'Your team is full'}</span></div>
     ${rest.map((d) => {
-      const chk = ctx.sim.hunters.canHire(state, { hunterId: d.id });
-      const cost = d.hireCost ?? 0;
-      let note = '';
-      let can = !!chk.ok;
-      if (!hOn) note = tag(`Hunters arrive at ${ctx.sim.HUNTERS_UNLOCK_COLORS} colors`);
-      else if (chk.reason === 'colors') note = tag(`${plural(chk.need, 'more color')}`);
-      else if (chk.reason === 'coins') note = h`<span class="hint">${ctx.format.num(Math.max(0, cost - fin(state.coins)))} more coins</span>`;
-      else if (chk.reason === 'full') note = h`<span class="hint">The team is full</span>`;
-      const price = cost > 0 ? h`<span class="mp-cost">${iconSvg('coin', { size: 16 })}${ctx.format.num(cost)}</span>` : h`<span class="mp-cost">Joins free</span>`;
-      return h`<div class="card mp-hire ${can ? '' : 'is-greyed'}" data-hire-row="${d.id}">
-        ${hunterPortrait(d.id, { size: 50, trait: d.trait, dim: !can })}
-        <div class="grow stack stack-sm" style="gap:3px">
-          <div class="row gap-2 wrap"><span class="h3">${d.name}</span><span class="chip mp-chip">${traitName(C, d.trait)}</span></div>
+      const info = hireInfo(ctx, state, d);
+      const foot = info.can
+        ? h`<span class="mp-cost">${info.cost > 0 ? iconSvg('coin', { size: 16 }) : ''}${info.text}</span>`
+        : (info.icon === 'lock' ? lockTag(info.text) : tag(info.text, { icon: info.icon }));
+      return h`<div class="card is-tap mp-hire" role="button" tabindex="0" data-action="open-hunter" data-hunter-id="${d.id}" data-tap data-hire-row="${d.id}">
+        ${hunterPortrait(d.id, { size: 50, trait: d.trait, dim: !info.can })}
+        <div class="grow stack stack-sm" style="gap:4px">
+          <div class="row gap-2 wrap"><span class="mp-hn">${d.name}</span><span class="chip mp-chip">${traitName(C, d.trait)}</span></div>
           <div class="hint">${d.blurb}</div>
-          <div class="row gap-2 wrap">${price}${note}</div>
+          <div class="mp-hire-foot">${foot}</div>
         </div>
-        ${button('Hire', { small: true, variant: can ? 'primary' : 'paper', disabled: !can, attrs: { 'data-action': 'hire', 'data-hunter-id': d.id } })}
+        ${info.can ? button('Hire', { variant: 'primary', attrs: { 'data-action': 'hire', 'data-hunter-id': d.id } }) : iconSvg('back', { size: 18, cls: 'mp-fwd' })}
       </div>`;
     })}`;
 }
@@ -829,17 +902,18 @@ function eventLine(state) {
   const ev = state.event && ctx.content.getEvent(state.event.key);
   const region = eventRegion(ctx, state);
   if (!ev || !region) return '';
+  const hOn = huntersOn(ctx, state);
   return h`<div class="card flat tight row gap-2" style="flex-direction:row;align-items:center">
     <span aria-hidden="true">${pennantSvg(ev.palette, 30)}</span>
-    <div class="grow"><div class="semi small">${ev.name}: the ${region.name} is open</div><div class="hint">Its postcards and trips count toward the event track.</div></div>
-    ${button('Track', { small: true, attrs: { 'data-action': 'open-quests' } })}</div>`;
+    <div class="grow"><div class="semi small">${hOn ? `${ev.name}: the ${region.name} is open` : `${ev.name} is on this week`}</div><div class="hint">${hOn ? 'Its postcards and trips count toward the event track. Points are saved, so there is never a rush.' : 'Its trips open with your hunters. Points are saved, so there is never a rush.'}</div></div>
+    ${button('Track', { attrs: { 'data-action': 'open-quests' } })}</div>`;
 }
 
 function build(state) {
   const now = ctx.game.now();
   const trips = ctx.sim.hunters.tripsSummary(state, now);
   const items = backpackItems(state, now);
-  return h`${backpackHtml(state, items)}${mapHtml(state)}${eventLine(state)}${rosterHtml(state, trips)}${hireHtml(state)}`;
+  return h`${backpackHtml(state, items)}${mapHtml(state)}${legendHtml(state)}${eventLine(state)}${rosterHtml(state, trips)}${hireHtml(state)}`;
 }
 
 function paint(state, force = false) {
@@ -858,6 +932,13 @@ function paint(state, force = false) {
   tickCountdowns(root, ctx);
   const sub = root.querySelector('.screen-head .subtitle');
   if (sub) sub.textContent = headSubtitle(state);
+  const slot = root.querySelector('[data-map-headslot]');
+  if (slot) {
+    const hOn = huntersOn(ctx, state);
+    const more = Math.max(0, ctx.sim.HUNTERS_UNLOCK_COLORS - colorsCount(ctx, state));
+    const headHtml = String(hOn ? button('Album', { attrs: { 'data-action': 'open-album' } }) : lockTag(`Album: ${more} more colors`));
+    if (slot.innerHTML !== headHtml) slot.innerHTML = headHtml;
+  }
 }
 
 /** The map is on screen (with its Backpack): every haul home counts as read, which clears the tab dot. */
@@ -898,7 +979,8 @@ function onClick(e) {
     const latest = Math.max(0, ...((state.hunters && state.hunters.roster) || []).map((x) => (x.lastHaul ? x.lastHaul.at : 0)));
     writeSeen(latest);
     paint(state, true);
-  } else if (a === 'open-card') ctx.navigate('album', { cardId: el.getAttribute('data-card-id') });
+  } else if (a === 'send-again') openSendSheet(ctx, { hunterId: el.getAttribute('data-hunter-id'), regionId: el.getAttribute('data-region-id') || null });
+  else if (a === 'open-card') ctx.navigate('album', { cardId: el.getAttribute('data-card-id') });
   else if (a === 'open-album') ctx.navigate('album');
   else if (a === 'open-quests') ctx.navigate('quests');
   else if (a === 'hire') {
@@ -925,7 +1007,7 @@ const screen = {
     injectStyle();
     root.innerHTML = String(h`<div class="screen-head is-left">
         <div class="titles"><div class="title">Map</div><div class="subtitle"></div></div>
-        ${button('Album', { small: true, attrs: { 'data-action': 'open-album' } })}
+        <div class="mp-headslot" data-map-headslot></div>
       </div><div class="screen-body" data-map-body></div>`);
     bodyEl = root.querySelector('[data-map-body]');
     root.addEventListener('click', onClick);

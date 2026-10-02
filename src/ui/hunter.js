@@ -8,13 +8,16 @@
  * recent postcards from this hunter's trips. Implements DESIGN.md "Hue Hunters
  * and postcards > The team" and "Expeditions".
  *
- * data-actions: send, answer-choice, open-card, open-album, go-map.
+ * A hunter who has not joined yet gets the same page, with a paper tag naming the real goal
+ * ("Joins at 25 colors: 9 more" / "Hire for 400 coins") and a Hire button once it is affordable.
+ *
+ * data-actions: send, hire, answer-choice, open-card, open-album, go-map.
  */
 
-import { h, backButton, button, progressBar, iconSvg, tag } from './kit.js';
+import { h, backButton, button, progressBar, iconSvg, tag, lockTag } from './kit.js';
 import {
   hunterPortrait, tripStatusHtml, tripBar, tickCountdowns, openSendSheet, openChoiceSheet,
-  haulChips, recentCardsFor, recordHauls, refreshSheet, TRAIT_HEX,
+  haulChips, recentCardsFor, recordHauls, refreshSheet, hireInfo, TRAIT_HEX,
 } from './map.js';
 import { postcardArt } from './album.js';
 
@@ -22,6 +25,10 @@ const CSS = `
 .hn-hero { align-items:center; text-align:center; gap:6px; padding-top:18px; }
 .hn-plate { position:relative; display:grid; place-items:center; }
 .hn-name { font-family:var(--font-display); font-size:26px; line-height:1.1; }
+.hn-h { font-family:var(--font-ui); font-weight:600; font-size:16px; line-height:1.25; }
+.hn-goal { display:flex; flex-direction:column; gap:10px; align-items:center; text-align:center; }
+.hn-goal .tag { white-space:normal; }
+.hn-chip { font-size:12px; min-height:28px; padding:0 10px; box-shadow:0 1px 0 var(--shadow-soft); }
 .hn-chips { display:flex; flex-wrap:wrap; gap:6px; justify-content:center; }
 .hn-perk { display:flex; align-items:flex-start; gap:10px; padding:8px 0; }
 .hn-perk + .hn-perk { border-top:1px solid rgba(42,38,34,.08); }
@@ -31,7 +38,7 @@ const CSS = `
 .hn-cards { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
 .hn-cards button { display:flex; flex-direction:column; gap:4px; padding:5px; border-radius:8px; background:var(--paper); box-shadow:var(--cut-sm); text-align:left; }
 .hn-cards .al-art { width:100%; height:auto; }
-.hn-cards span { font-family:var(--font-display); font-size:11px; line-height:1.15; padding:0 1px 2px; }
+.hn-cards span { font-family:var(--font-display); font-size:12px; line-height:1.15; padding:0 1px 2px; }
 `;
 
 function injectStyle() {
@@ -81,10 +88,43 @@ function perksHtml(hu) {
   });
 }
 
+/** A hunter who has not joined yet: portrait, blurb, trait, the real goal as a paper tag, and Hire when it is live. */
+function unhiredHtml(state) {
+  const C = ctx.content;
+  const def = hunterId ? C.getHunter(hunterId) : null;
+  if (!def) {
+    return h`<div class="card hn-goal"><div class="hn-h">Pick a hunter from the map</div><div class="hint">Your hunters and the ones who will join later all live there.</div>
+      ${button('Back to the map', { variant: 'primary', attrs: { 'data-action': 'go-map' } })}</div>`;
+  }
+  const trait = C.TRAITS[def.trait];
+  const info = hireInfo(ctx, state, def);
+  const goalTag = info.icon === 'lock' ? lockTag(info.text) : tag(info.text, { icon: info.icon });
+  const goal = info.can
+    ? h`${goalTag}${button(`Hire ${def.name}`, { variant: 'primary', block: true, attrs: { 'data-action': 'hire' } })}`
+    : goalTag;
+  const waiting = info.kind === 'coins' ? 'Your coins are building up, and then it is a quick tap.'
+    : info.kind === 'full' ? 'Make room on the team and this is a quick tap.'
+      : `Every new color brings ${def.name} closer.`;
+  return h`<div class="card hn-hero">
+      <div class="hn-plate">${hunterPortrait(def.id, { size: 148, trait: def.trait, label: def.name })}</div>
+      <div class="hn-name">${def.name}</div>
+      <div class="hn-chips"><span class="chip hn-chip" style="background:${TRAIT_HEX[def.trait] || '#ccc'}33">${trait ? trait.name : def.trait}</span>
+        <span class="chip hn-chip">${def.voice[0].toUpperCase() + def.voice.slice(1)} voice</span></div>
+      <p class="hint" style="max-width:300px">${def.blurb}</p>
+    </div>
+    <div class="card hn-goal" data-hire-goal>${goal}
+      ${info.can ? '' : h`<div class="hint">${waiting}</div>`}
+      ${button('Back to the map', { block: true, attrs: { 'data-action': 'go-map' } })}</div>
+    <div class="card">
+      <div class="hn-h">${trait ? trait.name : 'Trait'}</div>
+      <div class="hint">${trait ? trait.blurb : ''}</div>
+    </div>`;
+}
+
 function build(state) {
   const C = ctx.content;
   const hu = find(state);
-  if (!hu) return h`<div class="card"><div class="h3">That hunter has not joined yet.</div>${button('Back to the map', { attrs: { 'data-action': 'go-map' } })}</div>`;
+  if (!hu) return unhiredHtml(state);
   const def = C.getHunter(hu.id);
   const trait = C.TRAITS[hu.trait];
   const trait2 = hu.trait2 ? C.TRAITS[hu.trait2] : null;
@@ -100,13 +140,13 @@ function build(state) {
   return h`<div class="card hn-hero">
       <div class="hn-plate">${hunterPortrait(hu.id, { size: 148, trait: hu.trait, label: hu.name })}</div>
       <div class="hn-name">${hu.name}</div>
-      <div class="hn-chips"><span class="chip" style="background:${TRAIT_HEX[hu.trait] || '#ccc'}33">${trait ? trait.name : hu.trait}</span>${trait2 ? h`<span class="chip">${trait2.name}</span>` : ''}<span class="chip is-on">Level ${hu.level}</span>
-        ${def ? h`<span class="chip">${def.voice[0].toUpperCase() + def.voice.slice(1)} voice</span>` : ''}</div>
+      <div class="hn-chips"><span class="chip hn-chip" style="background:${TRAIT_HEX[hu.trait] || '#ccc'}33">${trait ? trait.name : hu.trait}</span>${trait2 ? h`<span class="chip hn-chip">${trait2.name}</span>` : ''}<span class="chip hn-chip">Level ${hu.level}</span>
+        ${def ? h`<span class="chip hn-chip">${def.voice[0].toUpperCase() + def.voice.slice(1)} voice</span>` : ''}</div>
       ${def ? h`<p class="hint" style="max-width:300px">${def.blurb}</p>` : ''}
     </div>
 
     <div class="card">
-      <div class="row between"><div class="h3">${out ? 'On the road' : 'At home'}</div>${out ? '' : tag('Ready', { icon: null })}</div>
+      <div class="row between"><div class="hn-h">${out ? 'On the road' : 'At home'}</div>${out ? '' : h`<span class="chip hn-chip">Ready</span>`}</div>
       ${out
         ? h`<div class="stack stack-sm"><div class="row gap-2 wrap"><span class="semi">${region ? region.name : 'Out exploring'}</span>${tripStatusHtml(ctx, trip, { withRegion: false })}</div>${trip.choicePending ? '' : tripBar(trip)}
             ${trip.choicePending ? button('Answer the radio', { variant: 'primary', block: true, attrs: { 'data-action': 'answer-choice' } }) : ''}</div>`
@@ -114,23 +154,23 @@ function build(state) {
     </div>
 
     <div class="card">
-      <div class="h3">${trait ? trait.name : 'Trait'}</div>
+      <div class="hn-h">${trait ? trait.name : 'Trait'}</div>
       <div class="hint">${trait ? trait.blurb : ''}</div>
       ${trait2 ? h`<div class="hint">Second trait, ${trait2.name}: ${trait2.blurb}</div>` : ''}
     </div>
 
     <div class="card">
-      <div class="row between"><div class="h3">Level ${hu.level}</div><span class="hint">+${bonus}% haul</span></div>
+      <div class="row between"><div class="hn-h">Level ${hu.level}</div><span class="hint">+${bonus}% haul</span></div>
       ${progressBar(xp.ratio, { label: 'Experience' })}
       <div class="hint">${xp.text}</div>
       <div class="divider"></div>
       ${perksHtml(hu)}
     </div>
 
-    ${haul ? h`<div class="card"><div class="h3">Last trip${C.getRegion(haul.region) ? h` to the ${C.getRegion(haul.region).name}` : ''}</div>${haulChips(ctx, state, haul)}</div>` : ''}
+    ${haul ? h`<div class="card"><div class="hn-h">Last trip${C.getRegion(haul.region) ? h` to the ${C.getRegion(haul.region).name}` : ''}</div>${haulChips(ctx, state, haul)}</div>` : ''}
 
     <div class="card">
-      <div class="row between"><div class="h3">Postcards from ${hu.name}</div>${button('Album', { small: true, attrs: { 'data-action': 'open-album' } })}</div>
+      <div class="row between"><div class="hn-h">Postcards from ${hu.name}</div>${button('Album', { attrs: { 'data-action': 'open-album' } })}</div>
       ${cardIds.length
         ? h`<div class="hn-cards">${cardIds.map((id) => {
           const c = C.getPostcard(id);
@@ -153,10 +193,12 @@ function paint(state, force = false) {
   bodyEl.scrollTop = keep;
   tickCountdowns(root, ctx);
   const hu = find(state);
+  const def = hunterId ? ctx.content.getHunter(hunterId) : null;
   const t = root.querySelector('.screen-head .title');
   const st = root.querySelector('.screen-head .subtitle');
-  if (t) t.textContent = hu ? hu.name : 'Hunter';
-  if (st) st.textContent = hu ? `${ctx.content.TRAITS[hu.trait] ? ctx.content.TRAITS[hu.trait].name : ''} · Level ${hu.level}` : '';
+  const traitOf = (id) => (ctx.content.TRAITS[id] ? ctx.content.TRAITS[id].name : '');
+  if (t) t.textContent = hu ? hu.name : def ? def.name : 'Your hunters';
+  if (st) st.textContent = hu ? `${traitOf(hu.trait)} · Level ${hu.level}` : def ? `${traitOf(def.trait)} · not on the team yet` : '';
 }
 
 function onClick(e) {
@@ -168,6 +210,15 @@ function onClick(e) {
   else if (a === 'open-card') ctx.navigate('album', { cardId: el.getAttribute('data-card-id') });
   else if (a === 'open-album') ctx.navigate('album');
   else if (a === 'go-map') ctx.navigate('map');
+  else if (a === 'hire') {
+    const def = ctx.content.getHunter(hunterId);
+    const res = ctx.game.act(ctx.sim.hunters.hire, { hunterId });
+    if (res && res.ok) {
+      ctx.audio.stamp();
+      ctx.toast(`${def ? def.name : 'A new hunter'} joins the team!`);
+      requestAnimationFrame(() => { const plate = root.querySelector('.hn-plate'); if (plate) ctx.fx.ringBurst(plate, '#E2B04A', { size: 160 }); });
+    } else ctx.toast('Not quite yet. Your coins are building up.');
+  }
 }
 
 const screen = {
@@ -178,7 +229,7 @@ const screen = {
     ctx = context;
     injectStyle();
     root.innerHTML = String(h`<div class="screen-head">${backButton('Back to the map')}
-      <div class="titles"><div class="title">Hunter</div><div class="subtitle"></div></div><span class="spacer"></span></div>
+      <div class="titles"><div class="title">Your hunters</div><div class="subtitle"></div></div><span class="spacer"></span></div>
       <div class="screen-body" data-hunter-body></div>`);
     bodyEl = root.querySelector('[data-hunter-body]');
     root.addEventListener('click', onClick);
