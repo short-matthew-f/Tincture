@@ -852,11 +852,22 @@ function paint(state, force = false) {
   if (!force && key === lastKey) { tickCountdowns(root, ctx); return; }
   lastKey = key;
   bodyEl.innerHTML = html;
+  markSeenSoon(state);
   const bp = bodyEl.querySelector('.mp-backpack');
   if (bp) droppedAt = Math.max(droppedAt, Number(bp.getAttribute('data-latest')) || 0);
   tickCountdowns(root, ctx);
   const sub = root.querySelector('.screen-head .subtitle');
   if (sub) sub.textContent = headSubtitle(state);
+}
+
+/** The map is on screen (with its Backpack): every haul home counts as read, which clears the tab dot. */
+let seenTimer = 0;
+function markSeenSoon(state) {
+  if (!visible || seenTimer || !ctx.sim.hunters.mapAttention(state, ctx.game.now()).hauls) return;
+  seenTimer = setTimeout(() => { // never act from inside a render
+    seenTimer = 0;
+    if (visible) ctx.game.act(ctx.sim.hunters.markHaulsSeen, {});
+  }, 0);
 }
 
 function headSubtitle(state) {

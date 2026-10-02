@@ -34,7 +34,7 @@ function orangeState(seed = 7) {
 const close = (a, b, rel = 0.01) => Math.abs(a - b) <= rel * Math.max(1, Math.abs(a), Math.abs(b));
 
 test('economy: cost curves grow 1.15 (vats 1.10), milestones double output', () => {
-  assert.equal(stationCost('source', 0, 'madder'), 10);
+  assert.equal(stationCost('source', 0, 'madder'), 6); // TUNING.md change 7 (was 10)
   assert.ok(close(stationCost('mixer', 11) / stationCost('mixer', 10), 1.15, 1e-9));
   assert.ok(close(stationCost('grinder', 5) / stationCost('grinder', 4), 1.15, 1e-9));
   assert.ok(close(stationCost('vat', 21) / stationCost('vat', 20), 1.10, 1e-9));

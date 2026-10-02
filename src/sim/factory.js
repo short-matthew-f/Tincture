@@ -301,7 +301,8 @@ export function rush(state, args, now) {
   const m = state.stations.mixers?.[i];
   if (!m || !m.recipe) return { ok: false, reason: 'idle' };
   const readyAt = num(m.rushedAt) + RUSH_COOLDOWN_MS;
-  if (num(m.rushedAt) > 0 && now < readyAt) return { ok: false, reason: 'cooldown', readyAt };
+  // A rushedAt in the future means the device clock went back: never lock Rush for it.
+  if (num(m.rushedAt) > 0 && num(m.rushedAt) <= now && now < readyAt) return { ok: false, reason: 'cooldown', readyAt };
   const rate = rates(state, now).mixerJars[i];
   const jars = Math.max(MIXER.batchJars, num(rate) * RUSH_SECONDS);
   const accepted = addStock(state, m.recipe, jars, 'standard');

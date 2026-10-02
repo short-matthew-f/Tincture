@@ -10,7 +10,7 @@
  * that is missing or fails to load gets a "Coming soon" placeholder, so one
  * broken screen never takes the app down.
  *
- * Debug handle: window.tincture = {game, ctx, router, debug: {advance(ms), discover(colorId)}}.
+ * Debug handle: window.tincture = {game, ctx, router, version, debug: {advance(ms), discover(colorId)}}.
  */
 
 import { Game } from './game.js';
@@ -25,7 +25,7 @@ import { fx } from './ui/fx.js';
 import * as overlay from './ui/overlay.js';
 import { createRouter, TABS } from './ui/router.js';
 import { applySettings } from './ui/settings.js';
-import { registerSW } from './pwa.js';
+import { registerSW, APP_VERSION } from './pwa.js';
 
 import * as apprentices from './content/apprentices.js';
 import * as canvases from './content/canvases.js';
@@ -203,6 +203,10 @@ async function boot() {
     tabbar: document.getElementById('tabbar'),
     overlay,
     onChange: () => setTimeout(pumpCeremonies, 0),
+    tabDots: (state) => {
+      const a = sim.hunters.mapAttention(state, game.now());
+      return { map: a.choices + a.hauls > 0 };
+    },
     afterRender: (state, top) => {
       for (const m of observers) {
         try { m.observe(state, top); } catch (e) { console.error('[app] observe failed', e); }
@@ -410,7 +414,7 @@ async function boot() {
     },
   });
 
-  window.tincture = { game, ctx, router, debug: makeDebug(game) };
+  window.tincture = { game, ctx, router, version: APP_VERSION, debug: makeDebug(game) };
   return { game, ctx, router };
 }
 
@@ -418,29 +422,16 @@ async function boot() {
  * Debug helpers for tests and the console (window.tincture.debug). Never used by
  * the game itself.
  *  - advance(ms): pretend `ms` passed while away. Shifts the loop clocks and the
- *    schedules that wait on absolute times (order refresh, spillover, collector,
- *    trips) back by `ms`, then resumes (>= 60 s runs the offline catch-up and
+ *    schedules that wait on absolute times (sim.shiftClock: order refresh,
+ *    spillover, collector, trips, Rush, boosts) back by `ms`, then resumes (>= 60 s runs the offline catch-up and
  *    opens the Morning Ledger) or ticks.
  *  - discover(colorId): discover a color through the real sim (the naming
  *    ceremony follows as in play).
  */
 function makeDebug(game) {
-  const back = (o, k, ms) => { if (o && Number.isFinite(o[k]) && o[k] > 0) o[k] -= ms; };
   return {
     advance(ms) {
-      const s = game.state;
-      const d = Math.max(0, Number(ms) || 0);
-      back(s, 'lastTick', d);
-      back(s, 'lastSeenAt', d);
-      back(s.orders, 'nextRefreshAt', d);
-      back(s.shelf, 'nextSpilloverAt', d);
-      back(s.gallery, 'nextCollectorAt', d);
-      back(s.gallery, 'lastAdmissionAt', d);
-      back(s.onboarding && s.onboarding.flags, 'stepAt', d); // coach marks that wait after the previous step
-      for (const hn of (s.hunters && s.hunters.roster) || []) {
-        if (hn && hn.trip) { back(hn.trip, 'departedAt', d); back(hn.trip, 'returnsAt', d); back(hn.trip, 'choiceOfferedAt', d); }
-      }
-      for (const v of (s.stations && s.stations.fleet) || []) { back(v, 'departedAt', d); back(v, 'arrivesAt', d); }
+      sim.shiftClock(game.state, Math.max(0, Number(ms) || 0));
       const summary = game.resume();
       if (!summary) game.tick();
       return summary;

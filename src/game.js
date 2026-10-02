@@ -38,6 +38,7 @@ export function memoryStorage(initial = {}) {
     setItem: (k, v) => { m.set(k, String(v)); },
     removeItem: (k) => { m.delete(k); },
     clear: () => m.clear(),
+    key: (i) => [...m.keys()][i] ?? null,
     get length() { return m.size; },
     _map: m,
   };
@@ -151,8 +152,13 @@ export class Game {
    */
   _fixClock(t) {
     const s = this.state;
-    if (fin(s.lastTick) > t + CLOCK_SKEW_MS) s.lastTick = t;
-    if (fin(s.lastSeenAt) > t + CLOCK_SKEW_MS) s.lastSeenAt = t;
+    const ahead = Math.max(fin(s.lastTick) - t, fin(s.lastSeenAt) - t);
+    if (!(ahead > CLOCK_SKEW_MS)) return;
+    // Every schedule moves back with the clocks, so trips, cooldowns and boosts
+    // keep the time they had left.
+    sim.shiftClock(s, ahead);
+    if (fin(s.lastTick) > t) s.lastTick = t;
+    if (fin(s.lastSeenAt) > t) s.lastSeenAt = t;
   }
 
   /** Begin the 250 ms loop. Runs a catch-up first when she has been away >= 60 s. */
@@ -359,10 +365,23 @@ export class Game {
     return { ok: true, summary };
   }
 
-  /** Erase the save and start over. Reloads the page when a `reload` option was given. */
+  /**
+   * Erase the save (and the per-viewer `tincture.ui.*` notes that belong to it,
+   * like the hunters' postcard log) and start over. Reloads the page when a
+   * `reload` option was given.
+   */
   reset() {
     const t = this.now();
     try { this.storage.removeItem(SAVE_KEY); } catch (e) { /* ignore */ }
+    try { this.storage.removeItem(SAVE_KEY + '.unreadable'); } catch (e) { /* ignore */ }
+    try {
+      const keys = [];
+      for (let i = 0; i < (this.storage.length || 0); i++) {
+        const k = typeof this.storage.key === 'function' ? this.storage.key(i) : null;
+        if (k && k.startsWith('tincture.ui.')) keys.push(k);
+      }
+      for (const k of keys) this.storage.removeItem(k);
+    } catch (e) { /* ignore */ }
     this.state = createInitialState(t);
     this.isNew = true;
     this.save();

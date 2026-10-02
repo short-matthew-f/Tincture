@@ -41,6 +41,7 @@
   --radius-sm: 10px;
   --tap: 44px;
   --tabbar-h: 72px;
+  --head-h: 66px; /* .screen-head without the safe area: 10 + 44 (back button) + 8, rounded up */
 
   --cut: 0 3px 0 var(--shadow);
   --cut-sm: 0 2px 0 var(--shadow-soft);
@@ -531,9 +532,10 @@ button.chip { min-height: var(--tap); }
 
 /* ----------------------------------------------------------- toasts, modal */
 
+/* Toasts sit just below the screen head so they never cover the back button or the title. */
 #toasts {
   position: fixed;
-  top: calc(10px + var(--safe-top));
+  top: calc(var(--head-h) + 10px + var(--safe-top));
   left: 0;
   right: 0;
   z-index: 40;
@@ -555,6 +557,7 @@ button.chip { min-height: var(--tap); }
   text-align: center;
   box-shadow: 0 3px 0 rgba(0, 0, 0, 0.35);
   pointer-events: auto;
+  cursor: pointer;
   animation: toast-in 220ms var(--ease-out) both;
 }
 .toast.is-leaving { animation: toast-out 160ms ease-in both; }

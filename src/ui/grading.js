@@ -105,7 +105,13 @@ function settle(ctx, s, board, now) {
   const sim = ctx.sim;
   const tier = board.tier;
   const def = (sim.PUZZLE_TIERS || {})[tier] || { k: 8, mult: 1 };
-  const coins = sim.economy.puzzleReward(s, tier, { ...def, now });
+  let coins = sim.economy.puzzleReward(s, tier, { ...def, now });
+  // The onboarding's first board pays a tutorial reward on top (one cheapest upgrade), once.
+  const ob = s.onboarding;
+  if (ob && !ob.done && ob.flags && !ob.flags.firstBoardPaid) {
+    coins += sim.economy.tutorialReward(s);
+    ob.flags.firstBoardPaid = true;
+  }
   sim.factory.earn(s, coins);
   const boostMinutes = 10 * def.mult;
   sim.factory.addBoost(s, { kind: 'production', mult: 0.25, minutes: boostMinutes }, now);

@@ -41,7 +41,7 @@ test('sources: starters and hunter-unlocked match the spec', () => {
   for (const id of STARTING_SOURCES) {
     const s = getSource(id);
     assert.equal(s.baseRate, STATION_KINDS.source.baseOutput); // starters share the station default (tools/balance/TUNING.md)
-    assert.equal(s.baseCost, 10);
+    assert.equal(s.baseCost, 6); // TUNING.md change 7 (was 10)
   }
   assert.ok(MAX_SOURCES_ERA1 === 8);
   const pig = SOURCES.map((s) => s.pigment);

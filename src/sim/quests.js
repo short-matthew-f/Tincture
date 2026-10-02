@@ -119,6 +119,9 @@ export function rollDaily(state, now = 0) {
   const q = ensureQuests(state);
   const dk = dayKey(now);
   if (q.dailyDate === dk) return null;
+  // The device clock went back a day or more: keep today's quests (no free reroll,
+  // and no bank top-up when the clock returns).
+  if (q.dailyDate && daysBetween(q.dailyDate, dk) < 0) return null;
   if (q.dailyDate) {
     const gap = daysBetween(q.dailyDate, dk);
     if (gap > 0) {
@@ -264,6 +267,7 @@ export function rollWeekly(state, now = 0) {
   const q = ensureQuests(state);
   const wk = isoWeekKey(now);
   if (q.weeklyKey === wk) return null;
+  if (q.weeklyKey && String(q.weeklyKey) > String(wk)) return null; // clock went back across a week: keep this one
   const first = weeklyQuestForWeek(wk);
   const start = Math.max(0, WEEKLY_QUESTS.indexOf(first));
   let chosen = null;

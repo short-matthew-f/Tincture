@@ -26,7 +26,7 @@ export function milestonesPassed(level) {
  *  vehicle capacity multiplier per level (vehicles carry VEHICLES[x].capacity at level 1)
  */
 export const STATION_KINDS = Object.freeze({
-  source:  Object.freeze({ id: 'source',  name: 'Source',  baseCost: 10,   costGrowth: 1.15, baseOutput: 0.08,  milestones: MILESTONES }),
+  source:  Object.freeze({ id: 'source',  name: 'Source',  baseCost: 6,    costGrowth: 1.15, baseOutput: 0.08,  milestones: MILESTONES }),
   grinder: Object.freeze({ id: 'grinder', name: 'Grinder', baseCost: 100,  costGrowth: 1.15, baseOutput: 0.16,  milestones: MILESTONES }),
   mixer:   Object.freeze({ id: 'mixer',   name: 'Mixer',   baseCost: 250,  costGrowth: 1.15, baseOutput: 0.04,  milestones: MILESTONES }),
   vat:     Object.freeze({ id: 'vat',     name: 'Display vat', baseCost: 60, costGrowth: 1.10, baseOutput: 400, milestones: MILESTONES }),

@@ -5,6 +5,8 @@
 
 export const SAVE_VERSION = 1;
 export const SAVE_KEY = 'tincture.save';
+/** Coins in the till of a brand-new workshop. */
+export const STARTING_COINS = 25;
 
 const PRIMARIES = [
   ['madder', 'Madder'],
@@ -47,7 +49,11 @@ export function createInitialState(now = 0, seed) {
     onboarding: { step: 0, done: false, flags: {} },
     era: 1,
     phase: 1,
-    coins: 0,
+    // "A few coins left in the drawer": the inherited workshop starts with a small
+    // till so her first upgrades come right after the first order and board
+    // (DESIGN.md "First ten minutes", tools/balance/TUNING.md change 7).
+    // Renovate does not refill it (prestige.js starts the new run at Deep Pockets).
+    coins: STARTING_COINS,
     seals: 0,
     heritage: 0,
     heritageSpent: {},
@@ -158,10 +164,25 @@ function isPlainObject(x) {
   return x !== null && typeof x === 'object' && !Array.isArray(x);
 }
 
+/** Top-level sections whose own keys mergeDefaults fills in (one level deep). */
+const DEEP_SECTIONS = ['onboarding', 'lifetime', 'stations', 'catalog', 'apprentices', 'orders', 'shelf',
+  'gallery', 'hunters', 'album', 'quests', 'commissions', 'ledger'];
+
+function fillMissing(target, defaults) {
+  for (const [k, d] of Object.entries(defaults)) {
+    const v = target[k];
+    if (v === undefined
+      || (Array.isArray(d) && !Array.isArray(v))
+      || (isPlainObject(d) && !isPlainObject(v))) target[k] = d;
+  }
+}
+
 /**
  * mergeDefaults(state, now) -> state (mutated and returned). Fills any missing
  * top-level key from createInitialState; `settings` is merged one level deep
- * (puzzleTier too) so new settings appear on old saves. Always ensures `_events`.
+ * (puzzleTier too) so new settings appear on old saves, and so are the object
+ * sections in DEEP_SECTIONS (gallery, onboarding + flags, orders, ...). Always
+ * ensures `_events`.
  */
 export function mergeDefaults(state, now = 0) {
   const defaults = createInitialState(now, state.seed);
@@ -177,6 +198,18 @@ export function mergeDefaults(state, now = 0) {
     if (state.settings.puzzleTier[key] === undefined) {
       state.settings.puzzleTier[key] = defaults.settings.puzzleTier[key];
     }
+  }
+  // Sections saved as objects get their missing keys one level deep, so a v1
+  // save from before a key existed (gallery.*, onboarding.flags, orders.*, ...)
+  // loads with the default. A wrong type (array for object, object for array)
+  // falls back to the default too.
+  for (const key of DEEP_SECTIONS) {
+    if (!isPlainObject(state[key])) { state[key] = defaults[key]; continue; }
+    fillMissing(state[key], defaults[key]);
+  }
+  if (!isPlainObject(state.onboarding.flags)) state.onboarding.flags = {};
+  for (const key of ['coins', 'seals', 'heritage', 'runEarned']) {
+    if (!Number.isFinite(state[key])) state[key] = key === 'coins' ? 0 : defaults[key];
   }
   if (!isPlainObject(state.flags)) state.flags = {};
   if (!Number.isFinite(state.pendingCollect)) state.pendingCollect = 0;
@@ -203,6 +236,11 @@ export function deserialize(json, now = 0) {
     throw new Error('Invalid save: not JSON');
   }
   if (!isPlainObject(obj)) throw new Error('Invalid save: not an object');
+  // Every Tincture save since v1 has its stations and catalog: anything else is
+  // some other JSON file, and importing it would wipe her game.
+  if (!isPlainObject(obj.state) || !isPlainObject(obj.state.stations) || !isPlainObject(obj.state.catalog)) {
+    throw new Error('Invalid save: not a Tincture save');
+  }
   const migrated = migrate(obj);
   return mergeDefaults(migrated.state, now);
 }

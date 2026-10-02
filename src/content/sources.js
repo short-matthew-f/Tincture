@@ -14,9 +14,9 @@ export const MAX_SOURCES_ERA1 = 8;
 
 export const SOURCES = Object.freeze([
   // Starters (the three Era 1 primaries).
-  { id: 'madder', name: 'Madder Patch', pigment: 'madder', baseRate: 0.08, baseCost: 10, unlock: { type: 'start' } },
-  { id: 'ochre', name: 'Ochre Pit', pigment: 'ochre', baseRate: 0.08, baseCost: 10, unlock: { type: 'start' } },
-  { id: 'woad', name: 'Woad Vat', pigment: 'woad', baseRate: 0.08, baseCost: 10, unlock: { type: 'start' } },
+  { id: 'madder', name: 'Madder Patch', pigment: 'madder', baseRate: 0.08, baseCost: 6, unlock: { type: 'start' } },
+  { id: 'ochre', name: 'Ochre Pit', pigment: 'ochre', baseRate: 0.08, baseCost: 6, unlock: { type: 'start' } },
+  { id: 'woad', name: 'Woad Vat', pigment: 'woad', baseRate: 0.08, baseCost: 6, unlock: { type: 'start' } },
   // Hunter-unlocked.
   { id: 'saffron', name: 'Saffron Field', pigment: 'saffron', baseRate: 0.128, baseCost: 120, unlock: { type: 'region', region: 'meadow' } },
   { id: 'umber', name: 'Umber Quarry', pigment: 'umber', baseRate: 0.176, baseCost: 400, unlock: { type: 'region', region: 'quarry' } },

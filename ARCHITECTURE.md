@@ -80,7 +80,7 @@ state = {
               notifyHunters: false, notifyVats: false, puzzleTier: {grading:'relaxed'} },
   onboarding: { step: 0, done: false, flags: {} },    // first-ten-minutes script
   era: 1, phase: 1,              // phase 1 Workshop, 2 Factory, 3 Commissions
-  coins: 0, seals: 0, heritage: 0, heritageSpent: {},  // heritage tree node id -> level
+  coins: 25 /* STARTING_COINS: a few coins left in the drawer */, seals: 0, heritage: 0, heritageSpent: {},  // heritage tree node id -> level
   runEarned: 0,                  // coins earned this run (Renovate formula)
   lifetime: { earned: 0, puzzles: 0, discoveries: 0, renovations: 0 },
   rooms: ['bench'],              // room ids unlocked
@@ -142,7 +142,7 @@ Each file exports frozen data and a lookup helper. Ids are kebab-case strings.
 
 ## Sim (src/sim/)
 
-- `economy.js` — `stationCost(kind, level)`, `stationOutput(kind, level)` (1.15 growth, 1.10 for vats; milestones 10/25/50/100/150/200 double), `colorPrice(state, colorId, purity)`, `incomeMultiplier(state)` (catalog milestones +2%/10 colors, Heritage 1+0.05H, boosts capped +200%, Essence), `cheapestUpgrade(state)`, `puzzleReward(state, tier)` = max(k·r_idle·60, 0.25·m·c_min) with k 8/12/20/32 and m 1/1.5/2.5/4, `flowMeter(state)` -> {make, store, ship, weakest, suggestion:{label, cost, action}}.
+- `economy.js` — `stationCost(kind, level)`, `stationOutput(kind, level)` (1.15 growth, 1.10 for vats; milestones 10/25/50/100/150/200 double), `colorPrice(state, colorId, purity)`, `incomeMultiplier(state)` (catalog milestones +2%/10 colors, Heritage 1+0.05H, boosts capped +200%, Essence), `cheapestUpgrade(state)`, `puzzleReward(state, tier)` = max(k·r_idle·60, 0.25·m·c_min) with k 8/12/20/32 and m 1/1.5/2.5/4, `flowMeter(state)` -> {make, store, ship, weakest, suggestion:{label, cost, action}}, `tutorialReward(state)` = 1× c_min (paid once by the tour's first order, `order.tutorial`, and first board, `onboarding.flags.firstBoardPaid`).
 - `factory.js` — `tick(state, now)`: advances production for `dt = now - lastTick` in one closed-form step (sources → grinders → mixers → stock, capped by storage; production pauses when full; shop sells at sell rate; fleet trips resolve; spillover vials; happy accidents; rush cooldowns; boosts expire). Must be **O(1) in dt** (no per-second loops) so a 3-day offline catch-up is instant. Exposes `collect(state, now)`, `rush(state, mixerIndex, now)`, `assignRecipe`, `buyUpgrade(state, {kind, index|id})`, `buyRoom`, `setVatColor`, `claimAccident`.
 - `storage.js` — `capacity(state)`, `fillTime(state)` ("vats fill in 6 h 20 m"), `addStock(state, color, jars, purity)`, `takeStock(state, color, jars, {preferPurity})`.
 - `shipping.js` — `dispatch(state, vehicleIndex, routeId, cargo, now)`, `resolveTrips`, route demand drift (`currentDemand(state, routeId, now)`), auto-dispatch for Dispatcher.
@@ -150,13 +150,13 @@ Each file exports frozen data and a lookup helper. Ids are kebab-case strings.
 - `discovery.js` — `tryDiscover(state, hex, method, now)` (ΔE ≤ 4 to an undiscovered cell), `discover(state, colorId, method, now)` → returns ceremony payload, `nameColor`, `catalogMilestones`, `nearbyUndiscovered(state, hex)` for the shimmer hint.
 - `shelf.js` — spillover scheduling, `place`, `merge(state, from, to)` → chain merge result list, golden vial, `sell(state, cellIndex)`, tidy-row bonus, Cask → Essence.
 - `gallery.js` — `startPiece`, `paintRegion` (consumes jars), `signPiece` (value = rarity·purity·variety·taste), `hang/unhang`, admission per second = 2e-5 · value, visitor comments, collector offers.
-- `hunters.js` — `sendHunter`, `resolveReturns(state, now)` (haul, wild hue with pity timer +2%/trip, postcards, companion postcard 1/15 long trips, special markets for Trader), scouting choice, hiring, leveling perks.
+- `hunters.js` — `mapAttention(state, now)` -> {choices, hauls} (pure read for the map tab dot; `markHaulsSeen` sets `lastHaul.seen` when the map is shown), `sendHunter`, `resolveReturns(state, now)` (haul, wild hue with pity timer +2%/trip, postcards, companion postcard 1/15 long trips, special markets for Trader), scouting choice, hiring, leveling perks.
 - `quests.js` — daily roll (3/day, weighted by unlocks, disabled types), reroll, progress hooks (`questEvent(state, type, amount)`), weekly quest, catch-up bank (2 days).
 - `events.js` — 8-week rotation keyed by ISO week; event points; track claims; progress persists per event key across reruns.
 - `commissions.js` — open 2–3, step progress via stock delivery, rewards (signature color id).
 - `prestige.js` — `heritagePreview(state)` = floor(sqrt(runEarned/1e7)), `renovate(state, now)` (resets stations/coins/rooms/shelf contents; keeps catalog, hunters, album, apprentices, heritage, gallery, essence), heritage tree purchase.
 - `ledger.js` — `buildReturnSummary(state, before, after, now)` and `almostThere(state)` (3–5 nearly-finished things across zones).
-- `offline.js` — `catchUp(state, now)`: snapshot, `factory.tick`, hunters, spillover, accidents, gallery admission, then builds the ledger. Called on boot and on `visibilitychange` → visible.
+- `offline.js` — `catchUp(state, now)`: snapshot, `factory.tick`, hunters, spillover, accidents, gallery admission, then builds the ledger. Called on boot and on `visibilitychange` → visible. `shiftClock(state, ms)` moves every saved clock and absolute schedule (orders, Clerk, spillover, collector, admission, trips, fleet, Rush, boosts) `ms` into the past: `Game` uses it when the device clock went backwards (trips and cooldowns keep their time left), `debug.advance` to fake time passing.
 - `closeUp.js` — `closeUpShop(state, now)`: sends idle hunters overnight, queues every mixer, returns `{fillTime}`.
 
 ## Puzzles (src/puzzles/)
@@ -171,7 +171,7 @@ All pure, all take `rng`. Each exposes `create(opts, rng) -> puzzle`, `apply(puz
 ## UI (src/ui/)
 
 - Screens are modules exporting `{ id, mount(root, ctx), show(params), hide(), render(state) }`. `ctx = { game, audio, haptics, fx, navigate(screenId, params), toast(text), modal(...) }`.
-- Bottom bar tabs: workshop, orders, puzzles, map, catalog. Overlay screens (ledger, album, quests, gallery, shelf, settings, grading, purify, packing, naming, phase-beat) open as a stacked `<section>` with a back button.
+- Bottom bar tabs: workshop, orders, puzzles, map, catalog. `createRouter({tabDots})` reads `tabDots(state) -> {tabId: true}` on every render and shows a walnut dot (the map: a scouting choice waiting or an unread haul). Toasts (`overlay.toast`) sit just below the screen head (`--head-h` + safe area), at most 3, a tap dismisses. Overlay screens (ledger, album, quests, gallery, shelf, settings, grading, purify, packing, naming, phase-beat) open as a stacked `<section>` with a back button.
 - Rendering is innerHTML-rebuild of the changed card/list at most 10×/s (`render` is called on `change` and throttled with rAF). Number counters use `fx.rollNumber(el, from, to)`.
 - Every tap: `audio.tick()` + `haptics.light()` via a delegated `pointerdown` listener on `[data-tap]`.
 - `audio.js` — Web Audio synth, no samples. One `AudioContext` unlocked on first gesture. API: `tick()`, `tink(hz|lightness)`, `note(L)`, `arpeggio(Ls[])`, `chord(Ls[], bright)`, `clink(tier)`, `chain(step)`, `glug(fillRatio)`, `cork()`, `thunk()`, `stamp()`, `knock()`, `bell()`, `motif()` (four-note Tincture motif), `coins(n)`, `evening()`, `duck(ms)`. All pentatonic from `color.noteHz`. Respects `settings.sound` and the `visibilitychange` (suspend when hidden).
@@ -204,7 +204,7 @@ Tokens from the spec: `--plaster:#E3E6E0 --paper:#F7F4EC --walnut:#7B5236 --ink:
 ## Testing
 
 - `npm test` → `node --test test/` must pass. Pure modules get unit tests. `test/balance.test.js` runs the Era 1 simulation in `tools/balance/` for the three profiles (fewer seeds in test, e.g. 5) and asserts the design doc's "Automated balance tests" list.
-- `test/ui.smoke.mjs` (Playwright, Chromium at `/opt/pw-browsers/chromium`): boots the app from `python3 -m http.server`, walks the first ten minutes with time mocked, asserts no console errors.
+- `npm run e2e` (Playwright, Chromium at `/opt/pw-browsers/chromium`): `test/shell.e2e.mjs` (shell smoke), `test/first-ten-minutes.e2e.mjs` (walks the first ten minutes with time advanced, counts upgrades, no console errors, offline boot) and `test/update-flow.e2e.mjs` (0.1.0 → bump to 0.1.1 in a temp copy → Settings shows Restart → reload at 0.1.1).
 
 ## Conventions
 

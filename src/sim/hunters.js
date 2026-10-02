@@ -617,6 +617,36 @@ export function tripsSummary(state, now = 0) {
   });
 }
 
+/**
+ * mapAttention(state, now) -> {choices, hauls} (pure read, mutates nothing):
+ * scouting choices waiting for an answer, and hunters home with a haul she has
+ * not looked at yet (`lastHaul.seen` is set by markHaulsSeen when the map
+ * shows the Backpack). The router's map tab dot reads this.
+ */
+export function mapAttention(state, now = 0) {
+  const roster = state?.hunters?.roster;
+  let choices = 0;
+  let hauls = 0;
+  if (!Array.isArray(roster)) return { choices, hauls };
+  for (const x of roster) {
+    if (!x) continue;
+    const t = x.trip;
+    if (x.state === 'out' && t && t.scoutId && !t.choice && t.choiceOfferedAt !== null
+      && Number.isFinite(t.choiceOfferedAt) && t.choiceOfferedAt <= now && t.returnsAt > now) choices++;
+    else if (x.state !== 'out' && x.lastHaul && !x.lastHaul.seen) hauls++;
+  }
+  return { choices, hauls };
+}
+
+/** markHaulsSeen(state) -> {marked}: every home hunter's last haul counts as read. */
+export function markHaulsSeen(state) {
+  let marked = 0;
+  for (const x of state?.hunters?.roster ?? []) {
+    if (x && x.state !== 'out' && x.lastHaul && !x.lastHaul.seen) { x.lastHaul.seen = true; marked++; }
+  }
+  return { marked };
+}
+
 /** Home hunters available to send. */
 export function idleHunters(state) {
   return ensureHunters(state).roster.filter((x) => x.state !== 'out');

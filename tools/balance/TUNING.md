@@ -12,7 +12,7 @@ max(k·r·60, 0.25·m·c_min) with k 8/12/20/32, Heritage floor(sqrt(E/1e7)),
 admission 2×10⁻⁵ of piece value per second (the piece value formula too; only
 the paint price was changed, change 6), Essence +5% per star, Phase gates
 (10 colors + Mill Room, 30 colors + Loading Yard), base costs of every station
-and room.
+and room (except the three starter sources, change 7).
 
 ## The player
 
@@ -74,6 +74,7 @@ Choices the doc does not spell out, made here:
 | 4 | The shop kept half the display capacity as reserve before selling anything. With 8-hour vats that is about 4 hours of production: a new player's first sale came after 4+ hours and ~4 hours of stock stayed locked forever | `SHOP_RESERVE_SHARE` 0.5 → 0.02 (about 10 minutes of production at the 8-hour window; still enough working stock for paint and orders) | First sale about 10 minutes in |
 | 5 | Players who skip puzzles still found colors far faster than the doc (Casual, no puzzles: 50 colors on day 5.0, 68 by day 21; doc 18.9 and 54), because Phase 2+ happy accidents fired every 2 hours of production | `ACCIDENT_MS.later` 2 h → 6 h (Phase 1 stays at 3 h, doc change #3) | Casual, no puzzles: 50 colors on day 7.0, 70 by day 21; tier ratios settled (Master 1.36× on seeds 1–5) |
 | 6 | Gallery admission was ~0.3% of income (target 10–20%): paint cost a fixed size × 3 jars a region, so a piece was worth the same on day 2 and day 20 while income grew by orders of magnitude | Paint scales with production (`sim/gallery.js`): a canvas costs `PAINT_SECONDS` of her current mixer output (`rates().jars`, floored at `MIN_PAINT_RATE` 0.05 jars/s), split across regions by size, rate locked when the piece starts, jars stored per region. The doc's 20 minutes (1,200 s) gave 48% because the engine opens up to 24 walls by day 14 (the doc's model hung about 4) and the greedy painter's tints make a piece worth ~2.2× its paint (rarity 2 × variety ~1.1), not 1.3×. `PAINT_SECONDS` 1,200 → 150 (2.5 minutes of production); `VALUE_MULT` left at 1 (value formula unchanged) | Casual admission share at day 14: 0.3% → 15.2% (30 seeds; 14.8% on 10, 13.1% on the test's seeds 1–5). 240 s gave 19.8%, 300 s 23.3%. A tint piece repays its paint in ~6 h, a primary-only piece in ~13–14 h (doc: about 11 h) |
+| 7 | Early pace (DESIGN.md "First ten minutes": about 10 upgrades, an upgrade right after the first puzzles). After the first order and the first board she held about 7 Coins against a cheapest upgrade of 12 (11.5), and the shop sells nothing for ~10 minutes (the change-4 reserve), so the walk needed 5 minutes of `debug.advance` for 2 upgrades | (a) a new workshop starts with `STARTING_COINS = 25` ("a few coins left in the drawer", `src/state.js`; Renovate still starts at Deep Pockets); (b) the tour's first order (`order.tutorial`) and first grading board (`onboarding.flags.firstBoardPaid`) each pay a tutorial reward of 1× the cheapest upgrade on top (`economy.tutorialReward`); (c) starter sources' base cost 10 → 6. Shop and vat base costs stay at 40 / 60: cutting them in proportion (24 / 36) put Master at 1.60× Relaxed on the test seeds (cap 1.6; 1.32× without it), while sources alone leave every table unchanged | Measured by `test/first-ten-minutes.e2e.mjs`, which now buys the flow meter's suggestion when affordable, else the cheapest Level up: after the first order (+9.5) and board (+8.6) she holds 43.1 Coins with the cheapest upgrade at 6.9, buys 5 upgrades at once, and 3 more after a second order (~25 Coins): **8 upgrades in 5.5 minutes of session clock with 5.1 minutes of `debug.advance`** (was 2 upgrades after 5+ minutes advanced). With (a)+(b) alone: 55 Coins against 11.5, 4 upgrades. 30-seed tables below: within noise of change 6 (Casual Renovate 6.2, Master 1.45×) |
 
 Unchanged on purpose: `STORE_TARGET_MS` (the player keeps 8 hours regardless;
 the flow meter's phase targets only steer the suggestion), puzzle reward
@@ -88,13 +89,14 @@ got there. The doc's targets are in brackets.
 | --- | --- | --- | --- | --- | --- |
 | Engaged | 0.0 [0.4] | 0.5 [1.4] | 4.0 [3.5] | 1.3 [2.8] | 104 [100] |
 | Engaged, no puzzles | 1.4 [1.5] | 5.0 [16.8] | 8.5 [16.8] | 10.1 [—] | 59 [35] |
-| Casual | 0.3 [0.9] | 1.8 [3.9] | 6.2 [5.7; test 5–8] | 3.3 [7.6] | 92 [94] |
+| Casual | 0.3 [0.9] | 1.8 [3.9] | 6.2 [5.7; test 5–8] | 3.3 [7.6] | 91.5 [94] |
 | Casual, no puzzles | 1.5 [2.1; test ≤ 3] | 4.2 [11.3] | 9.0 [11.3] | 7.2 [18.9] | 70 [54] |
-| Forgetful | 1.0 [2.3] | 3.5 [10.3] | 9.3 [11.6] | 6.0 [15.8] | 82.5 [69] |
-| Forgetful, no puzzles | 3.5 [2.3] | 7.0 [10.8] | 12.5 [12.1] | 10.8 [16.3] | 66.5 [68] |
+| Forgetful | 1.0 [2.3] | 3.5 [10.3] | 9.3 [11.6] | 6.0 [15.8] | 82 [69] |
+| Forgetful, no puzzles | 3.5 [2.3] | 7.0 [10.8] | 12.5 [12.1] | 10.8 [16.3] | 66 [68] |
 
-Rerun after change 6 (scaled paint). Admission now compounds into income, so
-Engaged and Casual fit one more Renovate in 21 days (7 and 5).
+Rerun after change 7 (early pace; change 6 moved these last). Admission
+compounds into income, so Engaged and Casual fit one more Renovate in 21 days
+than before change 6.
 
 Colors include the running weekly event's page (it counts toward the catalog
 and the phase gates), which is how Engaged passes 100.
@@ -109,19 +111,19 @@ Tincture Era 1 balance simulation (real engine), 21 days, 30 seeds per profile. 
 | --- | --- | --- | --- | --- | --- |
 | Engaged | 0.0 | 0.5 | 4.0 | 1.3 | 104 |
 | Engaged, no puzzles | 1.4 | 5.0 | 8.5 | 10.1 | 59 |
-| Casual (target player) | 0.3 | 1.8 | 6.2 | 3.3 | 92 |
+| Casual (target player) | 0.3 | 1.8 | 6.2 | 3.3 | 91.5 |
 | Casual, no puzzles | 1.5 | 4.2 | 9.0 | 7.2 | 70 |
-| Forgetful | 1.0 | 3.5 | 9.3 | 6.0 | 82.5 |
-| Forgetful, no puzzles | 3.5 | 7.0 | 12.5 | 10.8 | 66.5 |
+| Forgetful | 1.0 | 3.5 | 9.3 | 6.0 | 82 |
+| Forgetful, no puzzles | 3.5 | 7.0 | 12.5 | 10.8 | 66 |
 
 #### Difficulty tiers (Casual schedule)
 
 | Tier | First Renovate (day) | Active minutes over 21 days | Active Coins per minute (vs Relaxed) |
 | --- | --- | --- | --- |
 | Relaxed | 6.5 | 168 | 1.00× |
-| Steady | 6.2 | 252 | 1.11× |
-| Tricky | 5.5 | 420 | 1.32× |
-| Master | 5.2 | 672 | 1.47× |
+| Steady | 6.2 | 252 | 1.12× |
+| Tricky | 5.5 | 420 | 1.33× |
+| Master | 5.1 | 672 | 1.45× |
 
 #### Always-progress check
 
@@ -138,22 +140,34 @@ Tincture Era 1 balance simulation (real engine), 21 days, 30 seeds per profile. 
 
 | Profile | Gallery opens (day) | Admission share, day 14 / day 21 | Shelf share, day 14 | Avg Essence stars, day 7 / 14 / 21 | Pieces painted by day 21 | Worst progress gap |
 | --- | --- | --- | --- | --- | --- | --- |
-| Engaged | 0.3 | 11.7% / 11.5% | 0.0% | 2.4 / 6.2 / 9.4 | 62 | 2.5 min |
-| Casual | 1.0 | 15.2% / 16.1% | 0.0% | 2.8 / 5.4 / 7.7 | 36 | 1.5 min |
-| Forgetful | 2.3 | 10.4% / 15.3% | 0.0% | 2.8 / 3.0 / 4.4 | 17 | 1 min |
+| Engaged | 0.3 | 12.7% / 11.2% | 0.0% | 2.4 / 5.7 / 9.3 | 62 | 2.5 min |
+| Casual | 1.0 | 15.3% / 14.8% | 0.0% | 2.8 / 5.3 / 7.9 | 37 | 1.5 min |
+| Forgetful | 2.3 | 10.9% / 15.5% | 0.0% | 2.8 / 3.0 / 4.3 | 17 | 1 min |
 
 #### Economy
 
 | Profile | Puzzle share of Coins | Income/s day 7 | Income/s day 14 | Income/s day 21 | Offline window after day 1 (median of min) | Worst | Renovates in 21 days |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Engaged | 34.0% | 11.0K | 48.4K | 105.5K | 7.9 h | 7.3 h | 7 |
-| Engaged, no puzzles | 0.0% | 4.9K | 14.2K | 41.6K | 7.6 h | 7.2 h | 4.5 |
-| Casual | 10.7% | 4.0K | 21.3K | 58.0K | 8.0 h | 7.5 h | 5 |
-| Casual, no puzzles | 0.0% | 5.1K | 10.0K | 32.9K | 7.8 h | 7.3 h | 4 |
-| Forgetful | 1.3% | 5.1K | 9.0K | 19.2K | 7.9 h | 7.3 h | 3 |
-| Forgetful, no puzzles | 0.0% | 948.8 | 4.0K | 13.6K | 8.0 h | 7.6 h | 2 |
+| Engaged | 34.0% | 11.4K | 48.4K | 110.5K | 8.0 h | 7.6 h | 6.5 |
+| Engaged, no puzzles | 0.0% | 4.9K | 14.6K | 41.4K | 7.7 h | 7.2 h | 5 |
+| Casual | 10.7% | 3.3K | 21.8K | 59.8K | 7.9 h | 7.3 h | 5 |
+| Casual, no puzzles | 0.0% | 5.1K | 10.2K | 35.9K | 7.9 h | 7.2 h | 4 |
+| Forgetful | 1.3% | 5.1K | 9.0K | 19.4K | 7.9 h | 7.2 h | 3 |
+| Forgetful, no puzzles | 0.0% | 948.8 | 4.8K | 13.2K | 8.0 h | 7.3 h | 2 |
 
 ## Open
+
+- **About 10 upgrades in the first ten minutes** (DESIGN.md) is reached only
+  with a second order (8 in the e2e walk). The shop sells nothing for its
+  first ~10 minutes (change 4 keeps 24 jars, 10 minutes of one mixer, in
+  reserve), so idle income does not help the first session. Lowering the
+  reserve for Phase 1, or a cheaper second mixer, are the levers if playtests
+  want more. Puzzles are not the bottleneck: once her first mixer runs,
+  r_idle counts the shop's sell rate (0.12 Coins/s), so a Relaxed board pays
+  8 × 60 × 0.12 ≈ 58 Coins and an order 2–4 minutes of it (the walk's second
+  order paid ~25), each several upgrades at 7–12 Coins. Only puzzles played
+  before a mixer has a recipe fall back to the 0.25 × c_min floor, which is why
+  the tour's first order and board carry the tutorial reward.
 
 - **Gallery paint is 2.5 minutes of production, not the doc's 20.** The doc's
   model hung about 4 pieces worth 1.3× their paint; the engine opens up to 24
@@ -164,8 +178,8 @@ Tincture Era 1 balance simulation (real engine), 21 days, 30 seeds per profile. 
   `PAINT_SECONDS` together, which keeps the share but stretches the repay time
   past 11 hours) is a doc decision. Day-14 share per seed (10 seeds) ranges
   11% to 21%: it swings with where the day falls in the Renovate cycle.
-- **Master's per-minute edge sits near the cap.** It reads 1.47× over 30 seeds
-  (1.54× before change 6; doc model: 1.57×), but per seed it ranges
+- **Master's per-minute edge sits near the cap.** It reads 1.45× over 30 seeds
+  (1.47× after change 6, 1.54× before it; doc model: 1.57×), but per seed it ranges
   1.1× to 2.3× because the 21-day window lands at
   different points of each run's Renovate cycle (Master fits five Renovates,
   Relaxed four). A run where Master reveals only one tint per board was just as

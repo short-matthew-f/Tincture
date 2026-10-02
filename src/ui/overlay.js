@@ -66,7 +66,9 @@ function removeToast(t) {
 
 /**
  * toast(text, {hex, ms=2400, action:{label, onClick}}) -> {dismiss}.
- * Small paper toast at the top; at most 3 stacked (the oldest leaves first).
+ * Small paper toast just below the screen head (style.css #toasts: head height +
+ * safe area, so it never covers the back button or title); at most 3 stacked
+ * (the oldest leaves first); a tap dismisses it.
  */
 export function toast(text, { hex = null, ms = 2400, action = null } = {}) {
   const host = toastsEl();
@@ -77,13 +79,13 @@ export function toast(text, { hex = null, ms = 2400, action = null } = {}) {
   t.innerHTML = String(h`${hex ? raw(`<span class="toast-dot" style="background:${safeHex(hex)}"></span>`) : ''}<span>${text}</span>${action ? h`<button type="button" class="btn btn-paper small" data-tap>${action.label}</button>` : ''}`);
   if (action) {
     const b = t.querySelector('button');
-    b.addEventListener('click', () => {
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
       removeToast(t);
-      try { action.onClick && action.onClick(); } catch (e) { console.error(e); }
+      try { action.onClick && action.onClick(); } catch (err) { console.error(err); }
     });
-  } else {
-    t.addEventListener('click', () => removeToast(t));
   }
+  t.addEventListener('click', () => removeToast(t)); // a tap anywhere on a toast dismisses it
   host.appendChild(t);
   const live = [...host.querySelectorAll('.toast')].filter((x) => !x._leaving);
   while (live.length > MAX_TOASTS) removeToast(live.shift());

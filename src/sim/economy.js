@@ -412,6 +412,19 @@ export function puzzleReward(state, tier = 'relaxed', opts = {}) {
   return Math.max(k * r * 60, REWARD_FLOOR * mult * cmin, 0);
 }
 
+/** Tutorial rewards (first order, first board) pay this many cheapest upgrades on top. */
+export const TUTORIAL_REWARD_MULT = 1;
+
+/**
+ * tutorialReward(state) -> TUTORIAL_REWARD_MULT × c_min. Paid once for the
+ * onboarding's first order (`order.tutorial`) and once for its first grading
+ * board (`onboarding.flags.firstBoardPaid`), so she can buy an upgrade right
+ * after each (DESIGN.md "First ten minutes"; TUNING.md change 7).
+ */
+export function tutorialReward(state) {
+  return Math.max(0, num(TUTORIAL_REWARD_MULT * num(cheapestUpgrade(state).cost)));
+}
+
 // ---------------------------------------------------------------------------
 // Flow meter
 // ---------------------------------------------------------------------------

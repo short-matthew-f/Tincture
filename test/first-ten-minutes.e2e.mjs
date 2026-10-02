@@ -8,10 +8,13 @@
 // (debug.advance(ms)) or speed up discoveries (debug.discover(id)).
 //
 // Script: welcome -> first order mixed (madder + ochre) and delivered -> naming
-// prompt -> named -> Relaxed grading board solved -> a tint discovered -> two
-// upgrades bought in the Workshop -> 5 colors -> the Merge Shelf opens seeded,
-// one tap-merge chains -> the order board fills -> Mill Room tag visible ->
-// Close up shop introduced -> 3 days away reopen the Morning Ledger with
+// prompt -> named -> Relaxed grading board solved -> a tint discovered ->
+// upgrades bought in the Workshop (the flow meter's suggestion when affordable,
+// else the cheapest Level up) -> 5 colors -> the Merge Shelf opens seeded, one
+// tap-merge chains -> the order board fills and she fills a second order ->
+// more upgrades -> Mill Room tag visible -> Close up shop introduced; the first
+// session must buy at least 6 upgrades with at most 10 minutes of
+// debug.advance (TUNING.md change 7) -> 3 days away reopen the Morning Ledger with
 // produced lines -> All caught up. Then every screen and overlay is opened
 // and closed, and finally an offline reload must boot from the service worker.
 //
@@ -202,6 +205,57 @@ try {
     if (await b.count()) { await b.first().click(); await wait(200); }
   }
 
+  // The first session's clock: debug.advance is the only way time passes faster
+  // than real time, and DESIGN.md's script fits in ten minutes.
+  const SESSION_MS = 10 * 60e3;
+  let advanced = 0;
+  const advance = async (ms) => { advanced += ms; await S((x) => window.tincture.debug.advance(x), ms); };
+  // Every upgrade she buys in the first session (Workshop buttons only).
+  const purchases = [];
+  // debug.advance moves her clocks back rather than now forward, so the session
+  // clock is real time since the welcome card plus everything advanced.
+  let sessionStart = Date.now();
+  const sessionClock = () => Date.now() - sessionStart + advanced;
+
+  /**
+   * One buying round in the Workshop: the flow meter's suggestion whenever she
+   * can afford it, otherwise the first affordable Level up. Repeats until
+   * nothing is affordable. Returns how many she bought.
+   */
+  async function buyRound(label) {
+    if ((await topId()) !== 'workshop') { await page.click('#tabbar [data-tab="workshop"]'); await waitTop('workshop'); }
+    await dismissCoach();
+    const collect = page.locator(`${sec('workshop')} [data-action="collect"]:visible`);
+    if (await collect.count()) { await collect.first().click(); await wait(600); }
+    let n = 0;
+    for (let guard = 0; guard < 20; guard++) {
+      const coinsBefore = await S(() => window.tincture.game.state.coins);
+      const sugg = page.locator(`${sec('workshop')} [data-action="suggestion"]:not([aria-disabled="true"])`);
+      const suggKind = (await sugg.count()) ? await sugg.first().getAttribute('data-kind') : '';
+      let what = '';
+      if (suggKind && suggKind !== 'assign' && Number(await sugg.first().getAttribute('data-cost')) > 0) {
+        what = 'suggestion: ' + (await sugg.first().textContent()).trim();
+        await sugg.first().click();
+      } else {
+        // The cheapest affordable Level up (open panels only, as she sees them).
+        const buys = page.locator(`${sec('workshop')} [data-action="buy"]:not([disabled]):not([aria-disabled="true"])`);
+        const costs = await buys.evaluateAll((bs) => bs.map((b) => Number(b.dataset.cost)));
+        if (!costs.length) break;
+        const buy = buys.nth(costs.indexOf(Math.min(...costs)));
+        what = await buy.evaluate((b) => (b.closest('.ws-row')?.querySelector('.ws-t')?.textContent || b.dataset.kind || '').trim());
+        await buy.scrollIntoViewIfNeeded();
+        await buy.click();
+      }
+      await wait(250);
+      await clearCeremonies();
+      const coinsAfter = await S(() => window.tincture.game.state.coins);
+      if (!(coinsAfter < coinsBefore)) break;
+      n++;
+      purchases.push({ at: sessionClock(), what, cost: coinsBefore - coinsAfter, label });
+    }
+    return n;
+  }
+
   const discovered = () => S(() => Object.keys(window.tincture.game.state.catalog.discovered).length);
   const onboarding = () => S(() => ({ ...window.tincture.game.state.onboarding }));
 
@@ -216,6 +270,7 @@ try {
   await step('welcome');
 
   // ---------------------------------------------------------------- first order
+  sessionStart = Date.now();
   await page.click(`${sec('onboarding')} [data-action="welcome-start"]`);
   await waitTop('orders');
   must(await page.isVisible('[data-coach="first-order"]'), 'the first order is on the board with its coach mark');
@@ -284,30 +339,21 @@ try {
   await wait(400);
   must(await S(() => window.tincture.game.state.stations.mixers[0].recipe === 'orange'), 'mixer 1 makes orange');
   await step('mixer-assigned');
+  // The till from the drawer plus the tutorial rewards of the first order and
+  // the first board: her first upgrades come at once.
+  const coinsAtStep3 = await S(() => window.tincture.game.state.coins);
+  const cheapestAtStep3 = await S(() => window.tincture.ctx.sim.economy.cheapestUpgrade(window.tincture.game.state).cost);
+  console.log(`     at step 3: ${coinsAtStep3.toFixed(1)} Coins, cheapest upgrade ${cheapestAtStep3.toFixed(1)}`);
+  check(coinsAtStep3 >= 3 * cheapestAtStep3, 'after the first order and board she can afford three upgrades');
+  const levelsBefore = await S(() => window.tincture.game.state.onboarding.flags.levelsAt);
+  let bought = await buyRound('first upgrades');
   // Let the workshop run a few minutes (still in the session: no Ledger during onboarding).
-  for (let i = 0; i < 6; i++) {
-    await S(() => window.tincture.debug.advance(50e3));
+  for (let i = 0; i < 4; i++) {
+    await advance(45e3);
     await wait(120);
   }
-  const collect = page.locator(`${sec('workshop')} [data-action="collect"]:visible`);
-  if (await collect.count()) { await collect.first().click(); await wait(800); }
-  const levelsBefore = await S(() => window.tincture.game.state.onboarding.flags.levelsAt);
-  let bought = 0;
-  for (let tries = 0; tries < 12 && bought < 2; tries++) {
-    const buy = page.locator(`${sec('workshop')} [data-action="buy"]:not([disabled]):not([aria-disabled="true"])`);
-    const coinsBefore = await S(() => window.tincture.game.state.coins);
-    if (await buy.count()) {
-      await buy.first().scrollIntoViewIfNeeded();
-      await buy.first().click();
-      await wait(300);
-      if ((await S(() => window.tincture.game.state.coins)) < coinsBefore) bought++;
-    } else {
-      await S(() => window.tincture.debug.advance(50e3));
-      await wait(150);
-      if (await collect.count()) { await collect.first().click(); await wait(600); }
-    }
-  }
-  must(bought >= 2, `bought ${bought} upgrades from the Workshop`);
+  bought += await buyRound('after a few minutes');
+  must(bought >= 3, `bought ${bought} upgrades from the Workshop`);
   check(Number.isFinite(levelsBefore), 'onboarding recorded the station levels at step 3');
   await step('upgrades');
 
@@ -350,7 +396,7 @@ try {
   // ---------------------------------------------------------------- 6:00 order board fills, Mill Room goal
   for (let i = 0; i < 12; i++) {
     if ((await S(() => window.tincture.game.state.orders.open.length)) >= 3) break;
-    await S(() => window.tincture.debug.advance(55e3));
+    await advance(55e3);
     await wait(100);
   }
   await page.click('#tabbar [data-tab="orders"]');
@@ -358,6 +404,23 @@ try {
   const openOrders = await S(() => window.tincture.game.state.orders.open.length);
   must(openOrders >= 3, `the order board fills (${openOrders} open orders)`);
   await step('orders-full');
+  // She fills one more: the first match order, mixed from its recipe.
+  const next = await S(() => window.tincture.game.state.orders.open.find((o) => o.kind === 'match' && Array.isArray(o.recipe)));
+  if (next) {
+    const coinsBeforeOrder = await S(() => window.tincture.game.state.coins);
+    await page.click(`${sec('orders')} [data-action="open-match"][data-order="${next.id}"]`);
+    await waitTop('matching');
+    for (const r of next.recipe) {
+      for (let k = 0; k < r.weight; k++) await page.click(`${sec('matching')} [data-drop="${r.pigment}"]`);
+    }
+    await page.click(`${sec('matching')} [data-action="submit"]`);
+    await wait(900);
+    await keepNames();
+    check((await S(() => window.tincture.game.state.coins)) > coinsBeforeOrder, 'a second order pays');
+    if ((await topId()) === 'matching') await page.click(`${sec('matching')} [data-action="back-orders"]`);
+    await clearCeremonies();
+  }
+  await buyRound('after the second order');
   await page.click('#tabbar [data-tab="workshop"]');
   await waitTop('workshop');
   const ob5 = await onboarding();
@@ -372,15 +435,22 @@ try {
   for (let i = 0; i < 6; i++) {
     const o = await onboarding();
     if (o.done || o.step >= 7) break;
-    await S(() => window.tincture.debug.advance(31e3));
+    await advance(31e3);
     await wait(400);
     const ok = page.locator('#coach-layer [data-coach-action="ok"]');
     if (await ok.count()) { await ok.first().click(); await wait(300); }
   }
   const ob7 = await onboarding();
   must(ob7.step === 7 && !ob7.done, 'onboarding reached "Close up shop"');
-  await S(() => window.tincture.debug.advance(31e3));
+  await advance(31e3);
   await wait(500);
+  await buyRound('before closing up');
+  console.log(`     first session: ${purchases.length} upgrades in ${(sessionClock() / 60e3).toFixed(1)} min `
+    + `(${(advanced / 60e3).toFixed(1)} min advanced)\n       ` + purchases.map((p) => `${(p.at / 60e3).toFixed(1)} min  ${p.what} (${p.cost.toFixed(1)}; ${p.label})`).join('\n       '));
+  check(advanced <= SESSION_MS, `the first session lets at most 10 minutes pass (${(advanced / 60e3).toFixed(1)} min advanced)`);
+  check(purchases.length >= 6, `at least 6 upgrades bought in the first ten minutes (${purchases.length})`);
+  await page.click('#tabbar [data-tab="workshop"]');
+  await waitTop('workshop');
   const closeUp = page.locator(`${sec('workshop')} [data-coach="close-up"]`);
   must(await closeUp.count() > 0, 'the Close up shop control is on the Workshop');
   await closeUp.first().scrollIntoViewIfNeeded();
@@ -480,9 +550,13 @@ try {
       return !!(el && !el.hidden && el.getBoundingClientRect().height > 0 && el.textContent.trim().length > 0);
     }, id);
     if (id === 'paint' && !(await S(() => (window.tincture.game.state.gallery.pieces || []).some((p) => !p.signedAt)))) {
-      // Painting needs a piece on the easel; with none (the Gallery is still locked) it steps back by itself.
+      // Painting needs a piece on the easel; with none it closes and points her to the Gallery.
       check(!(await S(() => window.tincture.router.isOpen('paint'))), 'paint with no piece on the easel closes itself');
+      check((await topId()) === 'gallery', 'paint with no piece opens the Gallery');
+      check(await page.locator('#toasts .toast', { hasText: 'Pick a canvas to start painting' }).count() > 0, 'paint with no piece says "Pick a canvas to start painting"');
       noNewErrors('screen paint');
+      await S(() => window.tincture.router.back());
+      await wait(200);
       continue;
     }
     check(visible, `${id} opens and shows content`);

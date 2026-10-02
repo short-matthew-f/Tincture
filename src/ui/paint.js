@@ -14,7 +14,8 @@
  * Also exports `canvasSvgMarkup` and `exportPieceImage`, which gallery.js
  * reuses for its framed mini-renders.
  *
- * Params: show({pieceId}). data-actions: sign, sign-confirm, sign-cancel,
+ * Params: show({pieceId}); with no piece on the easel it closes, opens the
+ * Gallery and toasts "Pick a canvas to start painting". data-actions: sign, sign-confirm, sign-cancel,
  * hang, archive, undo, export, share, pick, family, close-sheet.
  */
 
@@ -602,8 +603,12 @@ const screen = {
     ui.lastCost = 0;
     closeSheet();
     if (!piece()) {
+      // Nothing on the easel: step back and point her to the Gallery's canvases.
       root.innerHTML = '';
-      if (ctx.back) ctx.back();
+      if (ctx.router && ctx.router.close) ctx.router.close('paint');
+      else if (ctx.back) ctx.back();
+      ctx.navigate('gallery');
+      if (ctx.toast) ctx.toast('Pick a canvas to start painting');
       return;
     }
     buildAll();

@@ -17,7 +17,7 @@ import { emit } from './bus.js';
 import { questEvent } from './quests.js';
 import { eventPoints } from './events.js';
 import {
-  incomeRate, incomeMultiplier, cheapestUpgrade, colorDef, colorTier, flowMeter,
+  incomeRate, incomeMultiplier, cheapestUpgrade, colorDef, colorTier, flowMeter, tutorialReward,
 } from './economy.js';
 import { takeStock } from './storage.js';
 import { availablePigments, tryDiscover, discoveredColors } from './discovery.js';
@@ -150,7 +150,12 @@ export function submitOrder(state, args = {}, now = 0) {
     res = { tier: sc.tier, pct: sc.pct, de: sc.de, mixHex, star: sc.star };
     if (mixHex) res.discovered = tryDiscover(state, { hex: mixHex, method: 'order' }, now);
   }
-  const coins = num(base * res.pct * mult);
+  let coins = num(base * res.pct * mult);
+  // The onboarding's first order also pays a tutorial reward: one cheapest upgrade.
+  if (order.tutorial) {
+    res.tutorialBonus = tutorialReward(state);
+    coins += res.tutorialBonus;
+  }
   payOut(state, coins);
   b.open.splice(idx, 1);
   b.filledCount = num(b.filledCount) + 1;

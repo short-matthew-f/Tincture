@@ -105,6 +105,7 @@ export function ensureStyles() {
 .ws-row .ws-lead { flex: 0 0 auto; display: flex; }
 .ws-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .ws-main .ws-t { font-size: 15px; font-weight: 600; line-height: 1.2; }
+.ws-main .ws-t .ws-loan { margin-left: 6px; vertical-align: 2px; }
 .ws-main .ws-s { font-size: 13px; color: var(--ink-soft); }
 .ws-main .ws-hint { font-size: 12px; color: var(--walnut); }
 .ws-actions { flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; align-items: stretch; min-width: 84px; }
@@ -558,17 +559,19 @@ function panelSpec(key, s, t) {
       const ids = Object.keys(st.sources || {});
       const built = ids.filter((id) => num(st.sources[id].level) > 0).length;
       return {
-        sig: ids.map((id) => `${id}:${st.sources[id].level}`).join(','),
+        sig: ids.map((id) => `${id}:${st.sources[id].level}:${st.sources[id].eventLoan ? 'loan' : ''}`).join(','),
         summary: `${built} source${built === 1 ? '' : 's'}`,
         rows: () => ids.map((id) => {
           const L = num(st.sources[id].level);
           const def = SOURCES_BY_ID[id];
           const pig = getPigment(def?.pigment ?? id);
           const out = L > 0 ? eco().stationOutput('source', L, id) * pm : num(def?.baseRate, 1) * pm;
+          // A source lent by the weekly event (Deep Sea twist) goes back at the week's end.
+          const loan = st.sources[id].eventLoan ? h` <span class="tag ws-loan" data-loan="${id}">this week</span>` : '';
           return row({
             key: `source:${id}`,
             lead: swatch(pig?.hex ?? hexOf(id), 36),
-            title: def?.name ?? cap1(id),
+            title: h`${def?.name ?? cap1(id)}${loan}`,
             sub: L > 0 ? `Level ${L} · ${fmtRate(out)} raw/s` : `Found by a hunter · ${fmtRate(out)} raw/s when built`,
             hint: L > 0 ? milestoneHint(L) : '',
             actions: buyBtn(L > 0 ? 'Level up' : 'Build', eco().stationCost('source', L, id), { 'data-action': 'buy', 'data-kind': 'source', 'data-id': id }),

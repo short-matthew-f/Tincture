@@ -38,11 +38,12 @@ test('orders: a perfect match pays 150% plus a reputation star', () => {
   manualOrder(s);
   const base = orderBasePay(s, 3);
   assert.equal(handDeliverBonus(s, NOW), 1);
+  const before = s.coins; // the till starts with STARTING_COINS
   const r = submitOrder(s, { orderId: 'o-test', drops: [{ id: 'woad', hex: getPigment('woad').hex, count: 2 }] }, NOW);
   assert.equal(r.ok, true);
   assert.equal(r.tier, 'perfect');
   assert.ok(Math.abs(r.coins - base * 1.5) < 1e-9, `${r.coins} vs ${base * 1.5}`);
-  assert.equal(s.coins, r.coins);
+  assert.equal(s.coins, before + r.coins);
   assert.equal(s.orders.reputation, 1);
   assert.equal(s.orders.filledCount, 1);
   assert.ok(s.orders.open.length >= MIN_OPEN, 'board refilled');
@@ -85,4 +86,22 @@ test('orders: the Order Clerk fills matching orders from stock at 70%', () => {
   assert.equal(r.filled, 1);
   assert.ok(Math.abs(r.coins - base * 0.7) < 1e-9);
   assert.ok(!s.orders.open.some((o) => o.id === 'o-test'));
+});
+
+test('orders: the onboarding tutorial order pays one cheapest upgrade on top', async () => {
+  const { cheapestUpgrade, tutorialReward } = await import('../src/sim/economy.js');
+  const { STARTING_COINS } = await import('../src/state.js');
+  const s = createInitialState(NOW, 31);
+  assert.equal(s.coins, STARTING_COINS);
+  assert.ok(STARTING_COINS >= 3 * cheapestUpgrade(s).cost, 'the drawer alone buys a few first upgrades');
+  const o = manualOrder(s);
+  o.tutorial = true;
+  const base = orderBasePay(s, 3);
+  const bonus = tutorialReward(s);
+  assert.equal(bonus, cheapestUpgrade(s).cost);
+  const r = submitOrder(s, { orderId: 'o-test', drops: [{ id: 'woad', hex: getPigment('woad').hex, count: 1 }] }, NOW);
+  assert.equal(r.tier, 'perfect');
+  assert.equal(r.tutorialBonus, bonus);
+  assert.ok(Math.abs(r.coins - (base * 1.5 + bonus)) < 1e-9);
+  assert.ok(s.coins - STARTING_COINS >= cheapestUpgrade(s).cost, 'the first order alone pays for an upgrade');
 });

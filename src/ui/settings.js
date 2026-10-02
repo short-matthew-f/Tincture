@@ -310,7 +310,7 @@ function doImport() {
   try { res = ctx.game.importSave(text); } catch (e) { res = { ok: false, error: e && e.message }; }
   const ok = res === undefined || res === true || (res && res.ok !== false);
   ui.message = ok ? 'Save imported. Welcome back.' : "That file didn't look like a Tincture save, so nothing was changed.";
-  if (ok && ctx.toast) ctx.toast('Save imported');
+  if (ctx.toast) ctx.toast(ok ? 'Save imported' : 'That file is not a Tincture save. Your game is unchanged.');
   refresh();
 }
 
@@ -372,6 +372,7 @@ function onChange(e) {
       refresh();
     }, () => {
       ui.message = "That file couldn't be read.";
+      if (ctx.toast) ctx.toast("That file couldn't be read. Your game is unchanged.");
       refresh();
     });
   }

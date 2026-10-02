@@ -4,7 +4,7 @@
  * `ctx.back` and ARCHITECTURE.md "UI" (tabs replace the stack; overlays stack
  * as <section>s with a back button).
  *
- *   const router = createRouter({ screens, root, tabbar, onChange, overlay })
+ *   const router = createRouter({ screens, root, tabbar, onChange, overlay, tabDots })
  *   router.navigate(id, params)   tab -> stack = [id]; other -> push (or bring to top)
  *   router.back()                 modal first, then pop; on a non-workshop tab -> workshop
  *   router.current()              {id, params} on top
@@ -21,6 +21,9 @@
  * including re-navigating to the top screen with new params; it does NOT run
  * again when an overlay above it closes (that calls reveal/render).
  *
+ * `tabDots(state)` -> {tabId: true}: a pure read run on every render; flagged
+ * tabs get a small walnut `.dot` (the map: a scouting choice or an unread haul).
+ *
  * Phone back button: the router keeps `history` entries in step with the stack
  * (pushState per overlay level), so popstate pops the stack.
  */
@@ -33,7 +36,7 @@ export const FULLSCREEN_IDS = Object.freeze(['matching', 'bench', 'commissions',
 
 export function createRouter({
   screens, root = null, tabbar = null, onChange = null, overlay = null, afterRender = null,
-  tabs = TABS, home = 'workshop', history: hist = (typeof window !== 'undefined' ? window.history : null),
+  tabDots = null, tabs = TABS, home = 'workshop', history: hist = (typeof window !== 'undefined' ? window.history : null),
 } = {}) {
   let stack = [];
   const errorsAt = new Map(); // screen id -> last logged error time
@@ -244,7 +247,26 @@ export function createRouter({
     if (state) lastState = state;
     if (!lastState) return;
     for (const id of visibleIds()) safe(id, 'render', lastState);
+    renderDots(lastState);
     if (afterRender) { try { afterRender(lastState, current()); } catch (e) { console.error('[router] afterRender failed', e); } }
+  }
+
+  /** Tab dots: `tabDots(state)` -> {tabId: true} (a pure read); a .dot span per flagged tab. */
+  function renderDots(state) {
+    if (!tabbar || typeof tabDots !== 'function') return;
+    let want = {};
+    try { want = tabDots(state) || {}; } catch (e) { want = {}; }
+    tabbar.querySelectorAll('[data-tab]').forEach((b) => {
+      const on = !!want[b.dataset.tab];
+      const dot = b.querySelector(':scope > .dot');
+      if (on && !dot) {
+        const d = b.ownerDocument.createElement('span');
+        d.className = 'dot';
+        d.setAttribute('aria-hidden', 'true');
+        b.appendChild(d);
+      } else if (!on && dot) dot.remove();
+      b.toggleAttribute('data-dot', on);
+    });
   }
 
   function requestRender(state) {

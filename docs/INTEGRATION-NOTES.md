@@ -38,13 +38,29 @@ Fixed while walking the first ten minutes:
 - Empty vat label "Pick col…" truncated: now "Choose".
 - `window.tincture.debug.advance(ms)` / `debug.discover(id)` for tests and the console.
 
+Final pass (early pace, toasts, small open items, review, update flow, README):
+- Early pace (TUNING.md change 7): `STARTING_COINS = 25`; the tour's first order and first board pay a tutorial reward of one cheapest upgrade (`economy.tutorialReward`, `order.tutorial`, `onboarding.flags.firstBoardPaid`); starter sources cost 6 (was 10; shop and vat kept at 40 / 60, see TUNING). The e2e walk buys the flow meter's suggestion when affordable, else the cheapest Level up, and checks at least 6 upgrades with at most 10 minutes of `debug.advance`: 8 upgrades, 5.1 minutes advanced (43.1 Coins vs a 6.9 upgrade right after the first order and board).
+- Toasts sit below the screen head (`--head-h` 66 px + 10 px + safe area = 76 px), at most 3, and a tap anywhere on one dismisses it (action toasts too).
+- Map tab dot: `hunters.mapAttention(state, now)` (pure read) through the router's new `tabDots` option; `markHaulsSeen` runs when the map is on screen.
+- A Deep Sea loan shows a "this week" paper tag in the Workshop's sources panel.
+- Paint with no piece on the easel closes, opens the Gallery and toasts "Pick a canvas to start painting" (e2e-checked).
+- Review fixes (tests in `test/review.test.js`):
+  - `mergeDefaults` fills missing keys one level deep in every object section (gallery, onboarding + flags, orders, shelf, hunters, quests, ...) and resets non-finite coins/seals/heritage; a v1 save missing them loads and plays.
+  - `deserialize` refuses JSON without `state.stations` and `state.catalog`: before, `{"state":{}}` imported as a blank game and wiped hers. Settings now toasts on a bad file ("Your game is unchanged") as well as on a good one.
+  - Clock moved back: `Game._fixClock` only rebased `lastTick`/`lastSeenAt`, so hunter trips, Rush, boosts, order refresh and spillover waited an extra day. It now shifts every schedule (`sim.shiftClock`, shared with `debug.advance`, which now also ages boosts and Rush). `rush` ignores a `rushedAt` in the future. `rollDaily`/`rollWeekly` keep the current quests when the date goes backwards (before: free fresh dailies, then a bank top-up when the clock came back).
+  - `reset()` also removes `tincture.ui.*` notes (the hunters' postcard log would otherwise show the old game's cards) and the `.unreadable` copy; layout prefs stay.
+  - Checked and fine: 30-day `catchUp` (~20 ms, no NaN/Infinity anywhere in state or summary), full shelf + full storage + 6 hunters out + 10 orders, Rush cooldown across a reload, Renovate twice (second refused), Clerk/Dispatcher/Steward with 0 Coins, `flowMeter` with no production, `puzzleReward` on odd states (always finite and > 0).
+- Update flow verified (`test/update-flow.e2e.mjs`, in `npm run e2e`): 0.1.0 says Up to date; after `bump-version.js 0.1.1` in a temp copy served on the same origin (with GitHub Pages' `max-age=600` headers) Settings shows Update ready + Restart, and Restart reloads on 0.1.1 with only the `tincture-v0.1.1` cache. No pwa.js / sw.js change was needed. `window.tincture.version` exposes `APP_VERSION`.
+- README.md at the repo root.
+
 ## Open
 
-- Map tab dot for a pending scout choice is not wired (needs a read-only "choice waiting" helper; `offerChoice` may mutate state, so it is not called from render).
-- A loaned Deep Sea source shows like any other source; the Workshop could tag it "for this week".
 - The first grading board in onboarding uses the running event's palette and frame (Autumn Harvest leaf); a plain board in her own colors may read better as the very first one.
 - Gallery, hunters, commissions, packing and purify are beyond the first ten minutes: the e2e only opens their screens empty. A second walk (Phase 2+) should drive them.
-- `paint` with no piece on the easel closes itself (the e2e checks that); nothing points her to the Gallery from there.
 - The All caught up stamp needs every pending thing handled (quests, event steps, accidents, muddy batches, collector); after 3 days away that means selling or purifying every muddy batch. Consider letting "Sell as is" batch-sell from the Ledger line.
-- Early pace: after the first order and first board she holds about 7 Coins and the cheapest upgrade is 12; with one mixer on her orange the shop sells 0.04 jars/s (about +0.1 Coins/s, collected by hand until the Errand Runner), so two upgrades take roughly 3 more minutes. The e2e lets 5 minutes pass with `debug.advance`. DESIGN's "about 10 upgrades in the first ten minutes" looks out of reach; a balance question.
+- Early pace: 8 upgrades in the walk's first session, against DESIGN's "about 10". The shop's reserve (24 jars, ~10 minutes of one mixer) means no idle income in the first session; orders and boards (paid in minutes of r_idle once a mixer runs) carry it. Levers if playtests want more: a smaller Phase 1 reserve or a cheaper second mixer (TUNING.md "Open").
+- The flow meter's first suggestion after a recipe is the shop (46) and then the mixer (288): neither is affordable in the first minutes, so the coach mark at step 3 points at a button that says "Needs …" while cheap source upgrades sit in the panels. Consider letting the suggestion fall back to the cheapest affordable upgrade in Phase 1.
+- Old saves: `lastHaul.seen` is missing on hauls from before this pass, so the map tab shows a dot once until she opens the map.
+- Toast offset is a fixed `--head-h` (66 px). Every overlay head measures 62 px; the Workshop's taller HUD (title row, meters, suggestion) is partly under a toast, but its gear and title are not.
 - Per-screen injected `<style>` tags were left as they are (consolidating them into style.css is not trivial: 20+ screens, each scoped by its own prefix).
+- Shipped files changed in this pass but the version stays 0.1.0 (as instructed; `bump-version.js 0.1.0` refreshed the SHELL list). Bump to 0.1.1 before deploying over an installed 0.1.0, or installed players will not be offered the update.

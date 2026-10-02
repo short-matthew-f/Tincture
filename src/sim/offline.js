@@ -26,3 +26,37 @@ export function catchUp(state, a, b) {
   state.lastSeenAt = now;
   return summary;
 }
+
+/**
+ * shiftClock(state, ms) -> state. Moves every saved moment and schedule `ms`
+ * into the past: the loop clocks (lastTick, lastSeenAt) and everything that
+ * waits on an absolute time (order refresh and Order Clerk, shelf spillover,
+ * collector visit and offer, gallery admission, hunter trips and scouting
+ * calls, fleet trips, Rush cooldowns, boosts, the coach-mark gap).
+ *
+ * Two callers: Game._fixClock when the device clock went backwards (shift by
+ * how far the saved clocks are ahead, so trips and cooldowns keep the time
+ * they had left: nothing granted, nothing lost), and the debug `advance(ms)`
+ * (shift, then the catch-up runs as if `ms` had passed).
+ */
+export function shiftClock(state, ms) {
+  const d = Number(ms);
+  if (!state || !Number.isFinite(d) || d <= 0) return state;
+  const back = (o, k) => { if (o && Number.isFinite(o[k]) && o[k] > 0) o[k] -= d; };
+  back(state, 'lastTick');
+  back(state, 'lastSeenAt');
+  back(state.orders, 'nextRefreshAt');
+  back(state.orders, 'nextClerkAt');
+  back(state.shelf, 'nextSpilloverAt');
+  back(state.gallery, 'nextCollectorAt');
+  back(state.gallery, 'lastAdmissionAt');
+  back(state.gallery && state.gallery.collectorOffer, 'until');
+  back(state.onboarding && state.onboarding.flags, 'stepAt');
+  for (const h of (state.hunters && state.hunters.roster) || []) {
+    if (h && h.trip) { back(h.trip, 'departedAt'); back(h.trip, 'returnsAt'); back(h.trip, 'choiceOfferedAt'); }
+  }
+  for (const v of (state.stations && state.stations.fleet) || []) { back(v, 'departedAt'); back(v, 'arrivesAt'); }
+  for (const m of (state.stations && state.stations.mixers) || []) back(m, 'rushedAt');
+  for (const b of state.boosts || []) back(b, 'until');
+  return state;
+}
