@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Tincture style tile</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Young+Serif&amp;family=Figtree:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#7B5236}a:hover{color:#5A3B26}
+</style>
+</helmet>
+<div style="width: 880px; height: 640px; box-sizing: border-box; background: #E3E6E0; font-family: 'Figtree', 'Segoe UI', sans-serif; color: #2A2622; padding: 40px 44px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px 40px">
+
+<div style="grid-column: 1 / 3; display: flex; justify-content: space-between; align-items: flex-end">
+<div>
+<div style="font-family: 'Young Serif', Georgia, serif; font-size: 40px; line-height: 1.05">Tincture</div>
+<div style="font-size: 16px; color: #5E5148; margin-top: 6px">Papercut style: cut shapes, plaster wall, warm wood, and her colors as the brightest thing on screen.</div>
+</div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 14px">
+<div style="font-family: 'Young Serif', Georgia, serif; font-size: 20px">Era 1 pigments</div>
+<div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px">
+<sc-for list="{{swatches}}" as="s" hint-placeholder-count="10">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<div style="height: 58px; border-radius: 10px; background: {{s.hex}}; box-shadow: 0 3px 0 rgba(42,38,34,0.28)"></div>
+<div style="font-size: 13px; font-weight: 600">{{s.name}}</div>
+</div>
+</sc-for>
+</div>
+<div style="font-family: 'Young Serif', Georgia, serif; font-size: 20px; margin-top: 10px">Materials</div>
+<div style="display: flex; gap: 12px">
+<div style="flex-grow: 1; display: flex; flex-direction: column; gap: 6px"><div style="height: 40px; border-radius: 10px; background: #E3E6E0; box-shadow: inset 0 0 0 1.5px #B7BDB3"></div><div style="font-size: 13px">Plaster wall</div></div>
+<div style="flex-grow: 1; display: flex; flex-direction: column; gap: 6px"><div style="height: 40px; border-radius: 10px; background: #F7F4EC; box-shadow: 0 3px 0 rgba(42,38,34,0.22)"></div><div style="font-size: 13px">Card paper</div></div>
+<div style="flex-grow: 1; display: flex; flex-direction: column; gap: 6px"><div style="height: 40px; border-radius: 10px; background: #7B5236; box-shadow: 0 3px 0 rgba(42,38,34,0.28)"></div><div style="font-size: 13px">Walnut</div></div>
+<div style="flex-grow: 1; display: flex; flex-direction: column; gap: 6px"><div style="height: 40px; border-radius: 10px; background: #2A2622; box-shadow: 0 3px 0 #000000"></div><div style="font-size: 13px">Ink</div></div>
+</div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 14px">
+<div style="font-family: 'Young Serif', Georgia, serif; font-size: 20px">Merge Shelf containers</div>
+<div style="background: #7B5236; border-radius: 14px; padding: 18px 14px 0 14px; box-shadow: 0 3px 0 rgba(42,38,34,0.3); display: flex; flex-direction: column">
+<div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; align-items: end">
+<svg width="72" height="110" viewBox="0 0 80 110" role="img" aria-label="Vial, Rose">
+<rect x="31" y="10" width="18" height="12" rx="3" fill="#C9A277"></rect>
+<rect x="32" y="22" width="16" height="82" rx="8" fill="#F2F4F0"></rect>
+<rect x="32" y="48" width="16" height="56" rx="8" fill="#D98A8F"></rect>
+<rect x="35" y="28" width="4" height="60" rx="2" fill="#FFFFFF" style="fill-opacity: 0.5"></rect>
+<rect x="32" y="22" width="16" height="82" rx="8" fill="none" stroke="#2A2622" style="stroke-width: 2.2"></rect>
+</svg>
+<svg width="72" height="110" viewBox="0 0 80 110" role="img" aria-label="Jar, Sage">
+<rect x="16" y="26" width="48" height="12" rx="3" fill="#C9A277"></rect>
+<rect x="18" y="38" width="44" height="66" rx="10" fill="#F2F4F0"></rect>
+<rect x="18" y="54" width="44" height="50" rx="10" fill="#8FA77A"></rect>
+<rect x="23" y="44" width="5" height="48" rx="2.5" fill="#FFFFFF" style="fill-opacity: 0.5"></rect>
+<rect x="18" y="38" width="44" height="66" rx="10" fill="none" stroke="#2A2622" style="stroke-width: 2.2"></rect>
+</svg>
+<svg width="72" height="110" viewBox="0 0 80 110" role="img" aria-label="Bottle, Ochre">
+<defs><clipPath id="bottleClip"><path d="M33 14 H47 V34 C47 40 64 44 64 62 V96 A8 8 0 0 1 56 104 H24 A8 8 0 0 1 16 96 V62 C16 44 33 40 33 34 Z"></path></clipPath></defs>
+<rect x="31" y="6" width="18" height="10" rx="3" fill="#C9A277"></rect>
+<path d="M33 14 H47 V34 C47 40 64 44 64 62 V96 A8 8 0 0 1 56 104 H24 A8 8 0 0 1 16 96 V62 C16 44 33 40 33 34 Z" fill="#F2F4F0"></path>
+<rect x="10" y="58" width="60" height="50" fill="#D39B2A" style="clip-path: url(#bottleClip)"></rect>
+<rect x="21" y="60" width="5" height="34" rx="2.5" fill="#FFFFFF" style="fill-opacity: 0.5"></rect>
+<path d="M33 14 H47 V34 C47 40 64 44 64 62 V96 A8 8 0 0 1 56 104 H24 A8 8 0 0 1 16 96 V62 C16 44 33 40 33 34 Z" fill="none" stroke="#2A2622" style="stroke-width: 2.2"></path>
+</svg>
+<svg width="72" height="110" viewBox="0 0 80 110" role="img" aria-label="Urn, Woad">
+<defs><clipPath id="urnClip"><path d="M26 22 H54 V30 C54 34 48 36 48 40 C62 46 68 58 68 72 C68 90 56 104 40 104 C24 104 12 90 12 72 C12 58 18 46 32 40 C32 36 26 34 26 30 Z"></path></clipPath></defs>
+<path d="M14 54 C2 54 2 76 14 78" fill="none" stroke="#2A2622" style="stroke-width: 3"></path>
+<path d="M66 54 C78 54 78 76 66 78" fill="none" stroke="#2A2622" style="stroke-width: 3"></path>
+<rect x="24" y="14" width="32" height="10" rx="3" fill="#C9A277"></rect>
+<path d="M26 22 H54 V30 C54 34 48 36 48 40 C62 46 68 58 68 72 C68 90 56 104 40 104 C24 104 12 90 12 72 C12 58 18 46 32 40 C32 36 26 34 26 30 Z" fill="#F2F4F0"></path>
+<rect x="6" y="56" width="68" height="52" fill="#3E6A9E" style="clip-path: url(#urnClip)"></rect>
+<rect x="19" y="58" width="5" height="30" rx="2.5" fill="#FFFFFF" style="fill-opacity: 0.5"></rect>
+<path d="M26 22 H54 V30 C54 34 48 36 48 40 C62 46 68 58 68 72 C68 90 56 104 40 104 C24 104 12 90 12 72 C12 58 18 46 32 40 C32 36 26 34 26 30 Z" fill="none" stroke="#2A2622" style="stroke-width: 2.2"></path>
+</svg>
+<svg width="72" height="110" viewBox="0 0 80 110" role="img" aria-label="Cask, Madder, with an Essence star">
+<path d="M40 4 l3.5 7 l7.5 1 l-5.5 5 l1.5 7.5 l-7 -3.5 l-7 3.5 l1.5 -7.5 l-5.5 -5 l7.5 -1 z" fill="#E2B04A" stroke="#8C6512" style="stroke-width: 1"></path>
+<path d="M14 34 C22 28 58 28 66 34 C71 50 71 86 66 100 C58 106 22 106 14 100 C9 86 9 50 14 34 Z" fill="#A87449" stroke="#2A2622" style="stroke-width: 2.2"></path>
+<path d="M12 50 C24 46 56 46 68 50" fill="none" stroke="#5E3E28" style="stroke-width: 4"></path>
+<path d="M12 84 C24 88 56 88 68 84" fill="none" stroke="#5E3E28" style="stroke-width: 4"></path>
+<rect x="22" y="58" width="36" height="20" rx="4" fill="#B8433A"></rect>
+<rect x="36" y="94" width="8" height="10" rx="2" fill="#5E3E28"></rect>
+<path d="M40 106 C38 108 38 109 40 110 C42 109 42 108 40 106 Z" fill="#B8433A"></path>
+</svg>
+</div>
+<div style="height: 12px; margin: 0 -14px; background: #5E3E28; border-radius: 0 0 14px 14px"></div>
+</div>
+<div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; text-align: center; font-size: 13px; color: #5E5148">
+<div>Vial</div><div>Jar</div><div>Bottle</div><div>Urn</div><div>Cask</div>
+</div>
+<div style="font-family: 'Young Serif', Georgia, serif; font-size: 20px; margin-top: 4px">Type</div>
+<div style="background: #F7F4EC; border-radius: 12px; padding: 14px 16px; box-shadow: 0 3px 0 rgba(42,38,34,0.22); display: flex; flex-direction: column; gap: 6px">
+<div style="font-family: 'Young Serif', Georgia, serif; font-size: 26px">Harbor Teal, named by you</div>
+<div style="font-size: 15px; line-height: 1.45">Figtree for everything you tap and read. Young Serif for names: colors, rooms, canvases and postcards.</div>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":880,"height":640}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      swatches: [
+        { name: 'Madder', hex: '#B8433A' },
+        { name: 'Ochre', hex: '#D39B2A' },
+        { name: 'Woad', hex: '#3E6A9E' },
+        { name: 'Marigold', hex: '#DE7A2E' },
+        { name: 'Sage', hex: '#8FA77A' },
+        { name: 'Murex', hex: '#6E4A7E' },
+        { name: 'Rose', hex: '#D98A8F' },
+        { name: 'Navy', hex: '#24385A' },
+        { name: 'Harbor Teal', hex: '#2F8A8A' },
+        { name: 'Lapis', hex: '#2F4FB0' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

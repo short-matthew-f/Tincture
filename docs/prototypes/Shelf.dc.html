@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Merge Shelf</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Young+Serif&amp;family=Figtree:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#7B5236}a:hover{color:#5A3B26}
+button{font-family:inherit;cursor:pointer}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #E3E6E0; font-family: 'Figtree', 'Segoe UI', sans-serif; color: #2A2622; display: flex; flex-direction: column; overflow: hidden">
+
+<div style="padding: 18px 18px 10px 18px; display: flex; align-items: center; justify-content: space-between">
+<button aria-label="Back to the workshop" style="width: 44px; height: 44px; border: 0; border-radius: 12px; background: #F7F4EC; box-shadow: 0 2px 0 rgba(42,38,34,0.2); display: flex; align-items: center; justify-content: center">
+<svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#2A2622" style="stroke-width: 2" aria-hidden="true"><path d="M12 4 L6 10 L12 16"></path></svg>
+</button>
+<div style="text-align: center">
+<div style="font-family: 'Young Serif', Georgia, serif; font-size: 20px">Merge Shelf</div>
+<div style="font-size: 13px; color: #5E5148">Tap two matching containers to merge</div>
+</div>
+<div style="width: 44px"></div>
+</div>
+
+<div style="margin: 4px 14px 0 14px; background: #7B5236; border-radius: 16px; padding: 12px 10px 14px 10px; box-shadow: 0 4px 0 rgba(42,38,34,0.3)">
+<div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px">
+<sc-for list="{{slots}}" as="s" hint-placeholder-count="30">
+<button aria-label="{{s.label}}" onClick="{{s.tap}}" style="height: 74px; border: 0; border-radius: 10px; background: #5E3E28; box-shadow: {{s.ring}}; display: flex; align-items: flex-end; justify-content: center; padding: 0 0 4px 0">
+<sc-if value="{{s.t1}}" hint-placeholder-val="{{false}}">
+<svg width="40" height="64" viewBox="0 0 80 110" aria-hidden="true"><rect x="31" y="10" width="18" height="12" rx="3" fill="#C9A277"></rect><rect x="32" y="22" width="16" height="82" rx="8" fill="#F2F4F0"></rect><rect x="32" y="48" width="16" height="56" rx="8" fill="{{s.hex}}"></rect><rect x="32" y="22" width="16" height="82" rx="8" fill="none" stroke="#2A2622" style="stroke-width: 3"></rect></svg>
+</sc-if>
+<sc-if value="{{s.t2}}" hint-placeholder-val="{{false}}">
+<svg width="44" height="64" viewBox="0 0 80 110" aria-hidden="true"><rect x="16" y="26" width="48" height="12" rx="3" fill="#C9A277"></rect><rect x="18" y="38" width="44" height="66" rx="10" fill="#F2F4F0"></rect><rect x="18" y="54" width="44" height="50" rx="10" fill="{{s.hex}}"></rect><rect x="18" y="38" width="44" height="66" rx="10" fill="none" stroke="#2A2622" style="stroke-width: 3"></rect></svg>
+</sc-if>
+<sc-if value="{{s.t3}}" hint-placeholder-val="{{false}}">
+<svg width="46" height="64" viewBox="0 0 80 110" aria-hidden="true"><rect x="31" y="6" width="18" height="10" rx="3" fill="#C9A277"></rect><path d="M33 14 H47 V34 C47 40 64 44 64 62 V96 A8 8 0 0 1 56 104 H24 A8 8 0 0 1 16 96 V62 C16 44 33 40 33 34 Z" fill="{{s.hex}}" stroke="#2A2622" style="stroke-width: 3"></path></svg>
+</sc-if>
+<sc-if value="{{s.t4}}" hint-placeholder-val="{{false}}">
+<svg width="50" height="64" viewBox="0 0 80 110" aria-hidden="true"><rect x="24" y="14" width="32" height="10" rx="3" fill="#C9A277"></rect><path d="M26 22 H54 V30 C54 34 48 36 48 40 C62 46 68 58 68 72 C68 90 56 104 40 104 C24 104 12 90 12 72 C12 58 18 46 32 40 C32 36 26 34 26 30 Z" fill="{{s.hex}}" stroke="#2A2622" style="stroke-width: 3"></path></svg>
+</sc-if>
+<sc-if value="{{s.t5}}" hint-placeholder-val="{{false}}">
+<svg width="50" height="64" viewBox="0 0 80 110" aria-hidden="true"><path d="M14 34 C22 28 58 28 66 34 C71 50 71 86 66 100 C58 106 22 106 14 100 C9 86 9 50 14 34 Z" fill="#A87449" stroke="#2A2622" style="stroke-width: 3"></path><rect x="22" y="56" width="36" height="22" rx="4" fill="{{s.hex}}"></rect><path d="M12 48 C24 44 56 44 68 48" fill="none" stroke="#5E3E28" style="stroke-width: 5"></path><path d="M12 86 C24 90 56 90 68 86" fill="none" stroke="#5E3E28" style="stroke-width: 5"></path></svg>
+</sc-if>
+</button>
+</sc-for>
+</div>
+</div>
+
+<div style="margin: 16px 14px 0 14px; background: #F7F4EC; border-radius: 14px; padding: 12px 14px; box-shadow: 0 3px 0 rgba(42,38,34,0.22); display: flex; flex-direction: column; gap: 6px">
+<div style="font-family: 'Young Serif', Georgia, serif; font-size: 17px">{{headline}}</div>
+<div style="font-size: 14px; color: #5E5148">{{detail}}</div>
+</div>
+
+<div style="margin: 12px 14px 0 14px; display: flex; gap: 10px">
+<div style="flex-grow: 1; background: #F7F4EC; border-radius: 12px; padding: 10px 12px; box-shadow: 0 2px 0 rgba(42,38,34,0.18)">
+<div style="font-size: 12px; color: #5E5148">Shelf value</div>
+<div style="font-weight: 700; font-size: 16px; font-variant-numeric: tabular-nums">{{value}} Coins</div>
+</div>
+<div style="flex-grow: 1; background: #F7F4EC; border-radius: 12px; padding: 10px 12px; box-shadow: 0 2px 0 rgba(42,38,34,0.18)">
+<div style="font-size: 12px; color: #5E5148">Essence earned</div>
+<div style="font-weight: 700; font-size: 16px">{{essence}}</div>
+</div>
+</div>
+
+<div style="margin: auto 14px 20px 14px; display: flex; gap: 10px">
+<button onClick="{{reset}}" style="min-height: 48px; flex-grow: 1; border: 0; border-radius: 12px; background: #F7F4EC; color: #2A2622; font-size: 15px; font-weight: 600; box-shadow: 0 3px 0 rgba(42,38,34,0.25)">Restock shelf</button>
+<button style="min-height: 48px; flex-grow: 1; border: 0; border-radius: 12px; background: #2A2622; color: #F7F4EC; font-size: 15px; font-weight: 600; box-shadow: 0 3px 0 #000000">Sell all</button>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { items: this.stock(), sel: null, headline: 'Shelf ready', detail: 'Two Sage vials make a Sage jar. Merging never changes a color.', essence: 0 };
+  }
+  stock() {
+    const s = [
+      ['Sage',1],['Sage',1],['Rose',1],['Ochre',2],['Ochre',2],
+      ['Woad',3],['Sage',2],['Gold',1],['Rose',1],['Murex',1],
+      ['Madder',4],['Madder',4],['Woad',3],['Ochre',1],['Ochre',1],
+      ['Murex',1],null,['Sage',1],['Rose',2],null,
+      ['Woad',1],['Woad',1],null,['Madder',1],['Sage',1],
+      null,['Rose',1],['Murex',2],null,['Ochre',1]
+    ];
+    return s.map((x) => (x ? { c: x[0], t: x[1] } : null));
+  }
+  tap(i) {
+    const items = this.state.items.slice();
+    const it = items[i];
+    const sel = this.state.sel;
+    if (sel === null) {
+      if (it) this.setState({ sel: i });
+      return;
+    }
+    if (sel === i) { this.setState({ sel: null }); return; }
+    const a = items[sel];
+    if (!it) { items[i] = a; items[sel] = null; this.setState({ items, sel: null, headline: 'Moved', detail: 'Tidy rows of one color family earn a bonus.' }); return; }
+    const sameTier = a.t === it.t && it.t < 5;
+    const gold = a.c === 'Gold' || it.c === 'Gold';
+    if (sameTier && (a.c === it.c || gold)) {
+      const color = it.c === 'Gold' ? a.c : it.c;
+      const t = it.t + 1;
+      items[i] = { c: color, t };
+      items[sel] = null;
+      const names = ['', 'vial', 'jar', 'bottle', 'urn', 'cask'];
+      if (t === 5) {
+        this.setState({ items, sel: null, essence: this.state.essence + 1, headline: 'Essence of ' + color, detail: color + ' gains a permanent star: +5% production and purity.' });
+      } else {
+        this.setState({ items, sel: null, headline: 'A ' + color + ' ' + names[t], detail: gold ? 'The golden vial doubled it and kept the ' + color + '.' : 'Worth more than the two that made it.' });
+      }
+      return;
+    }
+    this.setState({ sel: i });
+  }
+  renderVals() {
+    const hex = { Madder: '#B8433A', Ochre: '#D39B2A', Woad: '#3E6A9E', Sage: '#8FA77A', Murex: '#6E4A7E', Rose: '#D98A8F', Gold: '#E8C252' };
+    const tierVal = [0, 1, 2.5, 6, 15, 40];
+    const names = ['', 'vial', 'jar', 'bottle', 'urn', 'cask'];
+    let value = 0;
+    const slots = this.state.items.map((it, i) => {
+      if (it) value += tierVal[it.t] * 120;
+      const selected = this.state.sel === i;
+      return {
+        t1: !!it && it.t === 1, t2: !!it && it.t === 2, t3: !!it && it.t === 3, t4: !!it && it.t === 4, t5: !!it && it.t === 5,
+        hex: it ? hex[it.c] : '#5E3E28',
+        label: it ? (it.c === 'Gold' ? 'Golden vial' : it.c + ' ' + names[it.t]) : 'Empty slot',
+        ring: selected ? '0 0 0 3px #F7F4EC, 0 0 0 5px #E2B04A' : 'inset 0 3px 0 rgba(0,0,0,0.25)',
+        tap: () => this.tap(i)
+      };
+    });
+    const stars = this.state.essence === 0 ? 'None yet' : this.state.essence + (this.state.essence === 1 ? ' star' : ' stars');
+    return {
+      slots,
+      headline: this.state.headline,
+      detail: this.state.detail,
+      value: Math.round(value).toLocaleString('en-US'),
+      essence: stars,
+      reset: () => this.setState({ items: this.stock(), sel: null, essence: 0, headline: 'Shelf restocked', detail: 'Try the two Madder urns for a cask.' })
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Packing a shipment</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Young+Serif&amp;family=Figtree:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#7B5236}a:hover{color:#5A3B26}
+button{font-family:inherit;cursor:pointer}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #E3E6E0; font-family: 'Figtree', 'Segoe UI', sans-serif; color: #2A2622; display: flex; flex-direction: column; overflow: hidden">
+
+<div style="padding: 18px 18px 10px 18px; display: flex; align-items: center; justify-content: space-between">
+<button aria-label="Back to the loading yard" style="width: 44px; height: 44px; border: 0; border-radius: 12px; background: #F7F4EC; box-shadow: 0 2px 0 rgba(42,38,34,0.2); display: flex; align-items: center; justify-content: center">
+<svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#2A2622" style="stroke-width: 2" aria-hidden="true"><path d="M12 4 L6 10 L12 16"></path></svg>
+</button>
+<div style="text-align: center">
+<div style="font-family: 'Young Serif', Georgia, serif; font-size: 20px">Loading Yard</div>
+<div style="font-size: 13px; color: #5E5148">{{left}} jars left to pack</div>
+</div>
+<div style="width: 44px"></div>
+</div>
+
+<div style="margin: 8px 14px 0 14px; background: #F7F4EC; border-radius: 16px; padding: 14px; box-shadow: 0 3px 0 rgba(42,38,34,0.22); display: flex; align-items: center; gap: 16px">
+<sc-if value="{{hasJar}}" hint-placeholder-val="{{true}}">
+<svg width="74" height="102" viewBox="0 0 80 110" aria-hidden="true"><rect x="16" y="26" width="48" height="12" rx="3" fill="#C9A277"></rect><rect x="18" y="38" width="44" height="66" rx="10" fill="#F2F4F0"></rect><rect x="18" y="50" width="44" height="54" rx="10" fill="{{jarHex}}"></rect><rect x="23" y="44" width="5" height="48" rx="2.5" fill="#FFFFFF" style="fill-opacity: 0.5"></rect><rect x="18" y="38" width="44" height="66" rx="10" fill="none" stroke="#2A2622" style="stroke-width: 2.5"></rect></svg>
+</sc-if>
+<div style="display: flex; flex-direction: column; gap: 4px">
+<div style="font-size: 13px; color: #5E5148">{{nowLabel}}</div>
+<div style="font-family: 'Young Serif', Georgia, serif; font-size: 22px">{{jarName}}</div>
+<div style="display: flex; gap: 6px; margin-top: 4px">
+<sc-for list="{{upcoming}}" as="u" hint-placeholder-count="4">
+<div style="width: 16px; height: 22px; border-radius: 4px 4px 6px 6px; background: {{u.hex}}; box-shadow: 0 2px 0 rgba(42,38,34,0.25)"></div>
+</sc-for>
+</div>
+</div>
+</div>
+
+<div style="margin: 14px 14px 0 14px; display: flex; flex-direction: column; gap: 10px">
+<sc-for list="{{crates}}" as="c" hint-placeholder-count="3">
+<button onClick="{{c.drop}}" aria-label="Pack into the {{c.name}} crate" style="min-height: 108px; border: 0; border-radius: 14px; background: #A87449; box-shadow: 0 4px 0 rgba(42,38,34,0.3); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; text-align: left">
+<div style="display: flex; justify-content: space-between; align-items: center">
+<div style="display: flex; align-items: center; gap: 8px">
+<div style="background: #F7F4EC; border-radius: 6px; padding: 3px 9px; font-family: 'Young Serif', Georgia, serif; font-size: 15px; color: #2A2622">{{c.name}}</div>
+<div style="display: flex; gap: 3px">
+<sc-for list="{{c.palette}}" as="p" hint-placeholder-count="3">
+<div style="width: 12px; height: 12px; border-radius: 3px; background: {{p.hex}}; box-shadow: 0 0 0 1.5px #F7F4EC"></div>
+</sc-for>
+</div>
+</div>
+<div style="font-size: 13px; font-weight: 600; color: #F7F4EC">{{c.status}}</div>
+</div>
+<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px">
+<sc-for list="{{c.slots}}" as="s" hint-placeholder-count="4">
+<div style="height: 44px; border-radius: 8px; background: {{s.bg}}; box-shadow: {{s.edge}}"></div>
+</sc-for>
+</div>
+</button>
+</sc-for>
+</div>
+
+<div style="margin: 14px 14px 0 14px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
+<div style="background: #F7F4EC; border-radius: 12px; padding: 10px 12px; box-shadow: 0 2px 0 rgba(42,38,34,0.18)">
+<div style="font-size: 12px; color: #5E5148">Crates shipped</div>
+<div style="font-weight: 700; font-size: 16px">{{shipped}}</div>
+</div>
+<div style="background: #F7F4EC; border-radius: 12px; padding: 10px 12px; box-shadow: 0 2px 0 rgba(42,38,34,0.18)">
+<div style="font-size: 12px; color: #5E5148">Packing bonus earned</div>
+<div style="font-weight: 700; font-size: 16px">{{bonus}}</div>
+</div>
+</div>
+
+<div style="margin: auto 14px 20px 14px">
+<button onClick="{{restart}}" style="width: 100%; min-height: 48px; border: 0; border-radius: 12px; background: #2A2622; color: #F7F4EC; font-size: 15px; font-weight: 600; box-shadow: 0 3px 0 #000000">New shipment</button>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.jars = {
+      Woad: { hex: '#3E6A9E', route: 0, hz: 294 }, 'Harbor Teal': { hex: '#2F8A8A', route: 0, hz: 330 }, Navy: { hex: '#24385A', route: 0, hz: 262 },
+      Marigold: { hex: '#DE7A2E', route: 1, hz: 440 }, Rose: { hex: '#D98A8F', route: 1, hz: 523 }, Madder: { hex: '#B8433A', route: 1, hz: 392 },
+      Ochre: { hex: '#D39B2A', route: 2, hz: 440 }, Murex: { hex: '#6E4A7E', route: 2, hz: 294 }, Umber: { hex: '#6B4A32', route: 2, hz: 262 }
+    };
+    this.routes = [
+      { name: 'Harbor Town', palette: ['Woad', 'Harbor Teal', 'Navy'] },
+      { name: 'Festival City', palette: ['Marigold', 'Rose', 'Madder'] },
+      { name: 'Abbey', palette: ['Ochre', 'Murex', 'Umber'] }
+    ];
+    this.state = this.freshState();
+  }
+  freshState() {
+    return {
+      queue: ['Woad', 'Marigold', 'Ochre', 'Rose', 'Harbor Teal', 'Murex', 'Madder', 'Navy', 'Umber', 'Woad', 'Marigold', 'Ochre'],
+      crates: [[], [], []], clean: [true, true, true], shipped: 0, bonus: 0, msg: null
+    };
+  }
+  audio() {
+    if (!this.ac) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      this.ac = new AC();
+      this.master = this.ac.createGain(); this.master.gain.value = 0.5; this.master.connect(this.ac.destination);
+    }
+    if (this.ac.state === 'suspended') this.ac.resume();
+    return this.ac;
+  }
+  tone(hz, delay, vol, len, type) {
+    const ac = this.audio(); if (!ac) return;
+    const t = ac.currentTime + (delay || 0);
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol || 0.3, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + (len || 0.6));
+    g.connect(this.master);
+    const o = ac.createOscillator(); o.type = type || 'sine'; o.frequency.value = hz; o.connect(g);
+    o.start(t); o.stop(t + (len || 0.6) + 0.05);
+  }
+  thunk(delay, f) {
+    const ac = this.audio(); if (!ac) return;
+    const t = ac.currentTime + (delay || 0);
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.5, t + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+    g.connect(this.master);
+    const o = ac.createOscillator(); o.type = 'sine';
+    o.frequency.setValueAtTime(f || 140, t); o.frequency.exponentialRampToValueAtTime((f || 140) * 0.4, t + 0.15);
+    o.connect(g); o.start(t); o.stop(t + 0.2);
+  }
+  drop(r) {
+    const q = this.state.queue;
+    if (!q.length) return;
+    const name = q[0];
+    const jar = this.jars[name];
+    const crates = this.state.crates.map((c) => c.slice());
+    const clean = this.state.clean.slice();
+    crates[r].push(name);
+    const match = jar.route === r;
+    if (!match) clean[r] = false;
+    this.thunk(0, 130);
+    if (match) this.tone(jar.hz, 0.06, 0.25, 0.7);
+    let shipped = this.state.shipped, bonus = this.state.bonus, msg;
+    if (crates[r].length === 4) {
+      shipped += 1;
+      if (clean[r]) {
+        bonus += 1;
+        msg = this.routes[r].name + ' crate shipped clean: +25%';
+        [0, 4, 7, 12].forEach((st, k) => this.tone(262 * Math.pow(2, st / 12), 0.25 + k * 0.08, 0.2, 0.9));
+      } else {
+        msg = this.routes[r].name + ' crate shipped at base value';
+      }
+      this.thunk(0.2, 90);
+      crates[r] = [];
+      clean[r] = true;
+    } else {
+      msg = match ? name + ' fits ' + this.routes[r].name : name + ' packed; this crate ships at base value';
+    }
+    this.setState({ queue: q.slice(1), crates, clean, shipped, bonus, msg });
+  }
+  renderVals() {
+    const q = this.state.queue;
+    const cur = q.length ? q[0] : null;
+    const crates = this.routes.map((rt, r) => {
+      const items = this.state.crates[r];
+      const slots = [0, 1, 2, 3].map((k) => items[k]
+        ? { bg: this.jars[items[k]].hex, edge: '0 2px 0 rgba(42,38,34,0.3)' }
+        : { bg: '#8A5E40', edge: 'inset 0 2px 0 rgba(0,0,0,0.25)' });
+      return {
+        name: rt.name,
+        palette: rt.palette.map((n) => ({ hex: this.jars[n].hex })),
+        slots,
+        status: items.length + ' of 4' + (this.state.clean[r] ? '' : ', mixed'),
+        drop: () => this.drop(r)
+      };
+    });
+    return {
+      crates,
+      hasJar: !!cur,
+      jarHex: cur ? this.jars[cur].hex : '#F2F4F0',
+      jarName: cur ? cur : 'All packed',
+      nowLabel: cur ? (this.state.msg ? this.state.msg : 'Next on the conveyor') : (this.state.msg ? this.state.msg : 'Shipment ready'),
+      upcoming: q.slice(1, 6).map((n) => ({ hex: this.jars[n].hex })),
+      left: q.length,
+      shipped: this.state.shipped,
+      bonus: this.state.bonus ? this.state.bonus + ' clean ' + (this.state.bonus === 1 ? 'crate' : 'crates') : 'None yet',
+      restart: () => this.setState(this.freshState())
+    };
+  }
+}
+</script>
+</body>
+</html>

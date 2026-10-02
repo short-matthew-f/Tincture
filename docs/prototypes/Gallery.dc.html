@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Gallery painting</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Young+Serif&amp;family=Figtree:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#7B5236}a:hover{color:#5A3B26}
+button{font-family:inherit;cursor:pointer}
+.pane{cursor:pointer}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #E3E6E0; font-family: 'Figtree', 'Segoe UI', sans-serif; color: #2A2622; display: flex; flex-direction: column; overflow: hidden">
+
+<div style="padding: 18px 18px 6px 18px; display: flex; align-items: center; justify-content: space-between">
+<button aria-label="Back to the Gallery" style="width: 44px; height: 44px; border: 0; border-radius: 12px; background: #F7F4EC; box-shadow: 0 2px 0 rgba(42,38,34,0.2); display: flex; align-items: center; justify-content: center">
+<svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#2A2622" style="stroke-width: 2" aria-hidden="true"><path d="M12 4 L6 10 L12 16"></path></svg>
+</button>
+<div style="text-align: center">
+<div style="font-family: 'Young Serif', Georgia, serif; font-size: 20px">Harbor Window</div>
+<div style="font-size: 13px; color: #5E5148">{{painted}} of 16 panes painted</div>
+</div>
+<button style="min-height: 44px; padding: 0 16px; border: 0; border-radius: 12px; background: #2A2622; color: #F7F4EC; font-size: 14px; font-weight: 600; box-shadow: 0 3px 0 #000000">Sign</button>
+</div>
+
+<div style="flex-grow: 1; display: flex; align-items: center; justify-content: center; padding: 6px 0">
+<svg width="330" height="440" viewBox="0 0 300 400" role="img" aria-label="Stained-glass window canvas">
+<defs>
+<filter id="gcut" x="-10%" y="-10%" width="120%" height="120%"><feDropShadow dx="0" dy="4" stdDeviation="0.5" style="flood-color: #2A2622; flood-opacity: 0.28"></feDropShadow></filter>
+</defs>
+<g filter="url(#gcut)">
+<path d="M28 372 L28 130 A122 122 0 0 1 272 130 L272 372 Z" fill="#7B5236"></path>
+</g>
+<path class="pane" d="M40 160 L40 130 A110 110 0 0 1 150 20 L150 70 A40 40 0 0 0 110 110 A40 40 0 0 0 150 150 L150 160 Z" fill="{{f.r5}}" onClick="{{p.r5}}"></path>
+<path class="pane" d="M260 160 L260 130 A110 110 0 0 0 150 20 L150 70 A40 40 0 0 1 190 110 A40 40 0 0 1 150 150 L150 160 Z" fill="{{f.r6}}" onClick="{{p.r6}}"></path>
+<path class="pane" d="M150 70 A40 40 0 0 1 190 110 L168 110 A18 18 0 0 0 150 92 Z" fill="{{f.r1}}" onClick="{{p.r1}}"></path>
+<path class="pane" d="M190 110 A40 40 0 0 1 150 150 L150 128 A18 18 0 0 0 168 110 Z" fill="{{f.r2}}" onClick="{{p.r2}}"></path>
+<path class="pane" d="M150 150 A40 40 0 0 1 110 110 L132 110 A18 18 0 0 0 150 128 Z" fill="{{f.r3}}" onClick="{{p.r3}}"></path>
+<path class="pane" d="M110 110 A40 40 0 0 1 150 70 L150 92 A18 18 0 0 0 132 110 Z" fill="{{f.r4}}" onClick="{{p.r4}}"></path>
+<circle class="pane" cx="150" cy="110" r="18" fill="{{f.r0}}" onClick="{{p.r0}}"></circle>
+<rect class="pane" x="40" y="160" width="73" height="66" fill="{{f.r7}}" onClick="{{p.r7}}"></rect>
+<rect class="pane" x="40" y="226" width="73" height="68" fill="{{f.r8}}" onClick="{{p.r8}}"></rect>
+<rect class="pane" x="40" y="294" width="73" height="66" fill="{{f.r9}}" onClick="{{p.r9}}"></rect>
+<rect class="pane" x="187" y="160" width="73" height="66" fill="{{f.r10}}" onClick="{{p.r10}}"></rect>
+<rect class="pane" x="187" y="226" width="73" height="68" fill="{{f.r11}}" onClick="{{p.r11}}"></rect>
+<rect class="pane" x="187" y="294" width="73" height="66" fill="{{f.r12}}" onClick="{{p.r12}}"></rect>
+<path class="pane" d="M113 160 L187 160 L187 260 L150 200 L113 260 Z" fill="{{f.r13}}" onClick="{{p.r13}}"></path>
+<path class="pane" d="M150 200 L187 260 L150 320 L113 260 Z" fill="{{f.r14}}" onClick="{{p.r14}}"></path>
+<path class="pane" d="M113 360 L187 360 L187 260 L150 320 L113 260 Z" fill="{{f.r15}}" onClick="{{p.r15}}"></path>
+<g fill="none" stroke="#2A2622" style="stroke-width: 3.5; stroke-linejoin: round; pointer-events: none">
+<path d="M40 360 L40 130 A110 110 0 0 1 260 130 L260 360 Z"></path>
+<circle cx="150" cy="110" r="40"></circle>
+<circle cx="150" cy="110" r="18"></circle>
+<path d="M150 20 L150 92 M150 128 L150 160 M110 110 L132 110 M168 110 L190 110"></path>
+<path d="M40 160 L260 160 M113 160 L113 360 M187 160 L187 360 M40 226 L113 226 M40 294 L113 294 M187 226 L260 226 M187 294 L260 294"></path>
+<path d="M150 200 L187 260 L150 320 L113 260 Z"></path>
+</g>
+<g filter="url(#gcut)">
+<rect x="20" y="364" width="260" height="20" rx="4" fill="#6A4630"></rect>
+</g>
+</svg>
+</div>
+
+<div style="margin: 0 14px 16px 14px; background: #F7F4EC; border-radius: 16px; padding: 14px; box-shadow: 0 3px 0 rgba(42,38,34,0.22); display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; justify-content: space-between; align-items: baseline">
+<div style="font-family: 'Young Serif', Georgia, serif; font-size: 17px">{{selName}}</div>
+<div style="font-size: 13px; color: #5E5148">{{jarsText}}</div>
+</div>
+<div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px">
+<sc-for list="{{chips}}" as="c" hint-placeholder-count="10">
+<button aria-label="{{c.name}}" onClick="{{c.pick}}" style="height: 48px; border: 0; border-radius: 12px; background: {{c.hex}}; box-shadow: {{c.ring}}"></button>
+</sc-for>
+</div>
+<div style="font-size: 13px; color: #5E5148">Pick a color, then tap a pane. Any color can go anywhere.</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = {
+      sel: 2,
+      fills: { r0: 'Ochre', r1: 'Woad', r2: 'Murex', r3: 'Woad', r4: 'Murex', r5: 'Harbor Teal', r6: 'Harbor Teal', r7: 'Sage', r8: null, r9: null, r10: 'Sage', r11: null, r12: null, r13: 'Navy', r14: 'Madder', r15: null }
+    };
+  }
+  renderVals() {
+    const palette = [
+      { name: 'Madder', hex: '#B8433A' },
+      { name: 'Ochre', hex: '#D39B2A' },
+      { name: 'Woad', hex: '#3E6A9E' },
+      { name: 'Marigold', hex: '#DE7A2E' },
+      { name: 'Sage', hex: '#8FA77A' },
+      { name: 'Murex', hex: '#6E4A7E' },
+      { name: 'Rose', hex: '#D98A8F' },
+      { name: 'Navy', hex: '#24385A' },
+      { name: 'Harbor Teal', hex: '#2F8A8A' },
+      { name: 'Lapis', hex: '#2F4FB0' }
+    ];
+    const hexOf = {};
+    palette.forEach((c) => { hexOf[c.name] = c.hex; });
+    const sel = palette[this.state.sel];
+    const f = {};
+    const p = {};
+    let painted = 0;
+    for (let i = 0; i < 16; i++) {
+      const k = 'r' + i;
+      const v = this.state.fills[k];
+      if (v) painted++;
+      f[k] = v ? hexOf[v] : '#FBF8F1';
+      p[k] = () => this.setState({ fills: Object.assign({}, this.state.fills, { [k]: sel.name }) });
+    }
+    const chips = palette.map((c, i) => ({
+      name: c.name,
+      hex: c.hex,
+      ring: i === this.state.sel ? '0 0 0 3px #F7F4EC, 0 0 0 6px #2A2622' : '0 3px 0 rgba(42,38,34,0.25)',
+      pick: () => this.setState({ sel: i })
+    }));
+    return {
+      f, p, chips, painted,
+      selName: sel.name,
+      jarsText: 'Uses 3 jars a pane'
+    };
+  }
+}
+</script>
+</body>
+</html>

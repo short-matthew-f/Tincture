@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Purifying a batch</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Young+Serif&amp;family=Figtree:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#7B5236}a:hover{color:#5A3B26}
+button{font-family:inherit;cursor:pointer}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #E3E6E0; font-family: 'Figtree', 'Segoe UI', sans-serif; color: #2A2622; display: flex; flex-direction: column; overflow: hidden">
+
+<div style="padding: 18px 18px 10px 18px; display: flex; align-items: center; justify-content: space-between">
+<button aria-label="Back to puzzles" style="width: 44px; height: 44px; border: 0; border-radius: 12px; background: #F7F4EC; box-shadow: 0 2px 0 rgba(42,38,34,0.2); display: flex; align-items: center; justify-content: center">
+<svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#2A2622" style="stroke-width: 2" aria-hidden="true"><path d="M12 4 L6 10 L12 16"></path></svg>
+</button>
+<div style="text-align: center">
+<div style="font-family: 'Young Serif', Georgia, serif; font-size: 20px">Purify</div>
+<div style="font-size: 13px; color: #5E5148">A muddy batch of 4 colors</div>
+</div>
+<button onClick="{{undo}}" style="min-height: 44px; padding: 0 14px; border: 0; border-radius: 12px; background: #F7F4EC; color: #2A2622; font-size: 14px; font-weight: 600; box-shadow: 0 2px 0 rgba(42,38,34,0.2)">Undo</button>
+</div>
+
+<div style="margin: 16px 14px 0 14px; background: #7B5236; border-radius: 18px; padding: 34px 10px 0 10px; box-shadow: 0 4px 0 rgba(42,38,34,0.3); display: flex; flex-direction: column">
+<div style="display: flex; justify-content: center; gap: 6px; align-items: flex-end">
+<sc-for list="{{tubes}}" as="t" hint-placeholder-count="6">
+<button aria-label="{{t.label}}" onClick="{{t.tap}}" style="border: 0; background: transparent; padding: 0; display: flex; flex-direction: column; align-items: center; transform: {{t.lift}}">
+<div style="width: 30px; height: 12px; border-radius: 3px; background: {{t.cork}}"></div>
+<div style="width: 42px; height: 188px; box-sizing: border-box; border: 3px solid #2A2622; border-top: 0; border-radius: 0 0 21px 21px; background: rgba(242,244,240,0.9); overflow: hidden; display: flex; flex-direction: column-reverse">
+<sc-for list="{{t.layers}}" as="l" hint-placeholder-count="2">
+<div style="height: 45px; flex-shrink: 0; background: {{l.hex}}"></div>
+</sc-for>
+</div>
+</button>
+</sc-for>
+</div>
+<div style="height: 14px; margin: 18px -10px 0 -10px; background: #5E3E28; border-radius: 0 0 18px 18px"></div>
+</div>
+
+<div style="margin: 16px 14px 0 14px; background: #F7F4EC; border-radius: 14px; padding: 12px 14px; box-shadow: 0 3px 0 rgba(42,38,34,0.22); display: flex; flex-direction: column; gap: 4px">
+<div style="font-family: 'Young Serif', Georgia, serif; font-size: 17px">{{headline}}</div>
+<div style="font-size: 14px; color: #5E5148">{{detail}}</div>
+</div>
+
+<div style="margin: auto 14px 20px 14px; display: flex; gap: 10px">
+<button onClick="{{addTube}}" style="flex-grow: 1; min-height: 48px; border: 0; border-radius: 12px; background: #F7F4EC; color: #2A2622; font-size: 15px; font-weight: 600; box-shadow: 0 3px 0 rgba(42,38,34,0.25)">{{addLabel}}</button>
+<button onClick="{{restart}}" style="flex-grow: 1; min-height: 48px; border: 0; border-radius: 12px; background: #2A2622; color: #F7F4EC; font-size: 15px; font-weight: 600; box-shadow: 0 3px 0 #000000">New batch</button>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.cap = 4;
+    this.colors = { S: { name: 'Sage', hex: '#8FA77A', hz: 392 }, R: { name: 'Rose', hex: '#D98A8F', hz: 440 }, W: { name: 'Woad', hex: '#3E6A9E', hz: 262 }, O: { name: 'Ochre', hex: '#D39B2A', hz: 523 } };
+    this.state = { tubes: this.fresh(), sel: null, history: [], extra: false };
+  }
+  fresh() { return [['S', 'R', 'W', 'O'], ['O', 'W', 'R', 'S'], ['R', 'S', 'O', 'W'], ['W', 'O', 'S', 'R'], [], []]; }
+  audio() {
+    if (!this.ac) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      this.ac = new AC();
+      this.master = this.ac.createGain(); this.master.gain.value = 0.5; this.master.connect(this.ac.destination);
+    }
+    if (this.ac.state === 'suspended') this.ac.resume();
+    return this.ac;
+  }
+  tone(hz, delay, vol, len, type) {
+    const ac = this.audio(); if (!ac) return;
+    const t = ac.currentTime + (delay || 0);
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol || 0.3, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + (len || 0.6));
+    g.connect(this.master);
+    const o = ac.createOscillator(); o.type = type || 'sine'; o.frequency.value = hz; o.connect(g);
+    o.start(t); o.stop(t + (len || 0.6) + 0.05);
+  }
+  space() {
+    if (this.wet) return this.wet;
+    const ac = this.ac;
+    const input = ac.createGain();
+    const dl = ac.createDelay(1); dl.delayTime.value = 0.085;
+    const fb = ac.createGain(); fb.gain.value = 0.32;
+    const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1800;
+    const out = ac.createGain(); out.gain.value = 0.35;
+    input.connect(dl); dl.connect(lp); lp.connect(fb); fb.connect(dl); lp.connect(out); out.connect(this.master);
+    this.wet = input;
+    return input;
+  }
+  noise(len) {
+    const ac = this.ac;
+    const n = Math.floor(ac.sampleRate * len);
+    const buf = ac.createBuffer(1, n, ac.sampleRate);
+    const d = buf.getChannelData(0);
+    let last = 0;
+    for (let i = 0; i < n; i++) { last = 0.985 * last + 0.015 * (Math.random() * 2 - 1); d[i] = last * 8; }
+    const src = ac.createBufferSource(); src.buffer = buf;
+    return src;
+  }
+  pour(hz, layers, fillBefore) {
+    const ac = this.audio(); if (!ac) return 0;
+    const wet = this.space();
+    const len = 0.32 + layers * 0.2;
+    const t = ac.currentTime + 0.03;
+    const ladder = [-12, -10, -8, -5, -3, 0, 2, 4, 7, 9, 12].map((st) => hz * Math.pow(2, st / 12));
+    const src = this.noise(len + 0.1);
+    const lpN = ac.createBiquadFilter(); lpN.type = 'lowpass'; lpN.frequency.value = 900;
+    const gN = ac.createGain();
+    gN.gain.setValueAtTime(0.0001, t);
+    gN.gain.exponentialRampToValueAtTime(0.09, t + 0.08);
+    gN.gain.exponentialRampToValueAtTime(0.0001, t + len + 0.05);
+    src.connect(lpN); lpN.connect(gN); gN.connect(this.master);
+    src.start(t); src.stop(t + len + 0.1);
+    const step = 0.068;
+    const count = Math.max(4, Math.round(len / step));
+    for (let k = 0; k < count; k++) {
+      const frac = (fillBefore + layers * (k / count)) / this.cap;
+      const idx = Math.min(ladder.length - 1, Math.round(frac * (ladder.length - 1)));
+      const f = ladder[idx];
+      const bt = t + k * step + (Math.random() - 0.5) * 0.012;
+      const g = ac.createGain();
+      g.gain.setValueAtTime(0.0001, bt);
+      g.gain.exponentialRampToValueAtTime(0.1, bt + 0.008);
+      g.gain.exponentialRampToValueAtTime(0.0001, bt + 0.09);
+      const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2400;
+      const o = ac.createOscillator(); o.type = 'sine';
+      o.frequency.setValueAtTime(f * 0.82, bt); o.frequency.exponentialRampToValueAtTime(f * 1.06, bt + 0.05);
+      o.connect(lp); lp.connect(g); g.connect(this.master); g.connect(wet);
+      o.start(bt); o.stop(bt + 0.1);
+    }
+    const nt = t + len + 0.02;
+    const g2 = ac.createGain();
+    g2.gain.setValueAtTime(0.0001, nt);
+    g2.gain.exponentialRampToValueAtTime(0.16, nt + 0.01);
+    g2.gain.exponentialRampToValueAtTime(0.0001, nt + 0.9);
+    g2.connect(this.master); g2.connect(wet);
+    const o2 = ac.createOscillator(); o2.type = 'sine'; o2.frequency.value = hz; o2.connect(g2);
+    o2.start(nt); o2.stop(nt + 1);
+    return len;
+  }
+  pop(delay) {
+    const ac = this.audio(); if (!ac) return;
+    const t = ac.currentTime + delay;
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.4, t + 0.004);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
+    g.connect(this.master);
+    const o = ac.createOscillator(); o.type = 'triangle';
+    o.frequency.setValueAtTime(900, t); o.frequency.exponentialRampToValueAtTime(300, t + 0.08);
+    o.connect(g); o.start(t); o.stop(t + 0.1);
+  }
+  isDone(tube) { return tube.length === this.cap && tube.every((c) => c === tube[0]); }
+  tap(i) {
+    const tubes = this.state.tubes;
+    const sel = this.state.sel;
+    if (sel === null) {
+      if (!tubes[i].length || this.isDone(tubes[i])) { this.tone(500, 0, 0.05, 0.06, 'triangle'); return; }
+      this.tone(1500, 0, 0.06, 0.04, 'triangle');
+      this.setState({ sel: i });
+      return;
+    }
+    if (sel === i) { this.setState({ sel: null }); return; }
+    const from = tubes[sel].slice(), to = tubes[i].slice();
+    const top = from[from.length - 1];
+    if (to.length >= this.cap || (to.length && to[to.length - 1] !== top)) {
+      this.tone(320, 0, 0.06, 0.09, 'triangle');
+      this.setState({ sel: i < tubes.length && tubes[i].length && !this.isDone(tubes[i]) ? i : null });
+      return;
+    }
+    let moved = 0;
+    while (from.length && from[from.length - 1] === top && to.length < this.cap) { to.push(from.pop()); moved++; }
+    const next = tubes.slice(); next[sel] = from; next[i] = to;
+    const pourLen = this.pour(this.colors[top].hz, moved, tubes[i].length) || 0.4;
+    const solved = next.every((t) => t.length === 0 || this.isDone(t));
+    if (this.isDone(to)) this.pop(pourLen + 0.12);
+    if (solved) {
+      const order = ['W', 'S', 'R', 'O'];
+      order.forEach((c, k) => this.tone(this.colors[c].hz, pourLen + 0.45 + k * 0.12, 0.25, 1));
+    }
+    this.setState({ tubes: next, sel: null, history: this.state.history.concat([tubes]) });
+  }
+  renderVals() {
+    const tubes = this.state.tubes;
+    const solved = tubes.every((t) => t.length === 0 || this.isDone(t));
+    const corked = tubes.filter((t) => this.isDone(t)).length;
+    const list = tubes.map((t, i) => ({
+      layers: t.map((c) => ({ hex: this.colors[c].hex })),
+      cork: this.isDone(t) ? '#C9A277' : 'transparent',
+      lift: this.state.sel === i ? 'translateY(-16px)' : 'translateY(0px)',
+      label: t.length ? 'Tube ' + (i + 1) + ', top layer ' + this.colors[t[t.length - 1]].name : 'Tube ' + (i + 1) + ', empty',
+      tap: () => this.tap(i)
+    }));
+    return {
+      tubes: list,
+      headline: solved ? 'Pure. Sells for 1.5\u00d7' : corked ? corked + ' of 4 colors corked' : 'Pour each color into its own tube',
+      detail: solved ? 'Every color in its own tube. This batch is now high purity.' : 'Tap a tube, then tap where to pour. You can only pour onto the same color or into an empty tube.',
+      addLabel: this.state.extra ? 'Extra tube added' : 'Add an empty tube',
+      addTube: () => {
+        if (this.state.extra) return;
+        this.tone(660, 0, 0.12, 0.3);
+        this.setState({ tubes: tubes.concat([[]]), extra: true });
+      },
+      undo: () => {
+        const h = this.state.history.slice(); const prev = h.pop();
+        if (!prev) return;
+        this.tone(330, 0, 0.08, 0.1, 'triangle');
+        this.setState({ tubes: prev, history: h, sel: null });
+      },
+      restart: () => this.setState({ tubes: this.fresh(), sel: null, history: [], extra: false })
+    };
+  }
+}
+</script>
+</body>
+</html>

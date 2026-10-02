@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Morning Ledger</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Young+Serif&amp;family=Figtree:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#7B5236}a:hover{color:#5A3B26}
+button{font-family:inherit;cursor:pointer}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #E3E6E0; font-family: 'Figtree', 'Segoe UI', sans-serif; color: #2A2622; display: flex; flex-direction: column; overflow: hidden">
+
+<div style="margin: 18px 14px 0 14px; position: relative; background: #F7F4EC; border-radius: 6px 6px 18px 18px; padding: 20px 18px 16px 18px; box-shadow: 0 4px 0 rgba(42,38,34,0.24); display: flex; flex-direction: column; gap: 4px">
+<div style="display: flex; justify-content: space-between; align-items: baseline">
+<div style="font-family: 'Young Serif', Georgia, serif; font-size: 26px">Morning Ledger</div>
+<div style="font-size: 13px; color: #5E5148">Away 7 h 40 m</div>
+</div>
+<div style="font-size: 14px; color: #5E5148">Your vats filled while you were away. Here's what's waiting.</div>
+
+<div style="margin-top: 12px; display: flex; flex-direction: column">
+<sc-for list="{{items}}" as="it" hint-placeholder-count="6">
+<button onClick="{{it.tap}}" aria-label="{{it.aria}}" style="min-height: 58px; border: 0; border-top: 1px dashed #CFC6B8; background: transparent; display: flex; align-items: center; gap: 12px; padding: 8px 2px; text-align: left; opacity: {{it.opacity}}">
+<div style="width: 34px; height: 34px; border-radius: 9px; background: {{it.hex}}; box-shadow: 0 2px 0 rgba(42,38,34,0.25); flex-shrink: 0; display: flex; align-items: center; justify-content: center">
+<sc-if value="{{it.done}}" hint-placeholder-val="{{false}}">
+<svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="#F7F4EC" style="stroke-width: 2.6" aria-hidden="true"><path d="M4 10.5 L8.5 15 L16 6"></path></svg>
+</sc-if>
+</div>
+<div style="flex-grow: 1; display: flex; flex-direction: column; gap: 2px">
+<div style="font-size: 15px; font-weight: 600; color: #2A2622">{{it.title}}</div>
+<div style="font-size: 13px; color: #5E5148">{{it.sub}}</div>
+</div>
+<div style="font-size: 13px; font-weight: 600; color: #7B5236">{{it.action}}</div>
+</button>
+</sc-for>
+</div>
+
+<sc-if value="{{allDone}}" hint-placeholder-val="{{false}}">
+<div style="position: absolute; right: 22px; top: 150px; transform: rotate(-12deg); border: 4px solid #8E2F2A; border-radius: 10px; padding: 8px 14px; color: #8E2F2A; font-family: 'Young Serif', Georgia, serif; font-size: 26px; background: rgba(247,244,236,0.85); box-shadow: 0 0 0 2px rgba(142,47,42,0.25)">All caught up</div>
+</sc-if>
+</div>
+
+<div style="margin: 14px 14px 0 14px; background: #F7F4EC; border-radius: 14px; padding: 12px 14px; box-shadow: 0 3px 0 rgba(42,38,34,0.22); display: flex; flex-direction: column; gap: 8px">
+<div style="font-family: 'Young Serif', Georgia, serif; font-size: 16px">Almost there</div>
+<div style="display: flex; align-items: center; gap: 10px"><div style="width: 14px; height: 14px; border-radius: 4px; background: #8FA77A"></div><div style="font-size: 14px">Sage tint, one grading board away</div></div>
+<div style="display: flex; align-items: center; gap: 10px"><div style="width: 14px; height: 14px; border-radius: 4px; background: #2F8A8A"></div><div style="font-size: 14px">Harbor Window, two panes left to paint</div></div>
+</div>
+
+<div style="margin: auto 14px 20px 14px">
+<button onClick="{{closeShop}}" style="width: 100%; min-height: 52px; border: 0; border-radius: 14px; background: {{closeBg}}; color: {{closeFg}}; font-size: 16px; font-weight: 600; box-shadow: 0 3px 0 rgba(0,0,0,0.6)">{{closeLabel}}</button>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { done: [false, false, false, false, false], closed: false, soundOn: true };
+  }
+  audio() {
+    if (!this.ac) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      this.ac = new AC();
+      this.master = this.ac.createGain(); this.master.gain.value = 0.5; this.master.connect(this.ac.destination);
+    }
+    if (this.ac.state === 'suspended') this.ac.resume();
+    return this.ac;
+  }
+  tone(hz, delay, vol, len, type) {
+    const ac = this.audio(); if (!ac) return;
+    const t = ac.currentTime + (delay || 0);
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol || 0.3, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + (len || 0.6));
+    g.connect(this.master);
+    const o = ac.createOscillator(); o.type = type || 'sine'; o.frequency.value = hz; o.connect(g);
+    o.start(t); o.stop(t + (len || 0.6) + 0.05);
+  }
+  thunk() {
+    const ac = this.audio(); if (!ac) return;
+    const t = ac.currentTime + 0.05;
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.6, t + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+    g.connect(this.master);
+    const o = ac.createOscillator(); o.type = 'sine';
+    o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(55, t + 0.18);
+    o.connect(g); o.start(t); o.stop(t + 0.25);
+  }
+  renderVals() {
+    const defs = [
+      { title: 'Collect 4,820 Coins', sub: 'Shop sales and shipping overnight', action: 'Collect', hex: '#C99A2E', sound: 'coins' },
+      { title: 'Wren is back from the Coast', sub: 'A haul of murex, and a postcard', action: 'Open', hex: '#6E4A7E', sound: 'knock' },
+      { title: '9 vials on the shelf', sub: 'Two Sage vials can merge', action: 'Merge', hex: '#8FA77A', sound: 'clink' },
+      { title: 'New order from Festival City', sub: 'A bright marigold, pays 2.1K', action: 'View', hex: '#DE7A2E', sound: 'tick' },
+      { title: 'Daily quests ready', sub: '1 of 3 done: paint 10 regions next', action: 'Claim', hex: '#3E6A9E', sound: 'tick' }
+    ];
+    const done = this.state.done;
+    const allDone = done.every((x) => x);
+    const scaleHz = [262, 294, 330, 392, 440, 523];
+    const items = defs.map((d, i) => ({
+      title: d.title, sub: d.sub, action: done[i] ? 'Done' : d.action, hex: d.hex,
+      done: done[i], opacity: done[i] ? '0.55' : '1',
+      aria: d.title + (done[i] ? ', done' : ''),
+      tap: () => {
+        if (done[i]) return;
+        const nd = done.slice(); nd[i] = true;
+        const count = nd.filter((x) => x).length;
+        if (d.sound === 'coins') { for (let k = 0; k < 6; k++) this.tone(1200 + k * 120, k * 0.045, 0.08, 0.12, 'triangle'); }
+        else if (d.sound === 'knock') { this.tone(180, 0, 0.3, 0.12, 'sine'); this.tone(180, 0.14, 0.3, 0.12, 'sine'); }
+        else if (d.sound === 'clink') { this.tone(988, 0, 0.18, 0.5); this.tone(1318, 0.06, 0.12, 0.5); }
+        else { this.tone(scaleHz[count], 0, 0.18, 0.4); }
+        if (nd.every((x) => x)) { this.thunk(); }
+        this.setState({ done: nd });
+      }
+    }));
+    return {
+      items, allDone,
+      closeLabel: this.state.closed ? 'Shop closed. Vats fill in 7 h 40 m' : 'Close up shop',
+      closeBg: this.state.closed ? '#5E3E28' : '#2A2622',
+      closeFg: '#F7F4EC',
+      closeShop: () => {
+        if (this.state.closed) { this.setState({ closed: false, done: [false, false, false, false, false] }); return; }
+        [523, 440, 392, 330, 262].forEach((hz, k) => this.tone(hz, k * 0.16, 0.16, 1.2));
+        this.setState({ closed: true });
+      }
+    };
+  }
+}
+</script>
+</body>
+</html>
