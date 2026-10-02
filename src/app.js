@@ -1,0 +1,428 @@
+/**
+ * app.js: boot. Loads the save into a Game, builds the shared `ctx`
+ * (docs/UI-CONTRACT.md), mounts every screen into its <section data-screen>,
+ * wires the tab bar, back handling, taps, visibility, the service worker, and
+ * maps domain events to feel (DESIGN.md "Interaction spec") and ceremonies
+ * (discovery naming, phase beats). Implements ARCHITECTURE.md "UI", "Game
+ * loop" and "PWA and updates".
+ *
+ * Screens load through dynamic import() from the SCREEN_IDS list; a module
+ * that is missing or fails to load gets a "Coming soon" placeholder, so one
+ * broken screen never takes the app down.
+ *
+ * Debug handle: window.tincture = {game, ctx, router}.
+ */
+
+import { Game } from './game.js';
+import * as sim from './sim/index.js';
+import * as puzzles from './puzzles/index.js';
+import * as color from './color.js';
+import * as fmt from './format.js';
+import * as kit from './ui/kit.js';
+import { audio } from './ui/audio.js';
+import { haptics } from './ui/haptics.js';
+import { fx } from './ui/fx.js';
+import * as overlay from './ui/overlay.js';
+import { createRouter, TABS } from './ui/router.js';
+import { applySettings } from './ui/settings.js';
+import { registerSW } from './pwa.js';
+
+import * as apprentices from './content/apprentices.js';
+import * as canvases from './content/canvases.js';
+import * as catalog from './content/catalog.js';
+import * as commissions from './content/commissions.js';
+import * as eras from './content/eras.js';
+import * as events from './content/events.js';
+import * as heritage from './content/heritage.js';
+import * as hunters from './content/hunters.js';
+import * as names from './content/names.js';
+import * as pigments from './content/pigments.js';
+import * as postcards from './content/postcards.js';
+import * as quests from './content/quests.js';
+import * as regions from './content/regions.js';
+import * as rooms from './content/rooms.js';
+import * as routes from './content/routes.js';
+import * as sources from './content/sources.js';
+import * as stations from './content/stations.js';
+
+/** Every screen module under src/ui/, matching <section data-screen> in index.html. */
+export const SCREEN_IDS = Object.freeze([
+  'workshop', 'ledger', 'orders', 'matching', 'bench', 'commissions', 'puzzles', 'grading', 'purify',
+  'packing', 'map', 'hunter', 'album', 'quests', 'catalog', 'gallery', 'paint', 'shelf', 'heritage',
+  'settings', 'naming', 'phase-beat', 'onboarding',
+]);
+
+/** Screens that are ceremonies: one at a time, others wait in a queue. */
+const CEREMONY_IDS = new Set(['naming', 'phase-beat', 'onboarding']);
+
+const TITLES = {
+  workshop: 'Workshop', ledger: 'Morning Ledger', orders: 'Orders', matching: 'Matching', bench: 'Mixing Bench',
+  commissions: 'Commissions', puzzles: 'Puzzles', grading: 'Grading', purify: 'Purifying', packing: 'Packing',
+  map: 'Map', hunter: 'Hunter', album: 'Postcard Album', quests: 'Quests', catalog: 'Catalog', gallery: 'Gallery',
+  paint: 'Painting', shelf: 'Merge Shelf', heritage: 'Heritage', settings: 'Settings', naming: 'A new color',
+  'phase-beat': 'Something new', onboarding: 'Welcome',
+};
+
+// ---------------------------------------------------------------------------
+// Content + format
+// ---------------------------------------------------------------------------
+
+function mergeContent() {
+  const merged = Object.assign({}, apprentices, canvases, catalog, commissions, eras, events, heritage, hunters,
+    names, pigments, postcards, quests, regions, rooms, routes, sources, stations);
+  delete merged.byId; // every module has its own byId; use the named *_BY_ID maps instead
+  merged.modules = { apprentices, canvases, catalog, commissions, eras, events, heritage, hunters, names, pigments,
+    postcards, quests, regions, rooms, routes, sources, stations };
+  return Object.freeze(merged);
+}
+
+function makeFormat(game) {
+  const notation = () => (game.state && game.state.settings && game.state.settings.notation) || 'short';
+  return {
+    num: (n) => fmt.formatNumber(n, notation()),
+    duration: (ms) => fmt.formatDuration(ms),
+    countdown: (ms) => fmt.formatCountdown(ms),
+    rate: (perSec) => fmt.formatRate(perSec, notation()),
+    pct: (x) => fmt.pct(x),
+    dayKey: fmt.dayKey,
+    isoWeekKey: fmt.isoWeekKey,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Screens
+// ---------------------------------------------------------------------------
+
+function placeholderScreen(id) {
+  let root = null;
+  return {
+    id,
+    placeholder: true,
+    mount(el) {
+      root = el;
+      const isTab = TABS.includes(id);
+      root.innerHTML = String(kit.h`
+        <header class="screen-head">
+          ${isTab ? kit.raw('<div class="spacer"></div>') : kit.backButton('Back')}
+          <div class="titles"><div class="title">${TITLES[id] || id}</div></div>
+          <div class="spacer"></div>
+        </header>
+        <div class="screen-body">
+          <div class="card center"><div class="card-title">Coming soon</div>
+            <div class="hint">This part of the workshop is still being painted.</div></div>
+        </div>`);
+    },
+    show() {},
+    hide() {},
+    render() {},
+  };
+}
+
+async function loadScreen(id) {
+  try {
+    const m = await import(`./ui/${id}.js`);
+    const mod = m && (m.default || m);
+    if (!mod || typeof mod.mount !== 'function') throw new Error('no default export with mount()');
+    return { mod, ns: m };
+  } catch (e) {
+    console.warn(`[app] screen "${id}" is not available yet; showing a placeholder.`, e && e.message);
+    return { mod: placeholderScreen(id), ns: {} };
+  }
+}
+
+function sectionFor(id) {
+  const app = document.getElementById('app');
+  let sec = app.querySelector(`:scope > section[data-screen="${id}"]`);
+  if (!sec) {
+    sec = document.createElement('section');
+    sec.className = 'screen';
+    sec.id = `screen-${id}`;
+    sec.dataset.screen = id;
+    sec.hidden = true;
+    app.appendChild(sec);
+  }
+  return sec;
+}
+
+// ---------------------------------------------------------------------------
+// Boot
+// ---------------------------------------------------------------------------
+
+async function boot() {
+  const game = new Game({ reload: () => location.reload() });
+  applySettings(game.state.settings, { audio, haptics });
+
+  const content = mergeContent();
+  const ctx = {
+    game,
+    sim,
+    puzzles,
+    content,
+    color,
+    format: makeFormat(game),
+    audio,
+    haptics,
+    fx,
+    kit,
+    overlay,
+    navigate: (id, params) => router && router.navigate(id, params),
+    back: () => router && router.back(),
+    current: () => (router ? router.current() : null),
+    isTab: (id) => TABS.includes(id),
+    toast: (text, opts) => overlay.toast(text, opts),
+    modal: (opts) => overlay.modal(opts),
+    sheet: (opts) => overlay.sheet(opts),
+    celebrate: (kind, payload) => celebrate(kind, payload),
+    router: null,
+  };
+  let router = null;
+
+  // --- screens ------------------------------------------------------------
+  const loaded = await Promise.all(SCREEN_IDS.map(loadScreen));
+  const screens = {};
+  SCREEN_IDS.forEach((id, i) => {
+    const section = sectionFor(id);
+    let { mod } = loaded[i];
+    try {
+      mod.mount(section, ctx);
+    } catch (e) {
+      console.error(`[app] screen "${id}" failed to mount; showing a placeholder.`, e);
+      mod = placeholderScreen(id);
+      section.innerHTML = '';
+      mod.mount(section, ctx);
+    }
+    section.hidden = true;
+    screens[id] = { module: mod, section, ns: loaded[i].ns };
+  });
+
+  const observers = Object.values(screens).map((s) => s.module).filter((m) => typeof m.observe === 'function');
+
+  router = createRouter({
+    screens,
+    root: document.getElementById('app'),
+    tabbar: document.getElementById('tabbar'),
+    overlay,
+    onChange: () => setTimeout(pumpCeremonies, 0),
+    afterRender: (state, top) => {
+      for (const m of observers) {
+        try { m.observe(state, top); } catch (e) { console.error('[app] observe failed', e); }
+      }
+    },
+  });
+  ctx.router = router;
+
+  // --- ceremonies -----------------------------------------------------------
+  const ceremonyQueue = [];
+  let pendingLedger = null; // a return that arrived while a ceremony was on screen
+
+  function ceremonyActive() {
+    const top = router.current();
+    return !!(top && CEREMONY_IDS.has(top.id));
+  }
+
+  function pumpCeremonies() {
+    if (ceremonyActive()) return;
+    if (pendingLedger) {
+      const summary = pendingLedger;
+      pendingLedger = null;
+      router.navigate('ledger', { summary });
+    }
+    if (!ceremonyQueue.length) return;
+    const next = ceremonyQueue.shift();
+    router.navigate(next.screen, next.params);
+  }
+
+  function queueCeremony(screen, params) {
+    if (screen === 'naming' && ceremonyQueue.some((c) => c.screen === 'naming' && c.params.colorId === params.colorId)) return;
+    ceremonyQueue.push({ screen, params });
+    pumpCeremonies();
+  }
+
+  function celebrate(kind, payload = {}) {
+    const p = payload || {};
+    switch (kind) {
+      case 'discover': queueCeremony('naming', p); break;
+      case 'phase': queueCeremony('phase-beat', { ...p, kind: 'phase' }); break;
+      case 'milestone': queueCeremony('phase-beat', { ...p, kind: 'milestone' }); break;
+      case 'room': queueCeremony('phase-beat', { ...p, kind: 'room' }); break;
+      case 'renovate': queueCeremony('phase-beat', { ...p, kind: 'renovate' }); break;
+      case 'allCaughtUp':
+        audio.stamp();
+        haptics.medium();
+        break;
+      default: queueCeremony('phase-beat', p); break;
+    }
+  }
+
+  // --- domain events -> feel ------------------------------------------------
+  const quiet = (meta) => !!(meta && meta.catchUp);
+  const once = new Set();
+  const nameOf = (id) => { try { return sim.displayName(game.state, id) || id; } catch (e) { return id; } };
+  const hexOf = (id) => { const c = content.getColor && content.getColor(id); return c ? c.hex : null; };
+
+  game.on('change', (state) => router.requestRender(state));
+
+  game.on('discover', (p) => celebrate('discover', p));
+
+  game.on('chain', (p, meta) => {
+    if (quiet(meta)) return;
+    const steps = (p && p.steps) || [];
+    steps.forEach((s, i) => setTimeout(() => { audio.chain(i); haptics.light(); }, i * 90));
+  });
+
+  game.on('essence', (p, meta) => {
+    if (quiet(meta)) return;
+    audio.bell();
+    haptics.success();
+    const from = document.querySelector('[data-essence-from]')
+      || document.querySelector(`#app > .screen:not([hidden]) [data-cell][data-color="${p.colorId}"]`);
+    const to = document.querySelector(`#app > .screen:not([hidden]) [data-swatch="${p.colorId}"]`)
+      || document.querySelector('#tabbar [data-tab="catalog"]');
+    if (from && to) fx.flyTo(from, to, '#E2B04A', { count: 1, ms: 900 });
+  });
+
+  game.on('milestone', (p, meta) => {
+    if (!quiet(meta)) {
+      audio.thunk();
+      audio.clink(5);
+      haptics.medium();
+    }
+    if (p && p.kind === 'catalog') celebrate('milestone', { colors: p.colors, level: p.level });
+  });
+
+  game.on('phase', (p) => celebrate('phase', { phase: p.phase }));
+  game.on('room', (p) => celebrate('room', { id: p.id }));
+  game.on('renovate', (p) => celebrate('renovate', { heritage: p.heritage }));
+
+  game.on('hunterReturn', (p, meta) => { if (!quiet(meta)) audio.knock(); });
+
+  game.on('postcard', (p, meta) => {
+    if (quiet(meta)) return;
+    const card = content.getPostcard && content.getPostcard(p.id);
+    overlay.toast(p.duplicate ? 'A postcard you already have: turned into Seals' : `A postcard: ${card ? card.title : 'news from afar'}`);
+  });
+
+  game.on('setComplete', (p, meta) => {
+    if (quiet(meta)) return;
+    const r = content.getRegion && content.getRegion(p.region);
+    audio.chord([0.45, 0.6, 0.75, 0.9], 0.8);
+    overlay.toast(`Postcard set complete${r ? `: ${r.name}` : ''}`);
+  });
+
+  game.on('allCaughtUp', () => celebrate('allCaughtUp'));
+
+  game.on('storageFull', () => {
+    if (once.has('storageFull')) return;
+    once.add('storageFull');
+    overlay.toast('The vats are full: a good moment to collect, ship or sell.', { ms: 3200 });
+  });
+
+  game.on('saveFailed', () => {
+    if (once.has('saveFailed')) return;
+    once.add('saveFailed');
+    overlay.toast('This device is out of space, so saving is paused. Export a save from Settings.', { ms: 4000 });
+  });
+
+  game.on('comingSoon', () => {
+    overlay.modal({
+      title: 'Coming in a later update',
+      body: 'The next era is still being painted. Everything you have made is safe and waiting.',
+      actions: [{ label: 'Lovely', variant: 'primary', value: true }],
+    });
+  });
+
+  game.on('golden', (p, meta) => { if (!quiet(meta)) overlay.toast('A golden vial landed on the shelf', { hex: '#E2B04A' }); });
+  game.on('accident', (p, meta) => {
+    if (quiet(meta)) return;
+    audio.bell();
+    overlay.toast('A happy accident in the mixers');
+  });
+  game.on('questDone', (p, meta) => { if (!quiet(meta)) overlay.toast('A quest is ready to claim'); });
+  game.on('weeklyDone', (p, meta) => { if (!quiet(meta)) overlay.toast('The weekly quest is complete'); });
+  game.on('eventStep', (p, meta) => { if (!quiet(meta)) overlay.toast('A new event reward is ready'); });
+  game.on('commissionDone', (p, meta) => {
+    if (quiet(meta)) return;
+    const c = content.getCommission && content.getCommission(p.id);
+    audio.chord([0.4, 0.55, 0.7, 0.85], 1);
+    haptics.success();
+    overlay.toast(`Commission complete${c ? `: ${c.name || c.title || ''}` : ''}`);
+  });
+  game.on('sourceUnlocked', (p, meta) => {
+    if (quiet(meta)) return;
+    const src = content.SOURCES && content.SOURCES.find((s) => s.id === p.sourceId);
+    overlay.toast(`A new pigment source: ${src ? src.name : nameOf(p.sourceId)}`, { hex: hexOf(src && src.pigment) });
+  });
+  game.on('collector', (p, meta) => { if (!quiet(meta)) overlay.toast('A collector is visiting the Gallery'); });
+  game.on('scoutChoice', (p, meta) => { if (!quiet(meta)) overlay.toast('A hunter sent word: a choice is waiting on the map'); });
+
+  game.on('return', (summary) => {
+    const s = game.state;
+    if (!s.onboarding || !s.onboarding.done) return;
+    if (ceremonyActive()) pendingLedger = summary;
+    else router.navigate('ledger', { summary });
+  });
+
+  game.on('import', (state) => {
+    applySettings(state.settings, { audio, haptics });
+    ceremonyQueue.length = 0;
+    pendingLedger = null;
+    router.navigate('workshop');
+  });
+
+  // --- DOM wiring -------------------------------------------------------------
+  document.addEventListener('pointerdown', (e) => {
+    if (!e.target.closest || !e.target.closest('[data-tap]')) return;
+    audio.unlock();
+    audio.tick();
+    haptics.light();
+  }, { passive: true });
+
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest) return;
+    const tab = e.target.closest('#tabbar [data-tab]');
+    if (tab) { router.navigate(tab.dataset.tab); return; }
+    if (e.target.closest('[data-back]')) { router.back(); return; }
+    if (e.target.closest('[data-action="settings"]')) router.navigate('settings');
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) game.suspend();
+    else game.resume();
+  });
+  window.addEventListener('pagehide', () => game.suspend());
+  window.addEventListener('pageshow', (e) => { if (e.persisted) game.resume(); });
+
+  // --- first screen + loop ----------------------------------------------------
+  router.navigate('workshop');
+  const ob = game.state.onboarding;
+  if (ob && !ob.done && ob.step === 0) router.navigate('onboarding');
+  game.start();
+  router.requestRender(game.state);
+
+  registerSW({
+    onUpdateReady: () => {
+      document.documentElement.dataset.updateReady = 'on';
+      overlay.toast('Update ready. Restart from Settings.', { ms: 3600 });
+    },
+  });
+
+  window.tincture = { game, ctx, router };
+  return { game, ctx, router };
+}
+
+overlay.injectStyle('app-style', `
+html[data-update-ready="on"] [data-action="settings"] { position: relative; }
+html[data-update-ready="on"] [data-action="settings"]::after { content: ''; position: absolute; top: 6px; right: 6px; width: 9px; height: 9px; border-radius: 50%; background: var(--walnut); box-shadow: 0 0 0 2px var(--paper); }
+`);
+
+boot().catch((e) => {
+  console.error('[app] boot failed', e);
+  const app = document.getElementById('app');
+  if (app) {
+    const div = document.createElement('div');
+    div.className = 'card';
+    div.style.margin = '24px 16px';
+    div.textContent = 'Tincture could not start. Try reloading; your save is kept on this device.';
+    app.appendChild(div);
+  }
+});
