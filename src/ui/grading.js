@@ -19,7 +19,7 @@ import { h, raw, backButton, button, iconSvg, swatch } from './kit.js';
 import { stateRng } from '../rng.js';
 import {
   injectStyle, PZ_CSS, ensureActive, activeOf, TIER_IDS, TIER_LABEL, STAMP_TONE, stampSvg,
-  createGradingBoard, flushTints, rememberedTier, frameName, eventName,
+  createGradingBoard, flushTints, rememberedTier, frameName, eventName, coinsText,
 } from './puzzles.js';
 
 const CSS = `
@@ -37,8 +37,8 @@ const CSS = `
 .gr-grid.glow .gr-tile:not(.is-void) { box-shadow: inset 0 0 0 2px var(--paper), 0 0 9px rgba(255,255,255,.55); }
 .gr-grid.is-seamless { overflow: hidden; }
 .gr-grid.is-seamless .gr-tile { border-radius: 0; box-shadow: none; transform: none; }
-.gr-dot { width: 8px; height: 8px; border-radius: 4px; background: var(--ink); box-shadow: 0 0 0 2px var(--paper); pointer-events: none; }
-.gr-grid.cb .gr-dot { position: absolute; top: 4px; left: 4px; width: 6px; height: 6px; box-shadow: 0 0 0 1.5px var(--paper); }
+.gr-dot { box-sizing: border-box; width: 11px; height: 11px; border-radius: 50%; background: transparent; border: 2px solid var(--ink); box-shadow: 0 0 0 1.5px var(--paper); pointer-events: none; }
+.gr-grid.cb .gr-dot { position: absolute; top: 4px; left: 4px; width: 9px; height: 9px; border-width: 1.5px; box-shadow: 0 0 0 1.5px var(--paper); }
 .gr-num { font-size: min(15px, calc(var(--cell) * .4)); font-weight: 700; line-height: 1; pointer-events: none; font-variant-numeric: tabular-nums; }
 .gr-flash { position: absolute; inset: 0; background: rgba(255,255,255,.7); pointer-events: none; border-radius: inherit; animation: gr-flash 70ms linear both; }
 @keyframes gr-flash { from { opacity: 1; } to { opacity: 0; } }
@@ -50,17 +50,20 @@ const CSS = `
 .gr-stampwrap { position: absolute; right: 6px; bottom: 6px; z-index: 6; pointer-events: none; padding: 3px; border-radius: 50%; background: rgba(247,244,236,.94); box-shadow: 0 3px 0 var(--shadow); animation: pz-stamp-in 260ms var(--ease-out) both; }
 .gr-tools { display: flex; gap: 10px; }
 .gr-tools .btn { flex: 1 1 0; min-height: 48px; }
-.gr-tierbtn { min-height: 44px; padding: 0 12px; font-size: 14px; }
+.gr-tools .btn { padding: 0 10px; font-size: 14px; white-space: nowrap; }
+.gr-tools .btn.is-quiet { box-shadow: 0 3px 0 var(--shadow), inset 0 0 0 1.5px rgba(42,38,34,.2); }
+.gr-empty-actions { display: flex; flex-direction: column; gap: 8px; align-items: stretch; width: 100%; max-width: 260px; }
+.gr-result-top { align-items: center; }
+.gr-result-top .pz-stamp { flex: 0 0 auto; animation: pz-stamp-in 260ms var(--ease-out) both; }
 `;
 
 let C = null;
 let ROOT = null;
 const G = {
   visible: false, board: null, rank: [], sel: null, busy: false, celebrating: false, result: null,
-  timers: [], cb: false, moves: -1, drag: null, cell: 40, tiles: [], el: {}, params: {},
+  timers: [], cb: false, moves: -1, drag: null, cell: 40, tiles: [], el: {}, params: {}, settling: false,
 };
 
-const fmt = (n) => (C.format && C.format.num ? C.format.num(n) : Math.round(n).toLocaleString());
 const reduced = () => !!(C.fx && C.fx.isReducedMotion && C.fx.isReducedMotion());
 const later = (fn, ms) => { const id = setTimeout(fn, ms); G.timers.push(id); return id; };
 const clearTimers = () => { G.timers.forEach(clearTimeout); G.timers = []; };
@@ -145,10 +148,6 @@ function swapAct(s, args, now) {
 // Drawing
 // ---------------------------------------------------------------------------
 
-function swapsLabel(n) {
-  return `${n} ${n === 1 ? 'swap' : 'swaps'}`;
-}
-
 function cellSize(board) {
   const W = ROOT.clientWidth || 390;
   const H = ROOT.clientHeight || 760;
@@ -179,14 +178,14 @@ function paintTile(p) {
 
 function emptyHtml() {
   return h`<div class="screen-head">${backButton('Back to the puzzle table')}<div class="titles"><div class="title">Grading</div></div><div class="spacer"></div></div>
-<div class="screen-body gr-body"><div class="card pz-empty"><div class="h2">No board on the table</div><div class="hint">Start a new one whenever you like.</div>${button('New grading board', { variant: 'primary', attrs: { 'data-action': 'again' } })}</div></div>`;
+<div class="screen-body gr-body"><div class="card pz-empty"><div class="h2">The table is clear</div><div class="hint">Start a fresh board whenever you like.</div><div class="gr-empty-actions">${button('New grading board', { variant: 'primary', block: true, attrs: { 'data-action': 'again' } })}${button('Back to the table', { block: true, cls: 'is-quiet', attrs: { 'data-action': 'done' } })}</div></div></div>`;
 }
 
 function statusHtml(board) {
   const wrong = C.puzzles.grading.wrongCount(board);
-  const toGo = wrong === 1 ? 'One tile' : `${wrong} tiles`;
+  const toGo = wrong === 1 ? 'One more tile' : `${wrong} more tiles`;
   const hl = wrong <= 3 && wrong > 0 ? 'Almost there' : 'Put the gradient back in order';
-  return h`<div class="hl">${hl}</div><div class="dt">Every color has its own note. A tile in the right place rings. ${toGo} to go.</div>`;
+  return h`<div class="hl">${hl}</div><div class="dt">Every color has its own note. A tile in the right place rings. ${toGo} to settle.</div>`;
 }
 
 function updateStatus() {
@@ -197,8 +196,7 @@ function updateStatus() {
 function updateHead() {
   const b = G.board;
   if (!b || !G.el.sub) return;
-  G.el.sub.textContent = `${TIER_LABEL[b.tier]} · ${swapsLabel(b.moves)}`;
-  if (G.el.tierBtn) G.el.tierBtn.firstChild.textContent = TIER_LABEL[b.tier];
+  G.el.sub.textContent = `${TIER_LABEL[b.tier]} board`;
 }
 
 function drawAll() {
@@ -228,12 +226,11 @@ function drawAll() {
     ? h`<div class="gr-frametag"><span>${frameName(C, board.event, board.shape)}</span><span>${eventName(C, board.event)}</span></div>`
     : '';
   ROOT.innerHTML = String(h`<div class="screen-head">${backButton('Back to the puzzle table')}
-<div class="titles"><div class="title">Grading</div><div class="subtitle" data-sub></div></div>
-<button type="button" class="btn gr-tierbtn" data-action="tier-sheet" data-tap aria-label="Change difficulty"><span></span></button></div>
+<div class="titles"><div class="title">Grading</div><div class="subtitle" data-sub></div></div><div class="spacer"></div></div>
 <div class="screen-body gr-body">
 <div class="gr-frame" data-frame${board.event ? ` data-event="${board.event}"` : ''}>${tag}
 <div class="gr-grid${G.cb ? ' cb' : ''}${board.glow ? ' glow' : ''}" data-grid style="--cols:${board.cols};--cell:${G.cell}px" role="group" aria-label="Gradient board">${raw(tiles.join(''))}</div></div>
-<div class="gr-tools">${button(h`${iconSvg('sound', { size: 18 })}Hear the board`, { variant: 'primary', attrs: { 'data-action': 'hear' } })}</div>
+<div class="gr-tools" data-tools>${button(h`${iconSvg('sound', { size: 18 })}Hear the board`, { variant: 'primary', attrs: { 'data-action': 'hear' } })}${button('Change difficulty', { cls: 'is-quiet', attrs: { 'data-action': 'tier-sheet' } })}</div>
 <div class="card pz-status" data-status></div>
 </div>`);
   G.el = {
@@ -241,7 +238,7 @@ function drawAll() {
     grid: ROOT.querySelector('[data-grid]'),
     status: ROOT.querySelector('[data-status]'),
     sub: ROOT.querySelector('[data-sub]'),
-    tierBtn: ROOT.querySelector('.gr-tierbtn'),
+    tools: ROOT.querySelector('[data-tools]'),
   };
   G.tiles = [];
   const nodes = G.el.grid.children;
@@ -441,7 +438,7 @@ async function tierSheet() {
   const actions = TIER_IDS.filter((t) => t !== b.tier).map((t) => {
     const pay = C.sim.economy.puzzleReward(C.game.state, t, { ...(tiers[t] || {}) });
     const verb = TIER_IDS.indexOf(t) < idx ? `Drop to ${TIER_LABEL[t]}` : `Try ${TIER_LABEL[t]}`;
-    return { label: `${verb} · about ${fmt(pay)}`, variant: 'paper', value: t };
+    return { label: `${verb} · about ${coinsText(C, pay)} coins`, variant: 'paper', value: t };
   });
   actions.push({ label: `Stay on ${TIER_LABEL[b.tier]}`, variant: 'primary', value: null });
   const pick = await C.sheet({
@@ -502,14 +499,7 @@ function celebrate(reward) {
 
 function skip() {
   if (!G.celebrating) return;
-  const hadStamp = G.el.frame && G.el.frame.querySelector('.gr-stampwrap');
   clearTimers();
-  if (!hadStamp && G.reward && G.reward.tier !== 'relaxed' && G.el.frame) {
-    const w = document.createElement('div');
-    w.className = 'gr-stampwrap';
-    w.innerHTML = String(stampSvg(TIER_LABEL[G.reward.tier], { tone: STAMP_TONE[G.reward.tier], size: 84, double: G.reward.tier === 'master' }));
-    G.el.frame.appendChild(w);
-  }
   finalize();
 }
 
@@ -524,26 +514,54 @@ function bonusLine(bonus) {
   return h`<li>${iconSvg('star', { size: 18 })}<span><b>Bonus roll:</b> ${bonus.seals} Seals</span></li>`;
 }
 
+const nameOf = (colorId) => (C.sim.displayName ? C.sim.displayName(C.game.state, colorId) : colorId);
+
+/** The tint rows of the result card: swatch + name (the name follows her own naming). */
+function tintRows(found, reward) {
+  if (found.length) {
+    const shown = found.slice(0, 3);
+    return h`<div class="tints">${shown.map((f) => h`<div class="row">${swatch(f.hex, 44, { label: nameOf(f.colorId) })}<div class="grow"><div class="hint">New tint for your catalog</div><div class="nm pz-name" data-tint-name="${f.colorId}">${nameOf(f.colorId)}</div></div></div>`)}${found.length > shown.length ? h`<div class="hint">and ${found.length - shown.length} more tints</div>` : ''}</div>`;
+  }
+  if (reward.tints.length) {
+    return h`<div class="tints"><div class="row"><div class="chips">${reward.tints.slice(0, 4).map((hex) => swatch(hex, 36))}</div><div class="grow hint">Tints you revealed are already in your catalog.</div></div></div>`;
+  }
+  return '';
+}
+
+/** Keep the names on the result card in step with the naming screen. */
+function refreshNames() {
+  ROOT.querySelectorAll('[data-tint-name]').forEach((n) => {
+    const t = nameOf(n.dataset.tintName);
+    if (n.textContent !== t) n.textContent = t;
+  });
+}
+
 function finalize() {
   if (!G.celebrating) return;
   clearTimers();
-  G.celebrating = false;
   const reward = G.reward;
+  // The result is claimed before the tints are flushed: the flush can open the naming screen
+  // (its change event renders this screen), and render() must leave the solved board alone.
+  G.result = { reward, found: [] };
+  G.celebrating = false;
   const found = C.game.act((s, _a, now) => flushTints(C, s, now)) || [];
   G.result = { reward, found };
   const rise = G.el.frame && G.el.frame.querySelector('.gr-rise');
   if (rise) rise.remove();
-  const chips = (found.length ? found.map((f) => f.hex) : reward.tints).map((hex) => swatch(hex, 44));
-  const headline = found.length
-    ? `Solved. You found ${found[0].name}${found.length > 1 ? ` and ${found.length - 1} more` : ''}`
-    : 'Solved. Beautifully graded';
-  const detail = found.length ? 'A new tint for the catalog, plus a production boost.' : 'The tints you revealed were already in your catalog. The boost is yours.';
-  const boostLabel = reward.boostMinutes === Math.round(reward.boostMinutes) ? reward.boostMinutes : reward.boostMinutes.toFixed(1);
+  const board = G.el.frame && G.el.frame.querySelector('.gr-stampwrap');
+  if (board) board.remove(); // the stamp moves onto the result card
+  const mins = Math.round(reward.boostMinutes * 10) / 10;
+  const stamp = reward.tier !== 'relaxed'
+    ? stampSvg(TIER_LABEL[reward.tier], { tone: STAMP_TONE[reward.tier], size: 64, double: reward.tier === 'master' })
+    : '';
+  const headline = found.length ? 'Solved: a new tint is yours' : 'Solved. Beautifully graded';
+  const detail = found.length ? 'Your catalog just grew.' : 'A gentle boost is yours all the same.';
   const card = h`<div class="card pz-result" data-result>
-<div class="row">${chips.length ? h`<div class="chips">${chips}</div>` : ''}<div class="grow"><div class="hl">${headline}</div><div class="hint">${detail}</div></div></div>
+<div class="row gr-result-top"><div class="grow"><div class="hl">${headline}</div><div class="hint">${detail}</div></div>${stamp}</div>
+${tintRows(found, reward)}
 <ul class="lines">
-<li>${iconSvg('coin', { size: 18 })}<span><b class="num" data-coins>+0</b> coins, about ${reward.k} minutes of production</span></li>
-<li>${iconSvg('check', { size: 18 })}<span>+25% production for ${boostLabel} minutes</span></li>
+<li>${iconSvg('coin', { size: 18 })}<span><b class="num" data-coins>+0</b> coins</span></li>
+<li>${iconSvg('check', { size: 18 })}<span>+${mins} ${mins === 1 ? 'minute' : 'minutes'} of faster mixing</span></li>
 ${bonusLine(reward.bonus)}
 </ul>
 <div class="pz-actions">${button('Another board', { variant: 'primary', attrs: { 'data-action': 'again' } })}${button('Back to the table', { attrs: { 'data-action': 'done' } })}</div>
@@ -554,15 +572,17 @@ ${bonusLine(reward.bonus)}
     G.el.status.replaceWith(wrap.firstElementChild);
     G.el.status = null;
   }
+  if (G.el.tools) G.el.tools.hidden = true; // the result and its next steps take the room
   const coinsEl = ROOT.querySelector('[data-coins]');
-  if (coinsEl) C.fx.rollNumber(coinsEl, 0, reward.coins, { ms: 600, format: (v) => `+${fmt(v)}` });
+  if (coinsEl) C.fx.rollNumber(coinsEl, 0, reward.coins, { ms: 600, format: (v) => `+${coinsText(C, v)}` });
 }
 
 function again() {
   clearTimers();
+  const tier = G.result && G.result.reward && TIER_IDS.includes(G.result.reward.tier) ? G.result.reward.tier : rememberedTier(C.game.state);
   G.result = null;
   G.celebrating = false;
-  C.game.act((s, _a, now) => createGradingBoard(C, s, { tier: rememberedTier(s) }, now));
+  C.game.act((s, _a, now) => createGradingBoard(C, s, { tier }, now));
   G.board = activeOf(C.game.state).grading;
   drawAll();
 }
@@ -638,7 +658,8 @@ export default {
   },
 
   render(state) {
-    if (!ROOT || !G.visible || G.busy || G.celebrating || G.result || G.drag) return;
+    if (ROOT && G.visible && G.result) { refreshNames(); return; }
+    if (!ROOT || !G.visible || G.busy || G.celebrating || G.drag) return;
     const b = activeOf(state).grading || null;
     const cb = !!(state.settings && state.settings.colorblind);
     if (b !== G.board || (b && b.moves !== G.moves) || cb !== G.cb) {

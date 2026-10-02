@@ -22,7 +22,7 @@ import { h, raw, backButton, button, iconSvg, containerSvg, safeHex, escapeHtml 
 import { stateRng, shuffle } from '../rng.js';
 import {
   injectStyle, PZ_CSS, ensureActive, activeOf, FAMILY_HEX, FAMILY_ORDER, familyName, patternFill,
-  ensureDefs, lightnessOf, stampSvg,
+  ensureDefs, lightnessOf, stampSvg, yardStatus, yardTag, gentleDuration, coinsText,
 } from './puzzles.js';
 
 const MAX_JARS = 24;
@@ -58,17 +58,22 @@ const CSS = `
 .pk-lid .pz-stamp { background: rgba(247,244,236,.92); border-radius: 50%; }
 .pk-lid .pk-stampin { animation: pz-stamp-in 240ms var(--ease-out) both; }
 .pk-hint { font-size: 13px; color: var(--ink-soft); text-align: center; }
+.pk-empty-actions { display: flex; flex-direction: column; gap: 8px; align-items: stretch; width: 100%; max-width: 260px; }
+.pk-empty-actions .btn.is-quiet { box-shadow: 0 3px 0 var(--shadow), inset 0 0 0 1.5px rgba(42,38,34,.2); }
+.pk-result .bonus { display: inline-flex; align-items: center; gap: 8px; }
 `;
 
 let C = null;
 let ROOT = null;
 const K = {
-  visible: false, entry: null, celebrating: false, result: null, timers: [], el: {}, last: null, cb: false, sig: '',
+  visible: false, entry: null, celebrating: false, result: null, timers: [], el: {}, last: null, cb: false, sig: '', from: 'workshop',
 };
+
+/** Where Back leads: the table when she came from there, else the workshop (the yard lives in it). */
+const backLabel = () => (K.from === 'puzzles' ? 'Back to the table' : 'Back to the workshop');
 
 const later = (fn, ms) => { const id = setTimeout(fn, ms); K.timers.push(id); return id; };
 const clearTimers = () => { K.timers.forEach(clearTimeout); K.timers = []; };
-const fmt = (n) => (C.format && C.format.num ? C.format.num(n) : Math.round(n).toLocaleString());
 const reduced = () => !!(C.fx && C.fx.isReducedMotion && C.fx.isReducedMotion());
 
 // ---------------------------------------------------------------------------
@@ -259,8 +264,12 @@ function cratesHtml(e, justDropped) {
 }
 
 function emptyHtml() {
-  return h`<div class="screen-head">${backButton('Back to the loading yard')}<div class="titles"><div class="title">Loading Yard</div></div><div class="spacer"></div></div>
-<div class="screen-body pz-body"><div class="card pz-empty"><div class="h2">Nothing to pack right now</div><div class="hint">Load a vehicle at the loading yard and choose to pack it by hand.</div>${button('Back', { variant: 'primary', attrs: { 'data-action': 'done' } })}</div></div>`;
+  const yard = yardStatus(C, C.game.state);
+  const go = yard.open
+    ? button('Go to the Loading Yard', { variant: 'primary', block: true, attrs: { 'data-action': 'to-yard' } })
+    : '';
+  return h`<div class="screen-head">${backButton(backLabel())}<div class="titles"><div class="title">Packing</div></div><div class="spacer"></div></div>
+<div class="screen-body pz-body"><div class="card pz-empty"><div class="h2">Crates are all shipped</div><div class="hint">Packing happens when you ship a crate: load a cart at the Loading Yard and pack it by hand.</div>${yard.open ? '' : yardTag(yard)}<div class="pk-empty-actions">${go}${button(backLabel(), { block: true, cls: 'is-quiet', attrs: { 'data-action': 'done' } })}</div></div></div>`;
 }
 
 function drawAll(justDropped) {
@@ -269,13 +278,13 @@ function drawAll(justDropped) {
   const e = K.entry;
   if (!e) { ROOT.innerHTML = String(emptyHtml()); K.el = {}; return; }
   K.sig = sigOf(e);
-  const title = e.lanterns ? 'Stringing lanterns' : 'Loading Yard';
-  ROOT.innerHTML = String(h`<div class="screen-head">${backButton('Back to the loading yard')}
+  const title = e.lanterns ? 'Stringing lanterns' : 'Packing';
+  ROOT.innerHTML = String(h`<div class="screen-head">${backButton(backLabel())}
 <div class="titles"><div class="title">${title}</div><div class="subtitle" data-left>${leftLabel(e)}</div></div><div class="spacer"></div></div>
 <div class="screen-body pz-body">
 <div data-conveyor-wrap>${conveyorHtml(e)}</div>
 <div class="pk-crates" data-crates>${raw(cratesHtml(e, justDropped))}</div>
-<div class="pk-hint" data-hint>A clean crate ships at +25%. A mixed one still ships, at its regular price.</div>
+<div class="pk-hint" data-hint>A clean crate ships at +25%. A mixed one still ships, at base value.</div>
 </div>`);
   K.el = {
     left: ROOT.querySelector('[data-left]'),
@@ -372,22 +381,22 @@ function finalize() {
   let head;
   let detail;
   if (result.clean) {
-    head = 'Clean crate: +25%';
+    head = '+25% clean crate';
     detail = 'Every jar found its crate, so this shipment is paid a quarter more.';
   } else {
-    head = 'Packed and on its way';
-    detail = 'It ships at its regular price. A fully clean crate earns +25% next time.';
+    head = 'Shipped at base value';
+    detail = 'Packed and on its way. A fully clean crate earns +25% next time.';
   }
   const lines = [];
   if (disp && disp.ok) {
-    lines.push(h`<li>${iconSvg('coin', { size: 18 })}<span>Worth about <b class="num">${fmt(disp.value)}</b> coins on arrival</span></li>`);
+    lines.push(h`<li>${iconSvg('coin', { size: 18 })}<span>Worth about <b class="num">${coinsText(C, disp.value)}</b> coins on arrival</span></li>`);
     const ms = Number.isFinite(disp.arrivesAt) ? Math.max(0, disp.arrivesAt - now) : 0;
-    if (ms > 0 && C.format && C.format.duration) lines.push(h`<li>${iconSvg('check', { size: 18 })}<span>Back in ${C.format.duration(ms)}</span></li>`);
+    if (ms > 0) lines.push(h`<li>${iconSvg('check', { size: 18 })}<span>Back in about ${gentleDuration(ms)}</span></li>`);
   } else {
     lines.push(h`<li>${iconSvg('check', { size: 18 })}<span>This cart had already left, so nothing was sent. Nothing is lost.</span></li>`);
   }
-  const card = h`<div class="card pz-result" data-result><div class="hl">${head}</div><div class="hint">${detail}</div><ul class="lines">${lines}</ul>
-<div class="pz-actions">${button('Back to the yard', { variant: 'primary', attrs: { 'data-action': 'done' } })}</div></div>`;
+  const card = h`<div class="card pz-result pk-result" data-result><div class="hl">${head}</div><div class="hint">${detail}</div><ul class="lines">${lines}</ul>
+<div class="pz-actions">${button('Back to the workshop', { variant: 'primary', attrs: { 'data-action': 'to-workshop' } })}</div></div>`;
   // The result takes the conveyor's place at the top so it is in view without scrolling.
   K.el.conv.innerHTML = String(card);
   if (K.el.hint) K.el.hint.remove();
@@ -409,9 +418,17 @@ function onClick(e) {
     return;
   }
   const a = e.target.closest('[data-action]');
-  if (a && ROOT.contains(a) && a.dataset.action === 'done') {
+  if (!a || !ROOT.contains(a)) return;
+  const act = a.dataset.action;
+  if (act === 'done') {
     K.result = null;
     C.back();
+  } else if (act === 'to-workshop') {
+    K.result = null;
+    C.navigate('workshop', {});
+  } else if (act === 'to-yard') {
+    K.result = null;
+    C.navigate('workshop', { sheet: 'yard' });
   }
 }
 
@@ -440,6 +457,7 @@ export default {
   show(params = {}) {
     K.visible = true;
     clearTimers();
+    K.from = params && params.from === 'puzzles' ? 'puzzles' : 'workshop';
     const wants = params && (params.routeId !== undefined || params.vehicle !== undefined || (Array.isArray(params.cargo) && params.cargo.length));
     if (K.result && !wants) return; // coming back to a finished result card
     K.result = null;

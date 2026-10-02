@@ -18,7 +18,7 @@
 
 import { h, raw, backButton, button, swatch, iconSvg } from './kit.js';
 import {
-  injectStyle, PZ_CSS, ensureActive, activeOf, createPurifyPuzzle, patternFill, ensureDefs, lightnessOf,
+  injectStyle, PZ_CSS, ensureActive, activeOf, createPurifyPuzzle, patternFill, ensureDefs, lightnessOf, coinsText,
 } from './puzzles.js';
 
 const CSS = `
@@ -36,7 +36,10 @@ const CSS = `
 .pu-stream path { fill: none; stroke-linecap: round; filter: drop-shadow(0 1px 0 rgba(42,38,34,.35)); }
 .pu-tools { display: flex; gap: 10px; }
 .pu-tools .btn { flex: 1 1 0; min-height: 48px; }
-.pu-undo { min-height: 44px; padding: 0 14px; font-size: 14px; }
+.pu-undo { min-height: 44px; min-width: 64px; padding: 0 14px; font-size: 14px; }
+.pu-empty-actions { display: flex; flex-direction: column; gap: 8px; align-items: stretch; width: 100%; max-width: 260px; }
+.pu-empty-actions .btn.is-quiet, .pu-tools .btn.is-quiet { box-shadow: 0 3px 0 var(--shadow), inset 0 0 0 1.5px rgba(42,38,34,.2); }
+.pu-purity { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 14px; }
 `;
 
 let C = null;
@@ -49,7 +52,6 @@ let uid = 0;
 
 const later = (fn, ms) => { const id = setTimeout(fn, ms); P.timers.push(id); return id; };
 const clearTimers = () => { P.timers.forEach(clearTimeout); P.timers = []; };
-const fmt = (n) => (C.format && C.format.num ? C.format.num(n) : Math.round(n).toLocaleString());
 const reduced = () => !!(C.fx && C.fx.isReducedMotion && C.fx.isReducedMotion());
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
@@ -149,7 +151,10 @@ function shelfHtml(puz) {
 function statusHtml(puz) {
   const total = puz.colors.length;
   const corked = puz.tubes.filter((t) => isDone(puz, t)).length;
-  const hl = corked ? (corked >= total ? 'Every color is corked' : `${corked} of ${total} colors corked`) : 'Pour each color into its own tube';
+  const left = total - corked;
+  const hl = corked
+    ? (left <= 0 ? 'Every color is corked' : `${corked} ${corked === 1 ? 'color' : 'colors'} corked, ${left} more to go`)
+    : 'Pour each color into its own tube';
   return h`<div class="hl">${hl}</div><div class="dt">Tap a tube, then tap where to pour. You can pour onto the same color or into an empty tube.</div>`;
 }
 
@@ -171,13 +176,13 @@ function updateTools() {
   const add = ROOT.querySelector('[data-action="add-tube"]');
   if (add) {
     add.disabled = !!e.puzzle.extraTubeUsed;
-    add.textContent = e.puzzle.extraTubeUsed ? 'Extra tube added' : 'Add an empty tube';
+    add.textContent = e.puzzle.extraTubeUsed ? 'Extra tube added' : 'Add a tube';
   }
 }
 
 function emptyHtml() {
   return h`<div class="screen-head">${backButton('Back to the puzzle table')}<div class="titles"><div class="title">Purify</div></div><div class="spacer"></div></div>
-<div class="screen-body pz-body"><div class="card pz-empty"><div class="h2">Nothing to purify right now</div><div class="hint">When a mixer makes a muddy batch, it waits on the puzzle table.</div>${button('Back to the table', { variant: 'primary', attrs: { 'data-action': 'done' } })}</div></div>`;
+<div class="screen-body pz-body"><div class="card pz-empty"><div class="h2">All batches are sparkling</div><div class="hint">Muddy batches come from fast mixers. When one is made, it waits for you on the puzzle table.</div><div class="pu-empty-actions">${button('Back to the table', { variant: 'primary', block: true, attrs: { 'data-action': 'done' } })}${button('Go to the workshop', { block: true, cls: 'is-quiet', attrs: { 'data-action': 'to-workshop' } })}</div></div></div>`;
 }
 
 function drawAll() {
@@ -197,7 +202,7 @@ function drawAll() {
   P.name = C.sim.displayName ? C.sim.displayName(state, e.color) : e.color;
   P.hex = C.sim.economy.colorHex(e.color);
   const addBtn = canAddTube()
-    ? button(puz.extraTubeUsed ? 'Extra tube added' : 'Add an empty tube', { disabled: puz.extraTubeUsed, attrs: { 'data-action': 'add-tube' } })
+    ? button(puz.extraTubeUsed ? 'Extra tube added' : 'Add a tube', { disabled: puz.extraTubeUsed, cls: 'is-quiet', attrs: { 'data-action': 'add-tube' } })
     : '';
   ROOT.innerHTML = String(h`<div class="screen-head">${backButton('Back to the puzzle table')}
 <div class="titles"><div class="title">Purify</div><div class="subtitle">Muddy ${P.name}${jars ? ` \u00b7 ${jars} ${jars === 1 ? 'jar' : 'jars'}` : ''}</div></div>
@@ -346,11 +351,12 @@ function finalize() {
   const r = P.reward;
   P.result = r;
   const more = (C.game.state.muddyBatches || []).filter((b) => b.id !== (P.entry && P.entry.batchId));
+  const jarsIn = Math.max(0, Math.round(r.jars));
   const card = h`<div class="card pz-result" data-result>
-<div class="row">${swatch(P.hex, 44)}<div class="grow"><div class="hl">Pure batch of ${P.name}: sells for 1.5×</div><div class="hint">Every color in its own tube. This batch is now high purity.</div></div></div>
+<div class="row">${swatch(P.hex, 44, { label: P.name })}<div class="grow"><div class="hl">Purity: pure</div><div class="hint">A clean batch of <span class="pz-name">${P.name}</span> that sells for 50% more.</div></div></div>
 <ul class="lines">
-<li>${iconSvg('check', { size: 18 })}<span>${Math.max(0, Math.round(r.jars))} ${Math.round(r.jars) === 1 ? 'jar' : 'jars'} added to your stock</span></li>
-${r.coins > 0 ? h`<li>${iconSvg('coin', { size: 18 })}<span>+${fmt(r.coins)} coins from jars that did not fit</span></li>` : ''}
+<li>${iconSvg('check', { size: 18 })}<span>${jarsIn} ${jarsIn === 1 ? 'jar' : 'jars'} of pure ${P.name} added to your stock</span></li>
+${r.coins > 0 ? h`<li>${iconSvg('coin', { size: 18 })}<span>+${coinsText(C, r.coins)} coins from jars that did not fit</span></li>` : ''}
 </ul>
 <div class="pz-actions">${more.length ? button('Next batch', { variant: 'primary', attrs: { 'data-action': 'next-batch', 'data-batch': more[0].id } }) : ''}${button('Back to the table', { variant: more.length ? 'paper' : 'primary', attrs: { 'data-action': 'done' } })}</div>
 </div>`;
@@ -418,6 +424,9 @@ function onClick(e) {
   } else if (act === 'done') {
     P.result = null;
     C.back();
+  } else if (act === 'to-workshop') {
+    P.result = null;
+    C.navigate('workshop', {});
   } else if (act === 'next-batch') {
     const batchId = a.dataset.batch;
     P.result = null;

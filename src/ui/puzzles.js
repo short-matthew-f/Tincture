@@ -20,7 +20,7 @@
  * screen object required by docs/UI-CONTRACT.md.
  */
 
-import { h, raw, button, swatch, iconSvg, safeHex } from './kit.js';
+import { h, raw, button, swatch, iconSvg, safeHex, lockTag } from './kit.js';
 import { stateRng } from '../rng.js';
 import { deltaEHex } from '../color.js';
 
@@ -30,7 +30,14 @@ import { deltaEHex } from '../color.js';
 
 export const TIER_IDS = ['relaxed', 'steady', 'tricky', 'master'];
 export const TIER_LABEL = { relaxed: 'Relaxed', steady: 'Steady', tricky: 'Tricky', master: 'Master' };
-const GRID = { relaxed: '4 by 5', steady: '6 by 8', tricky: '8 by 10', master: '9 by 12' };
+const GRID = { relaxed: '4 × 5 tiles', steady: '6 × 8 tiles', tricky: '8 × 10 tiles', master: '9 × 12 tiles' };
+/** One plain line under the selected tier. */
+const TIER_HINT = {
+  relaxed: 'Calm and roomy: a gentle gradient to settle.',
+  steady: 'A bigger board with a little more to think about.',
+  tricky: 'Close shades side by side, for sharp eyes.',
+  master: 'The full gradient, with a bonus roll on top.',
+};
 /** Event twists that change grading boards (palette and/or frame). */
 const BOARD_RULES = ['boardShape', 'glowTiles', 'sunsetBoards', 'monochromeMaster'];
 const SHAPE_FRAME = { leaf: 'Leaf', snowflake: 'Snowflake', fish: 'Fish', window: 'Window' };
@@ -89,6 +96,45 @@ export function frameName(ctx, eventId, shape) {
     if (ev) name = ev.name;
   } catch { /* names are cosmetic */ }
   return `${name} frame`;
+}
+
+/**
+ * Where the Loading Yard stands: {open, req, need}. The yard is a room (checkPhase gates Phase 3
+ * on it); packing only ever starts from a loaded vehicle there.
+ */
+export function yardStatus(ctx, state) {
+  const rooms = (state && state.rooms) || [];
+  if (rooms.includes('loading-yard')) return { open: true, req: 0, need: 0 };
+  let req = 30;
+  try {
+    const r = (ctx.content.ROOMS || []).find((x) => x.id === 'loading-yard');
+    if (r && Number.isFinite(r.colorsRequired)) req = r.colorsRequired;
+  } catch { /* the gate falls back to 30 colors */ }
+  let have = 0;
+  try { have = ctx.sim.discoveredCount(state); } catch { have = 0; }
+  return { open: false, req, need: Math.max(1, req - have) };
+}
+
+/** "Shipping opens at 30 colors - 12 more": the paper tag for a yard that is not open yet. */
+export function yardTag(y) {
+  return lockTag(`Shipping opens at ${y.req} colors \u00b7 ${y.need} more`, { cls: 'pz-tag' });
+}
+
+/** Coins for display: whole numbers while small ("about 2 coins"), then the usual K/M short form. */
+export function coinsText(ctx, n) {
+  const v = Number.isFinite(n) ? n : 0;
+  const x = v < 100 ? Math.max(v > 0 ? 1 : 0, Math.round(v)) : v;
+  return ctx.format && ctx.format.num ? ctx.format.num(x) : Math.round(x).toLocaleString();
+}
+
+/** Plain minutes, never seconds: "12 minutes", "2 hours 5 minutes". */
+export function gentleDuration(ms) {
+  const m = Math.max(1, Math.ceil((Number.isFinite(ms) ? ms : 0) / 60000));
+  if (m < 60) return `${m} ${m === 1 ? 'minute' : 'minutes'}`;
+  const hrs = Math.floor(m / 60);
+  const rest = m % 60;
+  const hs = `${hrs} ${hrs === 1 ? 'hour' : 'hours'}`;
+  return rest ? `${hs} ${rest} ${rest === 1 ? 'minute' : 'minutes'}` : hs;
 }
 
 export function eventName(ctx, eventId) {
@@ -230,13 +276,21 @@ export const STAMP_TONE = { steady: '#7B5236', tricky: '#8C6512', master: '#2A26
 export const PZ_CSS = `
 .pz-body { gap: 12px; }
 .pz-empty { text-align: center; padding: 28px 16px; display: flex; flex-direction: column; gap: 10px; align-items: center; }
+.pz-empty .h2, .pz-hub .h3 { font-family: var(--font-ui); font-weight: 600; }
+.pz-empty .btn { min-width: 220px; }
+.pz-tag, .pz-hub .tag, .pz-empty .tag { white-space: normal; font-size: 12px; line-height: 1.25; padding-top: 5px; padding-bottom: 5px; }
+.pz-name { font-family: var(--font-display); font-weight: 400; }
 .pz-status { gap: 3px; }
-.pz-status .hl { font-family: var(--font-display); font-size: 17px; line-height: 1.25; }
+.pz-status .hl { font-family: var(--font-ui); font-weight: 600; font-size: 17px; line-height: 1.25; }
 .pz-status .dt { font-size: 14px; color: var(--ink-soft); }
 .pz-actions { display: flex; gap: 10px; }
-.pz-actions > .btn { flex: 1 1 0; min-height: 48px; }
+.pz-actions > .btn { flex: 1 1 auto; min-height: 48px; padding: 0 12px; white-space: nowrap; }
+.pz-actions.stack { flex-direction: column; }
 .pz-result { gap: 10px; animation: pz-rise 260ms var(--ease-out) both; }
-.pz-result .hl { font-family: var(--font-display); font-size: 19px; line-height: 1.2; }
+.pz-result .hl { font-family: var(--font-ui); font-weight: 600; font-size: 19px; line-height: 1.2; }
+.pz-result .tints { display: flex; flex-direction: column; gap: 8px; }
+.pz-result .tints .row { gap: 10px; }
+.pz-result .tints .nm { font-size: 17px; line-height: 1.2; }
 .pz-result .lines { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
 .pz-result .lines li { display: flex; align-items: center; gap: 8px; }
 .pz-result .lines b { font-weight: 700; }
@@ -246,6 +300,10 @@ export const PZ_CSS = `
 @keyframes pz-stamp-in { 0% { opacity: 0; transform: scale(1.5) rotate(-6deg); } 60% { opacity: 1; transform: scale(.96); } 100% { opacity: .94; transform: none; } }
 .pz-nudge { background: var(--paper); border-radius: var(--radius-sm); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; box-shadow: var(--cut-sm); }
 .pz-hub .tierline { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; color: var(--ink-soft); }
+.pz-hub .seg-control > button { min-height: 44px; }
+.pz-hub .btn.small, .pz-nudge .btn.small { min-height: 44px; }
+.pz-hub .btn.quiet { box-shadow: 0 3px 0 var(--shadow), inset 0 0 0 1.5px rgba(42,38,34,.2); }
+.pz-hub .tierdesc { min-height: 18px; }
 .pz-hub .reward { font-weight: 700; color: var(--ink); }
 .pz-hub .banner { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--glow); box-shadow: 0 0 0 1.5px var(--glow-ring); font-size: 13px; }
 .pz-hub .batch { display: flex; flex-direction: column; gap: 8px; padding: 10px 0; }
@@ -286,7 +344,7 @@ function build(state) {
   let boardInfo = '';
   if (board) {
     const wrong = C.puzzles.grading.wrongCount(board);
-    boardInfo = h`<div class="hint">A ${TIER_LABEL[board.tier] || 'Relaxed'} board is waiting: ${wrong === 1 ? 'one tile' : `${wrong} tiles`} to go.</div>`;
+    boardInfo = h`<div class="hint">A ${TIER_LABEL[board.tier] || 'Relaxed'} board is waiting: ${wrong === 1 ? 'one more tile' : `${wrong} more tiles`} to settle.</div>`;
   }
 
   let banner = '';
@@ -302,13 +360,14 @@ function build(state) {
 <div class="hint">Put a gradient back in order. Solving reveals new tints and a production boost.</div>
 ${banner}
 ${seg}
-<div class="tierline"><span>Reward: <span class="reward">about ${fmt(reward)}</span></span><span>${def.mult}×${tier === 'master' ? ' + a bonus roll' : ''}</span></div>
+<div class="hint tierdesc">${TIER_HINT[tier]}</div>
+<div class="tierline"><span>Reward: <span class="reward">about ${coinsText(C, reward)} coins</span></span>${tier === 'master' ? h`<span>plus a bonus roll</span>` : ''}</div>
 ${nudge ? h`<div class="pz-nudge"><div class="semi">You are gliding through these. Try Tricky?</div><div class="row"><button type="button" class="btn btn-primary small" data-action="try-tricky" data-tap>Try Tricky</button><button type="button" class="btn small" data-action="dismiss-nudge" data-tap>Maybe later</button></div></div>` : ''}
 ${boardInfo}
 ${board
     ? h`<div class="row"><div class="grow">${button('Continue board', { variant: 'primary', block: true, attrs: { 'data-action': 'continue-grading' } })}</div>${button('New board', { small: true, attrs: { 'data-action': 'new-grading' } })}</div>`
     : button('New grading board', { variant: 'primary', block: true, cls: 'tall', attrs: { 'data-action': 'new-grading' } })}
-${tw ? h`<button type="button" class="btn small block" data-action="new-grading" data-mode="own" data-tap>New board in my own colors</button>` : ''}
+${tw ? h`<button type="button" class="btn small block quiet" data-action="new-grading" data-mode="own" data-tap>New board in my own colors</button>` : ''}
 </div>`;
 
   const batches = state.muddyBatches || [];
@@ -319,22 +378,29 @@ ${tw ? h`<button type="button" class="btn small block" data-action="new-grading"
     const going = pur && pur.batchId === b.id;
     const jars = Math.max(1, Math.round(num(b.jars)));
     return h`<div class="batch">
-<div class="row">${swatch(hex, 40, { label: name })}<div class="grow"><div class="semi">${name}</div><div class="hint">${jars} ${jars === 1 ? 'jar' : 'jars'}${going ? ', a pour is under way' : ''}</div></div></div>
+<div class="row">${swatch(hex, 40, { label: name })}<div class="grow"><div class="semi pz-name">${name}</div><div class="hint">${jars} ${jars === 1 ? 'jar' : 'jars'}${going ? ', a pour is under way' : ''}</div></div></div>
 ${button(going ? `Continue purifying ${name}` : `Purify a batch of ${name} (${jars} ${jars === 1 ? 'jar' : 'jars'})`, { variant: 'primary', block: true, attrs: { 'data-action': 'purify', 'data-batch': b.id } })}
-${button('Sell as is (0.8×)', { small: true, block: true, attrs: { 'data-action': 'sell-muddy', 'data-batch': b.id } })}
+${button('Sell as is for 80% of the price', { small: true, block: true, cls: 'quiet', attrs: { 'data-action': 'sell-muddy', 'data-batch': b.id } })}
 </div>`;
   });
   const purifyCard = h`<div class="card" id="pz-purify">
 <div class="row between"><div class="h3">Purify</div>${batches.length ? h`<span class="chip">${batches.length} ${batches.length === 1 ? 'batch' : 'batches'}</span>` : ''}</div>
-<div class="hint">Sort the layers of a muddy batch into pure tubes. It sells for 1.5× or more.</div>
-${batches.length ? batchRows : h`<div class="hint">No muddy batches right now. When a mixer makes one, it waits here.</div>`}
+<div class="hint">Sort the layers of a muddy batch into pure tubes. A pure batch sells for 50% more.</div>
+${batches.length ? batchRows : h`<div class="hint">Muddy batches come from fast mixers. When one is made, it waits here for you.</div>
+${button('Go to the workshop', { block: true, cls: 'quiet', attrs: { 'data-action': 'to-workshop' } })}`}
 </div>`;
 
   const pk = active.packing;
+  const yard = yardStatus(C, state);
+  const packAction = pk
+    ? button('Continue packing', { variant: 'primary', block: true, attrs: { 'data-action': 'continue-packing' } })
+    : yard.open
+      ? button('Go to the Loading Yard', { block: true, cls: 'quiet', attrs: { 'data-action': 'to-yard' } })
+      : yardTag(yard);
   const packingCard = h`<div class="card" id="pz-packing">
 <div class="h3">Packing</div>
-<div class="hint">Sort jars into route crates before a cart leaves. A clean crate ships at +25%. Start it from a loaded vehicle at the loading yard.</div>
-${pk ? button('Continue packing', { variant: 'primary', block: true, attrs: { 'data-action': 'continue-packing' } }) : ''}
+<div class="hint">Packing happens when you ship a crate: sort the jars into route crates before a cart leaves. A clean crate ships at +25%.</div>
+${packAction}
 </div>`;
 
   return h`<div class="screen-head is-left"><div class="titles"><div class="title">Puzzle table</div><div class="subtitle">Short, calm, and always worth it</div></div></div>
@@ -349,6 +415,7 @@ function sigOf(state) {
     tier, fmt(rewardOf(state, tier)), a.grading ? [a.grading.tier, C.puzzles.grading.wrongCount(a.grading)] : 0,
     a.purify ? a.purify.batchId : 0, a.packing ? 1 : 0, tw ? tw.id : 0,
     (state.muddyBatches || []).map((b) => [b.id, Math.round(num(b.jars))]),
+    (() => { const y = yardStatus(C, state); return [y.open, y.need]; })(),
     num(state.stats && state.stats.fastSolves) >= 3,
   ]);
 }
@@ -410,12 +477,16 @@ function onClick(e) {
       if (s.activePuzzles && s.activePuzzles.purify && s.activePuzzles.purify.batchId === a.batchId) s.activePuzzles.purify = null;
       return r;
     }, { batchId });
-    if (res && res.ok) C.toast(`Sold for ${fmt(res.coins)} coins`);
+    if (res && res.ok) C.toast(`Sold for ${coinsText(C, res.coins)} coins`);
     draw(C.game.state, true);
   } else if (act === 'continue-purify') {
     C.navigate('purify', {});
   } else if (act === 'continue-packing') {
-    C.navigate('packing', {});
+    C.navigate('packing', { from: 'puzzles' });
+  } else if (act === 'to-workshop') {
+    C.navigate('workshop', {});
+  } else if (act === 'to-yard') {
+    C.navigate('workshop', { sheet: 'yard' });
   }
 }
 
