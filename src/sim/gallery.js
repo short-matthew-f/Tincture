@@ -1,13 +1,20 @@
 // gallery.js — painting, signing, hanging, admission, visitors (pure).
 // Implements docs/DESIGN.md "The Gallery": paint canvases region by region with
-// any color she owns (paint costs jars: size × 3), unlimited repaint until
-// signed, value from rarity × purity (via price) × variety × weekly taste,
-// admission 2×10^-5 of value per second (auto-collected), visitor comments in
+// any color she owns, unlimited repaint until signed, value from rarity ×
+// purity (via price) × variety × weekly taste, admission 2×10^-5 of value per
+// second (auto-collected), visitor comments in
 // her color names, a visiting collector about every 2 days (3× value for a
 // print; she keeps the original). Pieces survive every reset.
 //
+// Paint scales with her factory (docs/DESIGN.md "Balance model › Gallery and
+// Merge Shelf in the simulation": each piece uses 20 minutes of production in
+// paint). A whole canvas costs PAINT_SECONDS of her current mixer output,
+// split across regions by size; the rate is locked when the piece is started
+// (`paintRate`) so panes don't change price mid-piece, and every region's jars
+// are stored at paint time so the value preview and the signed value agree.
+//
 // Piece {id, canvas, title, regions:{regionId: colorId}, purity:{regionId: p},
-//        jars:{regionId: n}, startedAt, signedAt, value, hung}
+//        jars:{regionId: n}, paintRate, startedAt, signedAt, value, hung}
 
 import { CANVASES, getCanvas, starterCanvases } from '../content/canvases.js';
 import { VISITOR_COMMENTS, COMMENT_PLACES, fillComment } from '../content/names.js';
@@ -17,11 +24,18 @@ import { stateRng, uuid } from '../rng.js';
 import { emit } from './bus.js';
 import { questEvent } from './quests.js';
 import { eventPoints } from './events.js';
-import { colorPrice, colorTier, colorFamily, incomeMultiplier } from './economy.js';
+import { colorPrice, colorTier, colorFamily, incomeMultiplier, rates } from './economy.js';
 import { takeStock, PURITY_ORDER } from './storage.js';
 import { displayName } from './discovery.js';
 
+/** Legacy fixed price (jars per unit of region size); only a fallback for old saves. */
 export const JARS_PER_SIZE = 3;
+/** A whole canvas costs this many seconds of her current production in paint. */
+export const PAINT_SECONDS = 150;
+/** Production floor (jars/s) for pricing paint, so the first canvases are cheap but not free. */
+export const MIN_PAINT_RATE = 0.05;
+/** Piece value multiplier on the paint's sale value (with rarity, variety, taste). */
+export const VALUE_MULT = 1;
 export const ADMISSION_RATE = 2e-5;
 export const RARITY = Object.freeze({ primary: 1, secondary: 1.2, tertiary: 1.5, earth: 1.5, tint: 2, shade: 2, wild: 3 });
 export const VARIETY_STEP = 0.02;
@@ -89,25 +103,47 @@ export function startPiece(state, args = {}, now = 0) {
   if (!g.unlocked) return { ok: false, reason: 'locked' };
   if (!g.canvases.includes(args.canvasId) || !canvasDef(args.canvasId)) return { ok: false, reason: 'canvas' };
   const id = 'p-' + uuid(stateRng(state));
-  g.pieces.push({ id, canvas: args.canvasId, title: '', regions: {}, purity: {}, jars: {}, startedAt: now, signedAt: 0, value: 0, hung: false });
+  g.pieces.push({ id, canvas: args.canvasId, title: '', regions: {}, purity: {}, jars: {}, paintRate: paintRate(state, now), startedAt: now, signedAt: 0, value: 0, hung: false });
   return { ok: true, pieceId: id };
 }
 
-/** Jars a region needs: size × 3. */
-export function regionCost(canvasId, regionId) {
-  const r = regionList(canvasDef(canvasId)).find((x) => x.id === regionId);
-  return r ? Math.max(1, num(r.size, 1)) * JARS_PER_SIZE : 0;
+/** Production (mixer jars/s) that paint is priced from, floored at MIN_PAINT_RATE. */
+export function paintRate(state, now) {
+  let jars = 0;
+  try { jars = num(rates(state, now).jars); } catch { jars = 0; }
+  return Math.max(MIN_PAINT_RATE, jars);
+}
+
+const sizeOf = (r) => Math.max(1, num(r?.size, 1));
+
+/**
+ * regionCost(state, canvasId, regionId, pieceId?) -> jars that region needs:
+ * max(1, round(size / canvas size × production jars/s × PAINT_SECONDS)).
+ * With `pieceId` it uses the rate locked when that piece was started. The old
+ * call shape regionCost(canvasId, regionId) prices at the production floor.
+ */
+export function regionCost(state, canvasId, regionId, pieceId) {
+  if (typeof state === 'string') { pieceId = undefined; regionId = canvasId; canvasId = state; state = null; }
+  const regions = regionList(canvasDef(canvasId));
+  const r = regions.find((x) => x.id === regionId);
+  if (!r) return 0;
+  const total = regions.reduce((s, x) => s + sizeOf(x), 0);
+  const piece = pieceId && state ? findPiece(state, pieceId) : null;
+  const rate = piece && num(piece.paintRate) > 0 ? piece.paintRate : (state ? paintRate(state) : MIN_PAINT_RATE);
+  return Math.max(1, Math.round(sizeOf(r) / total * rate * PAINT_SECONDS));
 }
 
 /**
  * paintRegion(state, {pieceId, regionId, colorId}, now) -> {ok, jars, purity}.
- * Uses size × 3 jars of the color, highest purity first. Repainting is
- * unlimited until signed (the earlier paint is not refunded).
+ * Uses regionCost jars of the color (at the piece's locked rate), highest
+ * purity first, and records them in piece.jars. Repainting is unlimited until
+ * signed (the earlier paint is not refunded).
  */
-export function paintRegion(state, args = {}, now = 0) { // eslint-disable-line no-unused-vars
+export function paintRegion(state, args = {}, now = 0) {
   const p = findPiece(state, args.pieceId);
   if (!p || p.signedAt) return { ok: false, reason: 'piece' };
-  const need = regionCost(p.canvas, args.regionId);
+  if (!(num(p.paintRate) > 0)) p.paintRate = paintRate(state, now); // pieces started before paint scaled
+  const need = regionCost(state, p.canvas, args.regionId, p.id);
   if (!need) return { ok: false, reason: 'region' };
   if (!state.catalog?.discovered?.[args.colorId]) return { ok: false, reason: 'color' };
   const have = num(state.stock?.[args.colorId]?.jars);
@@ -137,7 +173,7 @@ export function pieceValue(state, piece, now = 0) {
   const canvas = canvasDef(piece.canvas);
   const regions = regionList(canvas);
   const painted = regions.filter((r) => piece.regions[r.id]);
-  if (!painted.length) return { value: 0, paint: 0, rarity: 1, variety: 1, taste: 1 };
+  if (!painted.length) return { value: 0, paint: 0, rarity: 1, variety: 1, taste: 1, mult: VALUE_MULT };
   let paint = 0;
   let rar = 0;
   const distinct = new Set();
@@ -145,7 +181,7 @@ export function pieceValue(state, piece, now = 0) {
   const taste = weeklyTaste(now);
   for (const r of painted) {
     const c = piece.regions[r.id];
-    const jars = num(piece.jars?.[r.id], Math.max(1, num(r.size, 1)) * JARS_PER_SIZE);
+    const jars = num(piece.jars?.[r.id], sizeOf(r) * JARS_PER_SIZE);
     paint += jars * colorPrice(state, c, piece.purity?.[r.id] ?? 'standard');
     rar += RARITY[colorTier(c)] ?? 1;
     distinct.add(c);
@@ -154,7 +190,7 @@ export function pieceValue(state, piece, now = 0) {
   const rarity = rar / painted.length;
   const variety = 1 + Math.min(VARIETY_CAP, VARIETY_STEP * distinct.size);
   const tasteMult = tasteCount / painted.length >= 0.5 ? 1 + TASTE_BONUS : 1;
-  return { value: num(paint * rarity * variety * tasteMult), paint, rarity, variety, taste: tasteMult };
+  return { value: num(paint * VALUE_MULT * rarity * variety * tasteMult), paint, rarity, variety, taste: tasteMult, mult: VALUE_MULT };
 }
 
 /** signPiece(state, {pieceId, title}, now) -> {ok, value}. Every region must be painted. */
@@ -171,6 +207,20 @@ export function signPiece(state, args = {}, now = 0) {
   questEvent(state, 'pieceSigned', 1, { pieceId: p.id, value: p.value });
   emit(state, 'signed', { pieceId: p.id, value: p.value });
   return { ok: true, value: p.value, breakdown: v };
+}
+
+/**
+ * clearRegion(state, {pieceId, regionId}) -> {ok}. Undo for an unsigned piece:
+ * the region goes back to bare paper. The paint is not refunded.
+ */
+export function clearRegion(state, args = {}) {
+  const p = findPiece(state, args.pieceId);
+  if (!p || p.signedAt) return { ok: false, reason: 'piece' };
+  if (!p.regions?.[args.regionId]) return { ok: false, reason: 'region' };
+  delete p.regions[args.regionId];
+  if (p.purity) delete p.purity[args.regionId];
+  if (p.jars) delete p.jars[args.regionId];
+  return { ok: true };
 }
 
 /** Delete an unsigned piece (paint is not refunded). */

@@ -95,16 +95,12 @@ test('after day 1 the offline window never falls below 4 hours for any profile',
   }
 });
 
-test('Gallery admission is a share of Casual income by day 14', async () => {
+test('Gallery admission settles between 10% and 20% of Casual income by day 14', async () => {
   const g = await runs;
   const share = median(g.casual.map((r) => r.days[13].admissionShare));
-  // TODO(balance): the spec wants 10%–20%. The engine prices paint in fixed jars
-  // (region size × 3, sim/gallery.js JARS_PER_SIZE), so a piece's value — and its
-  // 2e-5/s admission — stays flat while income grows by orders of magnitude; with
-  // the spec's admission rate fixed this lands near 0.3%. Restore `share >= 0.10`
-  // once paint cost scales with production (see TUNING.md "Open").
-  assert.ok(share > 0, `admission share ${share}`);
-  assert.ok(share <= 0.2, `admission share ${(100 * share).toFixed(1)}%`);
+  // Paint is priced from production (sim/gallery.js PAINT_SECONDS of mixer
+  // output per canvas), so a piece's value keeps pace with income.
+  assert.ok(share >= 0.1 && share <= 0.2, `admission share ${(100 * share).toFixed(1)}%`);
 });
 
 test('paintings, canvases and Essence survive every Renovate in the simulation', async () => {

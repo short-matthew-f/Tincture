@@ -44,8 +44,8 @@ export const PROFILES = Object.freeze({
 export const WINDOW_TARGET_MS = 8 * HOUR;
 /** Orders filled by hand per check-in, at Great. */
 export const ORDERS_PER_CHECKIN = 2;
-/** Gallery: a piece uses about this much production in paint. */
-export const PAINT_PRODUCTION_MS = 20 * 60e3;
+/** Gallery: a piece uses about this much production in paint (set by the engine, sim/gallery.js PAINT_SECONDS). */
+export const PAINT_PRODUCTION_MS = gallery.PAINT_SECONDS * 1000;
 /** Renovate once the suggestion shows and the gain reaches this. */
 export const RENOVATE_MIN_GAIN = 10;
 /** Shelf: keep at least this share of cells free (sell Bottles+ beyond it). */
@@ -384,16 +384,12 @@ function tendShelf(state, now, ctx) {
 // Gallery
 // ---------------------------------------------------------------------------
 
-function canvasJars(canvasId) {
-  const c = getCanvas(canvasId);
-  return (c?.regions ?? []).reduce((s, r) => s + Math.max(1, num(r.size, 1)) * gallery.JARS_PER_SIZE, 0);
-}
-
 function paintPiece(state, now, ctx) {
   const g = state.gallery;
   if (!g?.unlocked || !g.canvases.length) return;
-  const target = economy.rates(state, now).jars * PAINT_PRODUCTION_MS / 1000;
-  const canvasId = [...g.canvases].sort((a, b) => Math.abs(canvasJars(a) - target) - Math.abs(canvasJars(b) - target) || (a < b ? -1 : 1))[0];
+  // Every canvas costs the same (gallery.PAINT_SECONDS of production), so she
+  // works through her canvases in turn.
+  const canvasId = g.canvases[ctx.pieces % g.canvases.length];
   const canvas = getCanvas(canvasId);
   if (!canvas) return;
   const left = {};
@@ -407,7 +403,7 @@ function paintPiece(state, now, ctx) {
   const plan = [];
   let k = 0;
   for (const r of canvas.regions) {
-    const need = Math.max(1, num(r.size, 1)) * gallery.JARS_PER_SIZE;
+    const need = gallery.regionCost(state, canvasId, r.id);
     let chosen = null;
     for (let t = 0; t < colors.length; t++) {
       const c = colors[(k + t) % colors.length];
