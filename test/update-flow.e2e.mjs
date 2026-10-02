@@ -1,13 +1,13 @@
 // Tincture — test/update-flow.e2e.mjs
 // Playwright check of the update flow (ARCHITECTURE.md "PWA and updates"):
 //
-//   1. serve the repo (version 0.1.0); the app installs its service worker;
+//   1. serve the repo at its current version; the app installs its service worker;
 //      Settings > "Check for updates" says "Up to date";
-//   2. copy the repo to a temp dir and run `node tools/bump-version.js 0.1.1`
+//   2. copy the repo to a temp dir and bump it to the next patch version
 //      there; the same origin now serves the copy;
 //   3. "Check for updates" finds it: the Settings row shows "Update ready"
 //      with a Restart button;
-//   4. Restart reloads the page on 0.1.1 (window.tincture.version, the
+//   4. Restart reloads the page on the new version (window.tincture.version, the
 //      Settings label and the worker's cache name).
 //
 // The server is a tiny Node static server whose root can be swapped, and it
@@ -27,7 +27,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROMIUM = '/opt/pw-browsers/chromium';
 const FROM = JSON.parse(fs.readFileSync(path.join(ROOT, 'version.json'), 'utf8')).version;
-const TO = '0.1.1';
+const TO = FROM.replace(/(\d+)$/, (m) => String(Number(m) + 1)); // next patch version
 
 async function loadPlaywright() {
   const unwrap = (m) => (m && m.chromium ? m : m && m.default && m.default.chromium ? m.default : null);

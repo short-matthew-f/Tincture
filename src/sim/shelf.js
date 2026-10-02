@@ -102,8 +102,19 @@ export function tickSpillover(state, now = 0) {
   if (!unlocked(state)) { s.nextSpilloverAt = 0; return { added: 0 }; }
   const r = rates(state);
   const active = Object.entries(r.byColor).filter(([, j]) => j > 0);
-  if (!active.length) { s.nextSpilloverAt = now + SPILLOVER_MS; return { added: 0 }; }
-  if (!(s.nextSpilloverAt > 0)) { s.nextSpilloverAt = now + SPILLOVER_MS; return { added: 0 }; }
+  if (!active.length) {
+    // Nothing is producing: pause the timer, keeping the time left, so it
+    // neither resets to a fresh 10 minutes every tick nor fires while idle.
+    if (s.nextSpilloverAt > 0) s.pausedRemainingMs = Math.max(0, s.nextSpilloverAt - now);
+    s.nextSpilloverAt = 0;
+    return { added: 0 };
+  }
+  if (!(s.nextSpilloverAt > 0)) {
+    const remaining = s.pausedRemainingMs > 0 ? s.pausedRemainingMs : SPILLOVER_MS;
+    s.pausedRemainingMs = 0;
+    s.nextSpilloverAt = now + remaining;
+    return { added: 0 };
+  }
   const rng = stateRng(state);
   let added = 0;
   while (s.nextSpilloverAt <= now && added < s.cells.length) {

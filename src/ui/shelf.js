@@ -192,7 +192,7 @@ function updateHeader(st, now) {
   let next;
   if (!unlocked) next = 'The shelf is waiting for its first colors';
   else if (free === 0) next = 'The shelf is full. Merge or sell to make room.';
-  else if (!(s.nextSpilloverAt > 0)) next = 'Vials arrive while your mixers run';
+  else if (!(s.nextSpilloverAt > 0)) next = s.pausedRemainingMs > 0 ? `Mixers are paused. Next vial ${ctx.format.duration(s.pausedRemainingMs)} after they run` : 'Vials arrive while your mixers run';
   else {
     const ms = s.nextSpilloverAt - now;
     next = ms <= 1000 ? 'A vial is on its way' : `Next vial in ${ctx.format.duration(ms)}`;

@@ -129,3 +129,27 @@ test('shelf: expand to 6x9 keeps containers in place', () => {
   assert.equal(s.shelf.cells.length, 54);
   assert.equal(s.shelf.cells[1 * 6 + 2].color, 'madder');
 });
+
+test('shelf: the spillover timer pauses while nothing produces and resumes where it left off', () => {
+  const s = shelfState();
+  assert.equal(assignRecipe(s, { mixer: 0, colorId: 'orange' }).ok, true);
+  tickSpillover(s, NOW); // schedules the first vial, 10 minutes out
+  tickFactory(s, NOW + 4 * 60e3); // 6 minutes left
+  const left = s.shelf.nextSpilloverAt - (NOW + 4 * 60e3);
+  assert.ok(left > 5 * 60e3 && left <= 6 * 60e3, `about six minutes left (got ${left})`);
+  // Unassign the mixer: production stops. The timer must pause, not reset.
+  s.stations.mixers[0].recipe = null;
+  tickFactory(s, NOW + 5 * 60e3);
+  assert.equal(s.shelf.nextSpilloverAt, 0, 'no countdown while idle');
+  const kept = left - 60e3; // one more minute ran before the pause
+  assert.ok(Math.abs(s.shelf.pausedRemainingMs - kept) < 1000, 'remaining time kept');
+  tickFactory(s, NOW + 60 * 60e3); // an idle hour: still paused, nothing added
+  assert.equal(s.shelf.nextSpilloverAt, 0);
+  assert.equal(s.shelf.cells.filter(Boolean).length, 0);
+  // Resume: the vial lands after the remaining time, not after a fresh ten minutes.
+  assert.equal(assignRecipe(s, { mixer: 0, colorId: 'orange' }).ok, true);
+  const t = NOW + 61 * 60e3;
+  tickFactory(s, t);
+  assert.ok(Math.abs(s.shelf.nextSpilloverAt - (t + kept)) < 1000, 'resumed with the kept remainder');
+  assert.equal(s.shelf.pausedRemainingMs, 0);
+});
