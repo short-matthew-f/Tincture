@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mulberry32 } from '../src/rng.js';
-import { hexToOklch, oklchToHex, deltaEHex, mixPaintHex, inGamut, WHITE, BLACK } from '../src/color.js';
+import { hexToOklch, oklchToHex, deltaEHex, mixPaintHex, inGamut, hueFamily, HUE_FAMILIES, WHITE, BLACK } from '../src/color.js';
 import { PIGMENTS } from '../src/content/pigments.js';
 import * as grading from '../src/puzzles/grading.js';
 import * as matching from '../src/puzzles/matching.js';
@@ -225,7 +225,9 @@ test('matching orders: real recipes, Perfect is reachable', () => {
     assert.match(order.target, HEX);
     assert.deepEqual(roundTrip(order), order);
     const pigs = order.recipe.filter((r) => r.pigment !== 'white' && r.pigment !== 'black');
-    assert.ok(pigs.length >= 2 && pigs.length <= 3);
+    assert.ok(pigs.length >= 1 && pigs.length <= 3);
+    // A lone pigment always carries a drop, so the target is a tint or shade, never the pigment itself.
+    if (pigs.length === 1) assert.ok(order.recipe.length >= 2);
     assert.equal(new Set(order.recipe.map((r) => r.pigment)).size, order.recipe.length);
     for (const r of order.recipe) assert.ok(Number.isInteger(r.weight) && r.weight >= 1 && r.weight <= 4);
     assert.equal(order.parts, order.recipe.reduce((a, r) => a + r.weight, 0));
@@ -240,6 +242,32 @@ test('matching orders: real recipes, Perfect is reachable', () => {
   assert.ok(noDrops.recipe.every((r) => r.pigment !== 'white' && r.pigment !== 'black'));
   const solo = matching.createOrder({ pigments: OWNED.slice(0, 1), rng: mulberry32(1) });
   assert.ok(solo.recipe.length >= 1);
+  // Drops passed as pigments are not counted as pigments.
+  assert.throws(() => matching.createOrder({ pigments: [{ id: 'white', hex: WHITE }], rng: mulberry32(1) }), RangeError);
+});
+
+test('matching orders: a catalog recipe is used as-is, and the board is avoided', () => {
+  const catalogRecipes = [{ id: 'orange', hex: '#c56731', recipe: [{ pigment: 'madder', weight: 1 }, { pigment: 'ochre', weight: 1 }] }];
+  const o = matching.createOrder({ pigments: OWNED, catalogRecipes, catalogChance: 1 }, mulberry32(3));
+  assert.equal(o.colorId, 'orange');
+  assert.equal(o.target, '#c56731');
+  assert.deepEqual(o.recipe, catalogRecipes[0].recipe);
+  // A catalog color sitting on the board already (or one she cannot mix) falls back to a generated recipe.
+  const avoided = matching.createOrder({ pigments: OWNED, catalogRecipes, catalogChance: 1, avoidHexes: ['#c56731'] }, mulberry32(3));
+  assert.equal(avoided.colorId, undefined);
+  assert.ok(deltaEHex(avoided.target, '#c56731') >= 8);
+  const unmixable = matching.createOrder({ pigments: OWNED.slice(1, 3), catalogRecipes, catalogChance: 1 }, mulberry32(3));
+  assert.equal(unmixable.colorId, undefined);
+  // Families at their cap are skipped.
+  for (let s = 0; s < 20; s++) {
+    const g = matching.createOrder({ pigments: OWNED, avoidFamilies: ['orange', 'red'] }, mulberry32(100 + s));
+    assert.ok(!['orange', 'red'].includes(hueFamily(g.target)), g.target);
+  }
+  // Nothing can pass (every hex on the board), yet an order is still produced, Perfect-reachable.
+  const crowded = Array.from({ length: 40 }, (_, k) => oklchToHex({ L: 0.3 + 0.015 * k, C: 0.09, h: (k * 37) % 360 }));
+  const f = matching.createOrder({ pigments: OWNED, avoidHexes: crowded, avoidFamilies: [...HUE_FAMILIES] }, mulberry32(5));
+  assert.match(f.target, HEX);
+  assert.equal(f.target, mixPaintHex(f.recipe.map((r) => ({ hex: hexOf(r.pigment), weight: r.weight }))));
 });
 
 test('matching blend, any-you-love and bouquet', () => {

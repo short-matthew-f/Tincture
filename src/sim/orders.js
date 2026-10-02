@@ -5,13 +5,17 @@
 // (and a bonus vial), Great 120%, Good 100%, Close 70% — never a fail. Also
 // "Anything you love" orders (about 1 in 10, Gentle surprises), container orders
 // (an Urn of …, Merge Shelf), the Order Clerk at 70% and the hand-delivery bonus.
+// The board stays a sampler of color, not mud: targets avoid the ones already
+// open (ΔE ≥ 8), at most 2 per hue family, about half are real catalog colors
+// she can discover by matching, and no customer appears twice.
 //
 // Order {id, kind:'match'|'any'|'container', target, recipe, pay, minutes,
 //        container:null|{color, tier}, postedAt, customer}
 
 import { createOrder, blend, score } from '../puzzles/matching.js';
 import { CUSTOMER_NAMES } from '../content/names.js';
-import { deltaEHex } from '../color.js';
+import { deltaEHex, hueFamily } from '../color.js';
+import { mixableColors } from '../content/catalog.js';
 import { stateRng, uuid, pick } from '../rng.js';
 import { emit } from './bus.js';
 import { questEvent } from './quests.js';
@@ -59,14 +63,39 @@ export function handDeliverBonus(state, now) {
   return flowMeter(state, now).weakest === 'ship' ? HAND_DELIVER_BONUS : 1;
 }
 
+export const MAX_PER_FAMILY = 2;
+
 function orderPigments(state) {
   return availablePigments(state).filter((p) => p.id !== 'white' && p.id !== 'black');
 }
 
-/** generateOrder(state, rng, now) -> Order (not yet posted). */
+/** Era 1 catalog colors an order can ask for: mixable from her pigments and drops, and discoverable by matching. */
+export function orderCatalogRecipes(state) {
+  const have = new Set(availablePigments(state).map((p) => p.id));
+  const era = state?.era ?? 1;
+  return mixableColors()
+    .filter((c) => (c.era ?? 1) === era && c.foundBy === 'mix' && c.recipe.length >= 2 && c.recipe.every((r) => have.has(r.pigment)))
+    .map((c) => ({ id: c.id, hex: c.hex, recipe: c.recipe, discovered: !!state?.catalog?.discovered?.[c.id] }));
+}
+
+/** What the open board already shows: target hexes, families at their cap, customers. */
+function boardContext(state) {
+  const open = Array.isArray(state.orders?.open) ? state.orders.open : [];
+  const avoidHexes = open.map((o) => o && o.target).filter((h) => typeof h === 'string' && /^#[0-9a-f]{6}$/i.test(h));
+  const perFamily = {};
+  for (const h of avoidHexes) { const f = hueFamily(h); perFamily[f] = (perFamily[f] ?? 0) + 1; }
+  const avoidFamilies = Object.keys(perFamily).filter((f) => perFamily[f] >= MAX_PER_FAMILY);
+  const customers = new Set(open.map((o) => o && o.customer).filter(Boolean));
+  return { avoidHexes, avoidFamilies, customers };
+}
+
+/** generateOrder(state, rng, now) -> Order (not yet posted), chosen to sit well beside the open board. */
 export function generateOrder(state, rng = stateRng(state), now = 0) {
+  const ctx = boardContext(state);
   const minutes = PAY_MINUTES.min + (PAY_MINUTES.max - PAY_MINUTES.min) * rng();
-  const customer = pick(rng, CUSTOMER_NAMES ?? []) ?? 'A neighbor';
+  const names = CUSTOMER_NAMES ?? [];
+  const fresh = names.filter((n) => !ctx.customers.has(n));
+  const customer = pick(rng, fresh.length ? fresh : names) ?? 'A neighbor';
   const base = { id: 'o-' + uuid(rng), postedAt: now, customer, minutes, pay: orderBasePay(state, minutes), container: null };
   const roll = rng();
   if (roll < ANY_CHANCE) return { ...base, kind: 'any', target: null, recipe: null };
@@ -80,13 +109,20 @@ export function generateOrder(state, rng = stateRng(state), now = 0) {
     }
   }
   const difficulty = Math.min(1, 0.3 * ((state.phase ?? 1) - 1) + 0.02 * num(state.orders?.reputation));
-  const o = createOrder({ pigments: orderPigments(state), difficulty }, rng);
+  const o = createOrder({
+    pigments: orderPigments(state),
+    difficulty,
+    avoidHexes: ctx.avoidHexes,
+    avoidFamilies: ctx.avoidFamilies,
+    catalogRecipes: orderCatalogRecipes(state),
+  }, rng);
   return { ...base, kind: 'match', target: o.target, recipe: o.recipe };
 }
 
 /**
  * refreshOrders(state, now) -> {added}. Keeps at least 3 open (filled at once),
- * posts one more every 20 minutes up to 6. Orders never expire.
+ * posts one more every 20 minutes up to 6. Orders never expire. Each new order
+ * is generated against the board as it stands (see generateOrder).
  */
 export function refreshOrders(state, now = 0) {
   const b = board(state);
