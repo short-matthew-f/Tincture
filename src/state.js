@@ -114,6 +114,12 @@ export function createInitialState(now = 0, seed) {
     commissions: { open: [], done: [] },
     ledger: { pending: null, allCaughtUpAt: now },
     stats: { sessionStartedAt: now, lastCloseUpAt: 0 },
+    flags: {},                 // sim bookkeeping (storageFull edge, firstTickAt, ...)
+    pendingCollect: 0,         // shop till waiting for Collect
+    discoveredMarkets: [],     // route ids found by the Trader / markets
+    routesDiscovered: [],      // special markets hunters have reported
+    cosmetics: [],             // event-track cosmetic ids
+    trophies: [],              // commission trophy ids
     _events: [],
   };
 }
@@ -170,6 +176,11 @@ export function mergeDefaults(state, now = 0) {
     if (state.settings.puzzleTier[key] === undefined) {
       state.settings.puzzleTier[key] = defaults.settings.puzzleTier[key];
     }
+  }
+  if (!isPlainObject(state.flags)) state.flags = {};
+  if (!Number.isFinite(state.pendingCollect)) state.pendingCollect = 0;
+  for (const key of ['discoveredMarkets', 'routesDiscovered', 'cosmetics', 'trophies']) {
+    if (!Array.isArray(state[key])) state[key] = [];
   }
   if (!Array.isArray(state._events)) state._events = [];
   return state;

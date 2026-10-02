@@ -6,7 +6,8 @@
 // unlocked; one free reroll; no streaks; a catch-up bank holds up to 2 missed days.
 //
 // QUEST_TYPES entries:
-//   text        template with {n} (target amount) and {region} (region name)
+//   text        template with {n} (target amount), {n|one|many} (amount plus the
+//               singular or plural noun) and {region} (region name)
 //   event       the progress hook name sim calls: questEvent(state, event, amount)
 //   requires    { phase: n } minimum phase and/or { flag: 'hunters'|'gallery'|'shelf'|'fleet' }
 //   weight      relative draw weight
@@ -38,17 +39,17 @@ const q = (o) => Object.freeze({ reward: DAILY_REWARD, regions: null, ...o,
   requires: Object.freeze({ ...o.requires }), nRange: Object.freeze(o.nRange) });
 
 export const QUEST_TYPES = Object.freeze([
-  q({ id: 'fill-orders', text: 'Fill {n} orders', event: 'orderFilled', requires: { phase: 1 }, weight: 10, nRange: [2, 3] }),
-  q({ id: 'solve-board', text: 'Solve {n} grading board', event: 'boardSolved', requires: { phase: 1 }, weight: 10, nRange: [1, 2] }),
-  q({ id: 'name-color', text: 'Name {n} new color', event: 'colorNamed', requires: { phase: 1 }, weight: 6, nRange: [1, 1] }),
-  q({ id: 'discover-color', text: 'Discover {n} new color', event: 'colorDiscovered', requires: { phase: 1 }, weight: 8, nRange: [1, 2] }),
-  q({ id: 'buy-upgrades', text: 'Buy {n} upgrades', event: 'upgradeBought', requires: { phase: 1 }, weight: 8, nRange: [3, 5] }),
-  q({ id: 'merge-bottle', text: 'Merge {n} Bottle', event: 'merged', requires: { flag: 'shelf' }, weight: 7, nRange: [1, 3] }),
-  q({ id: 'paint-regions', text: 'Paint {n} regions', event: 'regionsPainted', requires: { flag: 'gallery' }, weight: 7, nRange: [8, 12] }),
+  q({ id: 'fill-orders', text: 'Fill {n|order|orders}', event: 'orderFilled', requires: { phase: 1 }, weight: 10, nRange: [2, 3] }),
+  q({ id: 'solve-board', text: 'Solve {n|grading board|grading boards}', event: 'boardSolved', requires: { phase: 1 }, weight: 10, nRange: [1, 2] }),
+  q({ id: 'name-color', text: 'Name {n|new color|new colors}', event: 'colorNamed', requires: { phase: 1 }, weight: 6, nRange: [1, 1] }),
+  q({ id: 'discover-color', text: 'Discover {n|new color|new colors}', event: 'colorDiscovered', requires: { phase: 1 }, weight: 8, nRange: [1, 2] }),
+  q({ id: 'buy-upgrades', text: 'Buy {n|upgrade|upgrades}', event: 'upgradeBought', requires: { phase: 1 }, weight: 8, nRange: [3, 5] }),
+  q({ id: 'merge-bottle', text: 'Merge {n|Bottle|Bottles}', event: 'merged', requires: { flag: 'shelf' }, weight: 7, nRange: [1, 3] }),
+  q({ id: 'paint-regions', text: 'Paint {n|region|regions}', event: 'regionsPainted', requires: { flag: 'gallery' }, weight: 7, nRange: [8, 12] }),
   q({ id: 'send-hunter', text: 'Send a hunter to the {region}', event: 'hunterSent', requires: { flag: 'hunters' }, weight: 8, nRange: [1, 1],
     regions: ['meadow', 'quarry', 'coast', 'jungle', 'volcano'] }),
-  q({ id: 'ship-crates', text: 'Ship {n} crates', event: 'crateShipped', requires: { flag: 'fleet' }, weight: 7, nRange: [3, 5] }),
-  q({ id: 'purify-batch', text: 'Purify {n} batch', event: 'batchPurified', requires: { phase: 2 }, weight: 6, nRange: [1, 2] }),
+  q({ id: 'ship-crates', text: 'Ship {n|crate|crates}', event: 'crateShipped', requires: { flag: 'fleet' }, weight: 7, nRange: [3, 5] }),
+  q({ id: 'purify-batch', text: 'Purify {n|batch|batches}', event: 'batchPurified', requires: { phase: 2 }, weight: 6, nRange: [1, 2] }),
 ]);
 
 export const QUEST_TYPES_BY_ID = Object.freeze(Object.fromEntries(QUEST_TYPES.map((x) => [x.id, x])));
@@ -73,9 +74,16 @@ export function eligibleQuestTypes(unlocks = {}, disabled = []) {
   });
 }
 
-/** Fill a quest text template. */
+/**
+ * Fill a quest text template. `{n|order|orders}` becomes "1 order" / "3 orders";
+ * a bare `{n}` is just the number.
+ */
 export function questText(type, n, regionName = '') {
-  return type.text.replace('{n}', String(n)).replace('{region}', regionName);
+  const text = typeof type === 'string' ? type : String(type?.text ?? '');
+  return text
+    .replace(/\{n\|([^|}]*)\|([^}]*)\}/g, (_, one, many) => `${n} ${Number(n) === 1 ? one : many}`)
+    .replace(/\{n\}/g, String(n))
+    .replace(/\{region\}/g, regionName);
 }
 
 const wq = (o) => Object.freeze({ ...o, steps: Object.freeze(o.steps.map((s) => Object.freeze(s))),

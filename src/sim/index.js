@@ -12,7 +12,7 @@ import { currentEvent } from './events.js';
 import { rollDaily, rollWeekly } from './quests.js';
 import { tickFactory, checkPhase } from './factory.js';
 import { resolveReturns, unlockRegions } from './hunters.js';
-import { refreshOrders } from './orders.js';
+import { refreshOrders, autoFillOrders } from './orders.js';
 import { refresh as refreshCommissions } from './commissions.js';
 
 export * from './economy.js';
@@ -71,6 +71,7 @@ export function tick(state, now) {
   tickFactory(state, now);
   const returns = resolveReturns(state, now);
   refreshOrders(state, now);
+  autoFillOrders(state, now); // Order Clerk (autoDispatch already runs inside tickFactory)
   refreshCommissions(state, now);
   unlockRegions(state, {}, now);
   checkPhase(state, {}, now);
