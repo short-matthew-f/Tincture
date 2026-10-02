@@ -13,7 +13,7 @@
  * `reset`, `submit`, `back-orders`.
  */
 
-import { h, raw, iconSvg, button, backButton, safeHex, lighten, escapeHtml } from './kit.js';
+import { h, raw, iconSvg, button, backButton, tag, swatch, safeHex, lighten, escapeHtml } from './kit.js';
 
 // ---------------------------------------------------------------------------
 // Shared helpers (also imported by bench.js and orders.js)
@@ -40,7 +40,99 @@ export function payBase(ctx, order, now) {
   return base * ctx.sim.incomeMultiplier(state, t) * o.handDeliverBonus(state, t);
 }
 
-const dropsLabel = (n) => (n ? `${n} ${n === 1 ? 'drop' : 'drops'}` : 'None');
+/** Whole coins, never fractions ("Pays 2 to 4.3" became "Up to 4 coins"). */
+export function coinsText(ctx, n) {
+  const v = Math.round(Number(n) || 0);
+  return ctx.format.num(Number(n) > 0 ? Math.max(1, v) : 0);
+}
+
+/** "5 coins" / "1 coin". */
+export function coinsWord(ctx, n) {
+  const v = Number(n) > 0 ? Math.max(1, Math.round(Number(n))) : 0;
+  return `${ctx.format.num(v)} ${v === 1 ? 'coin' : 'coins'}`;
+}
+
+/** The customer's wish in words ("a soft green"), so a plain swatch carries a little story. */
+export function wishWords(ctx, hex) {
+  try {
+    const { L, C } = ctx.color.hexToOklch(hex);
+    const fam = ctx.color.hueFamily(hex);
+    const word = fam === 'neutral' ? 'gray' : fam;
+    const lw = L > 0.82 ? 'pale' : L < 0.42 ? 'deep' : C > 0.13 ? 'bright' : L > 0.66 ? 'soft' : 'muted';
+    return `a ${lw} ${word}`;
+  } catch (e) {
+    return 'a color';
+  }
+}
+
+/** The name to show for an order's customer: a repeat on the same board gets a fresh neighbor (older saves). */
+export function customerName(ctx, order) {
+  const open = ctx.game.state.orders?.open ?? [];
+  const first = open.findIndex((o) => o.customer === order.customer);
+  if (first < 0 || open[first].id === order.id) return order.customer;
+  const names = ctx.content.CUSTOMER_NAMES ?? [];
+  if (!names.length) return order.customer;
+  const used = new Set(open.map((o) => o.customer));
+  let hash = 0;
+  for (const ch of String(order.id)) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  for (let k = 0; k < names.length; k++) {
+    const n = names[(hash + k) % names.length];
+    if (!used.has(n)) return n;
+  }
+  return order.customer;
+}
+
+/**
+ * Minute-granularity waiting copy: never seconds, never a pressure.
+ * ms <= 60 s says "soon".
+ */
+export function aboutMinutes(ms) {
+  if (!(ms > 60e3)) return 'soon';
+  const m = Math.round(ms / 60e3);
+  if (m >= 90) return `in about ${Math.round(m / 60)} h`;
+  return `in about ${m} m`;
+}
+
+/** The reputation star as a labeled chip, never a bare glyph. */
+export function repChip(n) {
+  const v = Math.max(0, Math.floor(Number(n) || 0));
+  return h`<span class="oq-chip">${iconSvg('star', { size: 16 })}<span>${v} reputation ${v === 1 ? 'star' : 'stars'}</span></span>`;
+}
+
+/** Commission lock: null when open, else {tag, more} naming the real goal from state. */
+export function commissionLock(ctx, state) {
+  const gate = ctx.sim.factory?.PHASE_GATES?.[3] ?? { colors: 30, room: 'loading-yard' };
+  const have = ctx.sim.discoveredCount(state);
+  const left = Math.max(0, gate.colors - have);
+  const yard = (state.rooms ?? []).includes(gate.room);
+  if ((state.phase ?? 1) >= 3) return null;
+  let text = 'Commissions open soon';
+  let more = '';
+  if (left > 0 && !yard) text = `Commissions open at ${gate.colors} colors and the Loading Yard`;
+  else if (left > 0) text = `Commissions open at ${gate.colors} colors`;
+  else if (!yard) text = 'Commissions open with the Loading Yard';
+  if (left > 0) more = `${left} more ${left === 1 ? 'color' : 'colors'}`;
+  if (!yard && left > 0) more += ', then build the Loading Yard';
+  else if (!yard) more = 'Build the Loading Yard in your workshop';
+  return { tag: tag(text, { icon: 'lock', cls: 'oq-lock' }), more };
+}
+
+/** Styles shared by orders, matching, bench and commissions (headings in Figtree; serif only for names). */
+export const SHARED_CSS = `
+[data-screen="orders"] .screen-head .title, [data-screen="matching"] .screen-head .title,
+[data-screen="bench"] .screen-head .title, [data-screen="commissions"] .screen-head .title { font-family: var(--font-ui); font-weight: 700; font-size: 19px; }
+.oq-h { font-family: var(--font-ui); font-weight: 700; font-size: 19px; line-height: 1.2; }
+.oq-h.sm { font-size: 16px; }
+.oq-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px 6px 9px; min-height: 32px; border-radius: 999px; background: var(--glow); color: var(--glow-ink); box-shadow: 0 0 0 2px var(--glow-ring); font-size: 13px; font-weight: 700; }
+.oq-lock { white-space: normal; font-size: 12px; max-width: 100%; line-height: 1.25; padding-top: 5px; padding-bottom: 5px; }
+.oq-lockrow { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.oq-lockrow .more { font-size: 13px; font-weight: 600; color: var(--ink-soft); padding-left: 2px; }
+.oq-req { display: inline-flex; align-items: center; gap: 5px; min-height: 26px; padding: 3px 11px; border-radius: 999px; background: var(--plaster); box-shadow: inset 0 0 0 1.5px var(--plaster-line); color: var(--ink); font-size: 12px; font-weight: 600; line-height: 1.1; }
+.oq-req svg { width: 12px; height: 12px; }
+.oq-btn { min-height: 44px; padding: 0 14px; font-size: 14px; }
+`;
+
+const dropsLabel = (n) => (n ? `${n} ${n === 1 ? 'drop' : 'drops'}` : '');
 
 // -- the jar ----------------------------------------------------------------
 
@@ -189,7 +281,7 @@ export class Mixer {
       box.innerHTML = String(h`${list.map((p) => h`<button type="button" class="mx-chip" data-action="drop" data-drop="${p.id}" data-tap aria-label="Add a drop of ${p.name}">
 <span class="mx-drop" style="background:${safeHex(p.hex)}"></span>
 <span class="mx-name">${p.name}</span>
-<span class="mx-count" data-count="${p.id}">None</span>
+<span class="mx-count" data-count="${p.id}"></span>
 </button>`)}`);
     }
     this.sync();
@@ -270,6 +362,7 @@ export const MIX_CSS = `
 .mx-jar { height: 100%; width: auto; max-width: 100%; overflow: visible; }
 .mx-jar [data-liq] { transition: transform 420ms var(--ease-out); }
 .mx-chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(62px, 1fr)); gap: 10px 6px; }
+.mx-chip { min-width: 44px; }
 .mx-chip { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 4px 0 2px; min-height: 92px; border-radius: 12px; }
 .mx-chip:active .mx-drop { transform: rotate(-45deg) translate(2px, -2px) scale(0.94); }
 .mx-drop { width: 44px; height: 44px; margin-top: 6px; border-radius: 50% 6% 50% 50%; transform: rotate(-45deg); box-shadow: inset 0 0 0 1.5px rgba(42,38,34,0.2), 0 3px 0 rgba(42,38,34,0.28); transition: transform 120ms var(--ease-out); }
@@ -292,21 +385,30 @@ const MATCH_CSS = `
 .mx-col { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .mx-col .cap { font-size: 13px; font-weight: 600; }
 .mx-target, .mx-mine { height: 168px; border-radius: 14px; box-shadow: 0 3px 0 rgba(42,38,34,0.28); }
+.mx-top.is-joined .mx-target, .mx-top.is-joined .mx-mine { height: 120px; }
 .mx-mine { animation: mx-slide 480ms var(--ease-out) both; }
 .mx-jarbox { height: 168px; display: flex; align-items: flex-end; justify-content: center; }
 .mx-gauge { flex-direction: row; align-items: center; gap: 10px; }
-.mx-gauge.is-done { justify-content: center; }
 .mx-gauge .mx-dial { width: 148px; flex: 0 0 auto; overflow: visible; }
 .mx-needle { transform-origin: 100px 96px; transition: transform 720ms cubic-bezier(0.25, 1.12, 0.5, 1); }
-.mx-tier { font-family: var(--font-display); font-size: 20px; line-height: 1.15; }
+.mx-tier { font-family: var(--font-ui); font-weight: 700; font-size: 20px; line-height: 1.15; }
 .mx-pay { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--ink-soft); }
-.mx-result { gap: 10px; animation: screen-in 260ms var(--ease-out) both; }
-.mx-result .big { font-family: var(--font-display); font-size: 26px; line-height: 1.1; }
-.mx-paid { display: flex; align-items: center; gap: 8px; font-size: 26px; font-weight: 700; }
-.mx-notes { display: flex; flex-direction: column; gap: 6px; }
-.mx-notes li { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.mx-result { gap: 10px; animation: screen-in 260ms var(--ease-out) both; align-items: center; text-align: center; }
+.mx-result .mx-top { width: 100%; text-align: left; }
+.mx-result .mx-dial { width: 190px; overflow: visible; margin-top: 2px; }
+.mx-result .big { font-family: var(--font-ui); font-weight: 800; font-size: 26px; line-height: 1.1; }
+.mx-paid { display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 26px; font-weight: 700; transition: opacity 200ms; }
+.mx-paid small { font-size: 15px; font-weight: 600; color: var(--ink-soft); }
+.mx-chips-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.mx-notes { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.mx-notes li { display: flex; align-items: center; gap: 10px; font-size: 14px; }
 .mx-notes svg { flex: 0 0 auto; }
+.mx-new { flex-direction: row; align-items: center; gap: 12px; }
+.mx-new .nm { font-family: var(--font-display); font-size: 18px; line-height: 1.2; }
+.mx-new .lk { margin-top: 2px; min-height: 44px; padding: 0 12px; font-size: 14px; }
+.mx-goal { font-size: 13px; color: var(--ink-soft); text-align: center; padding: 2px 8px; }
 .mx-gone { text-align: center; align-items: center; padding: 22px 16px; }
+.mx-tip { font-size: 13px; color: var(--ink-soft); }
 @keyframes mx-slide { from { transform: translateX(34%); opacity: 0.2; } to { transform: none; opacity: 1; } }
 `;
 
@@ -317,6 +419,7 @@ const S = {
   orderId: null,
   order: null,
   phase: 'mixing', // 'mixing' | 'submitting' | 'done'
+  newColor: null, // color id found by the delivered mix
   timers: [],
 };
 
@@ -331,19 +434,33 @@ function head(title) {
   return h`<div class="screen-head">${backButton('Back to orders')}<div class="titles"><div class="title ellipsis">${title}</div></div><span class="spacer"></span></div>`;
 }
 
+function nextMatchOrder(exceptId) {
+  return (stateOf().orders?.open ?? []).find((o) => o.kind === 'match' && o.id !== exceptId) ?? null;
+}
+
+function gonePage() {
+  const next = nextMatchOrder(null);
+  const left = (stateOf().orders?.open ?? []).length;
+  return h`${head('Order delivered')}<div class="screen-body"><div class="card mx-gone"><div class="oq-h">That order is all set</div><p class="muted">${left ? `${left} ${left === 1 ? 'order is' : 'orders are'} waiting on the board.` : 'New orders arrive on the board as the day goes by.'}</p>
+${next ? button('Next order', { variant: 'primary', block: true, attrs: { 'data-action': 'next-order' } }) : ''}
+${button('Back to orders', { variant: next ? 'paper' : 'primary', block: true, attrs: { 'data-action': 'back-orders' } })}</div></div>`;
+}
+
 function build() {
   const { ctx, root } = S;
   const order = S.order;
   if (S.mixer) S.mixer = null;
+  S.newColor = null;
   if (!order || order.kind !== 'match') {
-    root.innerHTML = String(h`${head('Order filled')}<div class="screen-body"><div class="card mx-gone"><div class="h2">That order has been delivered</div><p class="muted">New ones arrive on the board as the days go by.</p>${button('Back to orders', { variant: 'primary', attrs: { 'data-action': 'back-orders' } })}</div></div>`);
+    root.innerHTML = String(gonePage());
     return;
   }
   const target = safeHex(order.target);
-  root.innerHTML = String(h`${head(`Order from ${order.customer}`)}
+  const who = customerName(ctx, order);
+  root.innerHTML = String(h`${head(`Order from ${who}`)}
 <div class="screen-body">
 <div class="card">
-<div class="small muted">${order.customer} would like a color like this one. Anything you deliver pays at least 70%.</div>
+<div class="small muted">${who} would like ${wishWords(ctx, order.target)}. Anything you deliver is welcome; the needle shows what it pays.</div>
 <div class="mx-top" data-top>
 <div class="mx-col"><div class="mx-target" style="background:${target}" role="img" aria-label="Their swatch"></div><div class="cap">Their swatch</div></div>
 <div class="mx-col" data-mine-col><div class="mx-jarbox" data-jar-slot></div><div class="cap">Your mix</div></div>
@@ -351,12 +468,11 @@ function build() {
 </div>
 <div class="card mx-gauge" data-gauge>
 ${dialSvg()}
-<div class="stack stack-sm grow"><div class="mx-tier" data-tier>Add a drop</div><div class="mx-pay" data-pay-hint></div><div class="small muted" data-hint>Drops blend like paint.</div></div>
+<div class="stack stack-sm grow"><div class="mx-tier" data-tier>Add a drop</div><div class="mx-pay" data-pay-hint></div><div class="small muted" data-hint>Tap a drop below to start mixing.</div></div>
 </div>
-<div data-mix-only>${chipsHtml()}</div>
-<div data-result-slot></div>
+${chipsHtml()}
 </div>
-<div class="mx-actions" data-mix-only>
+<div class="mx-actions" data-bar>
 ${button('Undo', { attrs: { 'data-action': 'undo' } })}
 ${button('Reset jar', { attrs: { 'data-action': 'reset' } })}
 ${button('Deliver', { variant: 'primary', cls: 'grow', attrs: { 'data-action': 'submit' } })}
@@ -375,24 +491,27 @@ function update() {
   const tierEl = root.querySelector('[data-tier]');
   const payEl = root.querySelector('[data-pay-hint]');
   const hint = root.querySelector('[data-hint]');
-  const fmt = ctx.format.num;
   const base = payBase(ctx, order);
   const coin = String(iconSvg('coin', { size: 16 }));
   if (!hex) {
     setNeedle(root, 0);
     tierEl.textContent = 'Add a drop';
-    payEl.innerHTML = `${coin}<span>Pays ${fmt(base * 0.7)} to ${fmt(base * 1.5)}</span>`;
-    hint.textContent = 'Drops blend like paint.';
+    payEl.innerHTML = `${coin}<span>Pays up to ${coinsWord(ctx, base * 1.5)}</span>`;
+    hint.textContent = 'Tap a drop below to start mixing.';
   } else {
     const sc = m.score(order.target, hex);
     setNeedle(root, m.closeness(order.target, hex));
-    tierEl.textContent = sc.tier === 'close' ? 'Close enough' : TIER_NAMES[sc.tier];
-    payEl.innerHTML = `${coin}<span>Pays ${fmt(base * sc.pct)}</span>`;
+    tierEl.textContent = TIER_NAMES[sc.tier] ?? 'Nice';
+    payEl.innerHTML = `${coin}<span>Pays ${coinsWord(ctx, base * sc.pct)}</span>`;
     hint.textContent = sc.tier === 'perfect' ? 'That is a match. Deliver when you like.' : 'Keep going, or deliver any time.';
   }
   const has = mixer.size > 0;
-  root.querySelector('[data-action="undo"]').disabled = !has;
-  root.querySelector('[data-action="reset"]').disabled = !has;
+  const undo = root.querySelector('[data-action="undo"]');
+  const reset = root.querySelector('[data-action="reset"]');
+  undo.hidden = !has;
+  reset.hidden = !has;
+  undo.disabled = !has;
+  reset.disabled = !has;
   root.querySelector('[data-action="submit"]').disabled = !has;
 }
 
@@ -407,13 +526,25 @@ function chordFor(tier, hexes) {
   ctx.audio.chord(Ls, bright);
 }
 
+const SHELF_GOAL = (ctx, state) => {
+  const need = ctx.sim.shelf.UNLOCK_COLORS ?? 5;
+  const left = need - ctx.sim.discoveredCount(state);
+  return left > 0 ? `${left} more ${left === 1 ? 'color' : 'colors'} and the shelf opens` : '';
+};
+
+/** The bar at the bottom after a delivery: two ways on. */
+function barHtml(next) {
+  return h`${button('Back to orders', { variant: next ? 'paper' : 'primary', cls: next ? '' : 'grow', attrs: { 'data-action': 'back-orders' } })}
+${next ? button('Next order', { variant: 'primary', cls: 'grow', attrs: { 'data-action': 'next-order' } }) : ''}`;
+}
+
 function submit() {
   const { ctx, root, mixer, order } = S;
   if (S.phase !== 'mixing' || !mixer || !mixer.size) return;
   const drops = mixer.drops();
   const state = stateOf();
   const bonus = ctx.sim.orders.handDeliverBonus(state, ctx.game.now());
-  const customer = order.customer;
+  const customer = customerName(ctx, order);
   const target = order.target;
   S.phase = 'submitting';
   const res = ctx.game.act(ctx.sim.orders.submitOrder, { orderId: order.id, drops });
@@ -426,47 +557,51 @@ function submit() {
   S.phase = 'done';
   const mixHex = res.mixHex || mixer.hex;
   const tier = res.tier;
-
-  // Her swatch slides beside the target.
-  root.querySelectorAll('[data-mix-only]').forEach((n) => { n.hidden = true; });
-  const mineCol = root.querySelector('[data-mine-col]');
-  mineCol.innerHTML = String(h`<div class="mx-mine" style="background:${safeHex(mixHex)}" role="img" aria-label="Your mix"></div><div class="cap">Your mix</div>`);
-  root.querySelector('[data-top]').classList.add('is-joined');
-  // The needle swings from rest and settles.
-  setNeedle(root, 0, { instant: true });
+  S.newColor = res.discovered ? res.discovered.colorId : null;
   const closeness = ctx.puzzles.matching.closeness(target, mixHex);
-  requestAnimationFrame(() => setNeedle(root, closeness));
-  root.querySelector('[data-gauge] .stack').hidden = true;
-  root.querySelector('[data-gauge]').classList.add('is-done');
 
-  // The result card.
   const cell = Number.isInteger(res.vialCell) ? state.shelf?.cells?.[res.vialCell] : null;
   const vialName = cell ? ctx.sim.displayName(state, cell.color) : null;
-  const lines = [];
-  if (tier === 'perfect') lines.push(h`<li>${iconSvg('star', { size: 20 })}<span>+1 reputation star</span></li>`);
-  if (vialName) lines.push(h`<li>${iconSvg('plus', { size: 18 })}<span>A bonus vial of ${vialName} is on the shelf</span></li>`);
-  if (bonus > 1) lines.push(h`<li>${iconSvg('coin', { size: 18 })}<span>Fleet is busy: +${Math.round((bonus - 1) * 100)}% for hand delivery</span></li>`);
-  if (res.discovered) lines.push(h`<li>${iconSvg('star', { size: 18 })}<span>This mix found a new color for your catalog</span></li>`);
+  const notes = [];
+  if (vialName) notes.push(h`<li>${iconSvg('plus', { size: 18 })}<span>A bonus vial of <span class="serif">${vialName}</span> is on the shelf</span></li>`);
+  if (bonus > 1) notes.push(h`<li>${iconSvg('coin', { size: 18 })}<span>Fleet is busy: +${Math.round((bonus - 1) * 100)}% for hand delivery</span></li>`);
+  if (res.tutorialBonus > 0) notes.push(h`<li>${iconSvg('coin', { size: 18 })}<span>Includes a welcome gift of ${coinsWord(ctx, res.tutorialBonus)}</span></li>`);
   const praise = {
     perfect: `${customer} is thrilled. Exactly the color they pictured.`,
     great: `${customer} loves it.`,
     good: `${customer} is happy with it.`,
     close: `${customer} says it will do nicely. Thank you!`,
   }[tier] || `${customer} says thank you.`;
-  const slot = root.querySelector('[data-result-slot]');
-  slot.innerHTML = String(h`<div class="card mx-result" data-result>
-<div class="big">${tier === 'perfect' ? 'Perfect!' : tier === 'close' ? 'Close enough' : `${TIER_NAMES[tier]} match`}</div>
+  const next = nextMatchOrder(order.id);
+  const waiting = (stateOf().orders?.open ?? []).length;
+  const goal = SHELF_GOAL(ctx, stateOf());
+  const newName = S.newColor ? ctx.sim.displayName(stateOf(), S.newColor) : '';
+
+  root.innerHTML = String(h`${head(`Order from ${customer}`)}
+<div class="screen-body" data-done>
+<div class="card mx-result" data-result>
+<div class="mx-top is-joined">
+<div class="mx-col"><div class="mx-target" style="background:${safeHex(target)}" role="img" aria-label="Their swatch"></div><div class="cap">Their swatch</div></div>
+<div class="mx-col"><div class="mx-mine" style="background:${safeHex(mixHex)}" role="img" aria-label="Your mix"></div><div class="cap">Your mix</div></div>
+</div>
+${dialSvg()}
+<div class="big" data-tier-done>${tier === 'perfect' ? 'Perfect!' : tier === 'close' ? 'Close enough' : `${TIER_NAMES[tier] ?? 'Lovely'} match`}</div>
 <div class="muted small">${praise}</div>
-<div class="mx-paid">${iconSvg('coin', { size: 26 })}<span data-paid class="num">0</span></div>
-${lines.length ? h`<ul class="mx-notes">${lines}</ul>` : ''}
-${button('Back to orders', { variant: 'primary', block: true, attrs: { 'data-action': 'back-orders' } })}
-</div>`);
-  const body = root.querySelector('.screen-body');
-  if (body) body.scrollTop = 0;
+<div class="mx-paid" data-paid-wrap style="opacity:0">${iconSvg('coin', { size: 26 })}<span data-paid class="num">${coinsText(ctx, res.coins)}</span><small>${Math.max(1, Math.round(res.coins)) === 1 ? 'coin' : 'coins'}</small></div>
+${tier === 'perfect' ? h`<div class="mx-chips-row">${repChip(state.orders?.reputation ?? 0)}</div>` : ''}
+</div>
+${notes.length ? h`<div class="card"><ul class="mx-notes">${notes}</ul></div>` : ''}
+${S.newColor ? h`<div class="card mx-new" data-newcolor>${swatch(res.discovered.hex || mixHex, 48, { label: newName })}<div class="grow"><div class="small muted">A new color joined your catalog</div><div class="nm" data-newcolor-name>${newName}</div><button type="button" class="btn btn-paper lk" data-action="see-catalog" data-tap>See it in your catalog</button></div></div>` : ''}
+<div class="mx-goal">${waiting} ${waiting === 1 ? 'order is' : 'orders are'} waiting on the board${goal ? `. ${goal}.` : '.'}</div>
+</div>
+<div class="mx-actions" data-bar>${barHtml(next)}</div>`);
+  setNeedle(root, 0, { instant: true });
+  requestAnimationFrame(() => setNeedle(root, closeness));
 
   // Sounds, haptics, confetti, rolling pay: after the slide lands.
   const hexes = [target, mixHex, ...drops.map((d) => d.hex)];
   const paid = root.querySelector('[data-paid]');
+  const wrap = root.querySelector('[data-paid-wrap]');
   later(() => {
     chordFor(tier, hexes);
     if (tier === 'perfect') {
@@ -476,9 +611,12 @@ ${button('Back to orders', { variant: 'primary', block: true, attrs: { 'data-act
     } else {
       ctx.haptics.light();
     }
-    ctx.fx.rollNumber(paid, 0, res.coins, { ms: 650, format: ctx.format.num });
+    if (wrap) wrap.style.opacity = '1';
+    ctx.fx.rollNumber(paid, 0, res.coins, { ms: 650, format: (v) => coinsText(ctx, v) });
     ctx.audio.coins(tier === 'perfect' ? 7 : 4);
   }, 380);
+  // Never leave the pay hidden if the timer is cut short.
+  later(() => { if (wrap) wrap.style.opacity = '1'; }, 1500);
 }
 
 export default {
@@ -487,6 +625,7 @@ export default {
   mount(root, ctx) {
     S.root = root;
     S.ctx = ctx;
+    injectStyles('oq-shared', SHARED_CSS);
     injectStyles('mix', MIX_CSS);
     injectStyles('matching', MATCH_CSS);
     root.addEventListener('click', (e) => {
@@ -498,6 +637,13 @@ export default {
         case 'reset': if (S.phase === 'mixing') S.mixer?.reset(); break;
         case 'submit': submit(); break;
         case 'back-orders': ctx.navigate('orders'); break;
+        case 'next-order': {
+          const o = nextMatchOrder(S.phase === 'done' ? null : S.orderId);
+          if (o) ctx.navigate('matching', { orderId: o.id });
+          else ctx.navigate('orders');
+          break;
+        }
+        case 'see-catalog': ctx.navigate('catalog'); break;
         default: break;
       }
     });
@@ -518,6 +664,15 @@ export default {
   },
 
   render(state) {
+    if (S.phase === 'done') {
+      // She named the new color on top of this page: keep the name current.
+      const el = S.root.querySelector('[data-newcolor-name]');
+      if (el && S.newColor) {
+        const name = S.ctx.sim.displayName(state, S.newColor);
+        if (el.textContent !== name) el.textContent = name;
+      }
+      return;
+    }
     if (S.phase !== 'mixing' || !S.mixer) return;
     const order = findOrder();
     if (!order) { // delivered elsewhere (the Order Clerk) while she was mixing

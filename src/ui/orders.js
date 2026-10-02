@@ -17,18 +17,20 @@
  * Coach target: data-coach="first-order" on the first order card.
  */
 
-import { h, iconSvg, button, tag, swatch, safeHex, containerSvg, CONTAINER_NAMES } from './kit.js';
-import { injectStyles, payBase } from './matching.js';
+import { h, raw, iconSvg, button, swatch, safeHex, containerSvg, CONTAINER_NAMES } from './kit.js';
+import {
+  injectStyles, payBase, coinsWord, wishWords, customerName, aboutMinutes, repChip, commissionLock, SHARED_CSS,
+} from './matching.js';
 
 const CSS = `
 .or-chips { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.or-rep { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; font-size: 18px; }
-.or-rep small { font-size: 12px; font-weight: 500; color: var(--ink-soft); }
 .or-badge { background: var(--glow); box-shadow: 0 0 0 2px var(--glow-ring), 0 2px 0 var(--shadow-soft); color: var(--glow-ink); font-weight: 600; font-size: 14px; flex-direction: row; align-items: center; gap: 10px; padding: 10px 14px; }
-.or-card .or-main { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.or-thanks { flex-direction: row; align-items: center; gap: 12px; animation: screen-in 260ms var(--ease-out) both; }
+.or-card .or-main { display: flex; align-items: center; gap: 12px; min-width: 0; min-height: 64px; }
 .or-card .or-sw { width: 64px; height: 64px; border-radius: 12px; flex: 0 0 auto; box-shadow: 0 3px 0 rgba(42,38,34,0.28); }
 .or-card .or-sw.any { background: linear-gradient(135deg, #F3D68A 0%, #E2B04A 55%, #C99A2E 100%); display: grid; place-items: center; }
 .or-card .or-name { font-family: var(--font-display); font-size: 17px; line-height: 1.2; }
+.or-card .or-name.plain { font-family: var(--font-ui); font-weight: 700; }
 .or-card .or-pay { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: var(--ink-soft); }
 .or-card .or-go { flex: 0 0 auto; color: var(--ink-soft); }
 .or-card .or-go svg { transform: rotate(180deg); }
@@ -36,15 +38,15 @@ const CSS = `
 .or-pick { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; max-height: 250px; overflow-y: auto; padding: 4px 2px 6px; -webkit-overflow-scrolling: touch; }
 .or-opt { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 4px; border-radius: 12px; background: var(--plaster); min-height: 88px; min-width: 0; }
 .or-opt.is-sel { background: var(--paper); box-shadow: 0 0 0 3px var(--ink); }
-.or-opt .nm { font-size: 12px; font-weight: 600; line-height: 1.15; text-align: center; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.or-opt .py { font-size: 11px; color: var(--ink-soft); }
+.or-opt .nm { font-family: var(--font-display); font-size: 12px; line-height: 1.15; text-align: center; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.or-opt .py { font-size: 12px; color: var(--ink-soft); }
 .or-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.or-actions.one { grid-template-columns: 1fr; }
 .or-actions .btn { padding: 0 10px; }
 .or-lock { display: flex; align-items: center; justify-content: center; min-height: var(--tap); }
 .or-empty { text-align: center; padding: 22px 16px; align-items: center; }
 .or-done { color: var(--ink); font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; }
 `;
-
 const S = {
   ctx: null,
   root: null,
@@ -57,6 +59,7 @@ const S = {
   timer: 0,
   bonusAt: -Infinity,
   bonus: 1,
+  delivered: null, // {text, hex, coins}: the last any/container delivery, thanked inline
 };
 
 const stateOf = () => S.ctx.game.state;
@@ -86,26 +89,32 @@ function containerCell(state, want) {
 function countdownText(state) {
   const { ctx } = S;
   const b = state.orders;
-  if ((b.open?.length ?? 0) >= ctx.sim.orders.MAX_OPEN) return 'The board is full';
+  const n = b.open?.length ?? 0;
+  const waiting = n ? `${n} ${n === 1 ? 'order' : 'orders'} waiting` : 'The board is ready for new orders';
+  if (n >= ctx.sim.orders.MAX_OPEN) return `${waiting}. Fill one to bring the next.`;
   const ms = (b.nextRefreshAt ?? 0) - ctx.game.now();
-  return ms > 0 ? `Next order in ${ctx.format.countdown(ms)}` : 'A new order is on its way';
+  return ms > 0 ? `${waiting}. Next one ${aboutMinutes(ms)}.` : `${waiting}. A new one is on its way.`;
 }
+
+const HEART = raw('<svg class="icon" width="34" height="34" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20.5 C5 15.2 3 12 3 8.8 A4.8 4.8 0 0 1 12 6.6 A4.8 4.8 0 0 1 21 8.8 C21 12 19 15.2 12 20.5 Z" fill="#FFF6DF" stroke="#8C6512" stroke-width="1.4" stroke-linejoin="round"/></svg>');
 
 // ---------------------------------------------------------------------------
 // Cards
 // ---------------------------------------------------------------------------
 
-function payRange(base, lo = 0.7, hi = 1.5) {
+function payUpTo(base, mult = 1.5) {
   const { ctx } = S;
-  return h`<span class="or-pay">${iconSvg('coin', { size: 14 })}<span>Pays ${ctx.format.num(base * lo)} to ${ctx.format.num(base * hi)}</span></span>`;
+  return h`<span class="or-pay">${iconSvg('coin', { size: 14 })}<span>Up to ${coinsWord(ctx, base * mult)}</span></span>`;
 }
 
 function matchCard(o, coach) {
-  const base = payBase(S.ctx, o);
-  return h`<div class="card or-card is-tap" data-action="open-match" data-order="${o.id}" data-tap role="button" tabindex="0"${coach ? h` data-coach="first-order"` : ''} aria-label="Order from ${o.customer}, match this color">
+  const { ctx } = S;
+  const base = payBase(ctx, o);
+  const who = customerName(ctx, o);
+  return h`<div class="card or-card is-tap" data-action="open-match" data-order="${o.id}" data-tap role="button" tabindex="0"${coach ? h` data-coach="first-order"` : ''} aria-label="Order from ${who}, would like ${wishWords(ctx, o.target)}">
 <div class="or-main">
 <span class="or-sw" style="background:${safeHex(o.target)}" aria-hidden="true"></span>
-<div class="grow stack stack-sm"><div class="or-name ellipsis">${o.customer}</div><div class="small muted">Match this color</div>${payRange(base)}</div>
+<div class="grow stack stack-sm"><div class="or-name ellipsis">${who}</div><div class="small muted">Would like ${wishWords(ctx, o.target)}</div>${payUpTo(base)}</div>
 <span class="or-go">${iconSvg('back', { size: 20 })}</span>
 </div>
 </div>`;
@@ -122,17 +131,17 @@ function anyCard(o, coach) {
     .map((c) => ({ ...c, pct: sim.orders.ANY_MULT * (bonus[sim.colorTier(c.id)] ?? 1) }))
     .sort((a, b) => b.pct - a.pct || (a.name < b.name ? -1 : 1));
   const hi = colors.length ? colors[0].pct : sim.orders.ANY_MULT;
-  const lo = colors.length ? colors[colors.length - 1].pct : sim.orders.ANY_MULT;
+  const who = customerName(ctx, o);
   const picked = colors.find((c) => c.id === S.pick[o.id]) ?? null;
   return h`<div class="card or-card" data-order-card="${o.id}"${coach ? h` data-coach="first-order"` : ''}>
-<div class="or-main is-tap" data-action="toggle-any" data-order="${o.id}" data-tap role="button" tabindex="0" aria-expanded="${open ? 'true' : 'false'}" aria-label="Anything you love, from ${o.customer}">
-<span class="or-sw any" aria-hidden="true">${iconSvg('star', { size: 34 })}</span>
-<div class="grow stack stack-sm"><div class="or-name ellipsis">Anything you love</div><div class="small muted">${o.customer} will pay extra for a color you are proud of.</div>${payRange(base, lo, hi)}</div>
+<div class="or-main is-tap" data-action="toggle-any" data-order="${o.id}" data-tap role="button" tabindex="0" aria-expanded="${open ? 'true' : 'false'}" aria-label="Anything you love, from ${who}">
+<span class="or-sw any" aria-hidden="true">${HEART}</span>
+<div class="grow stack stack-sm"><div class="or-name plain ellipsis">Anything you love</div><div class="small muted"><span class="serif">${who}</span> will pay extra for a color you are proud of.</div>${payUpTo(base, hi)}</div>
 <span class="or-go" style="${open ? 'transform:rotate(90deg)' : ''}">${iconSvg('back', { size: 20 })}</span>
 </div>
 ${open ? h`<div class="small muted">Rarer colors pay more. Pick one to offer.</div>
-<div class="or-pick" data-keepscroll="pick-${o.id}">${colors.map((c) => h`<button type="button" class="or-opt${picked && picked.id === c.id ? ' is-sel' : ''}" data-action="pick-color" data-order="${o.id}" data-color="${c.id}" data-tap aria-pressed="${picked && picked.id === c.id ? 'true' : 'false'}">${swatch(c.hex, 40)}<span class="nm">${c.name}</span><span class="py">${ctx.format.num(base * c.pct)}</span></button>`)}</div>
-${picked ? button(h`Offer ${picked.name} for ${ctx.format.num(base * picked.pct)}`, { variant: 'primary', block: true, attrs: { 'data-action': 'offer-any', 'data-order': o.id } }) : h`<div class="or-lock small muted">Tap a color to see what it pays.</div>`}` : ''}
+<div class="or-pick" data-keepscroll="pick-${o.id}">${colors.map((c) => h`<button type="button" class="or-opt${picked && picked.id === c.id ? ' is-sel' : ''}" data-action="pick-color" data-order="${o.id}" data-color="${c.id}" data-tap aria-pressed="${picked && picked.id === c.id ? 'true' : 'false'}">${swatch(c.hex, 40)}<span class="nm">${c.name}</span><span class="py">${coinsWord(ctx, base * c.pct)}</span></button>`)}</div>
+${picked ? button(h`Offer ${picked.name} for ${coinsWord(ctx, base * picked.pct)}`, { variant: 'primary', block: true, attrs: { 'data-action': 'offer-any', 'data-order': o.id } }) : h`<div class="or-lock small muted">Tap a color to see what it pays.</div>`}` : ''}
 </div>`;
 }
 
@@ -151,12 +160,12 @@ function containerCard(o, coach) {
   return h`<div class="card or-card"${coach ? h` data-coach="first-order"` : ''} data-order-card="${o.id}">
 <div class="or-main">
 <span class="or-cont">${containerSvg(want.tier, hex, { size: 44, label: colorName })}</span>
-<div class="grow stack stack-sm"><div class="or-name">${o.customer} would like ${article(tierName)} ${tierName} of ${colorName}</div>
-<div class="or-pay">${iconSvg('coin', { size: 14 })}<span>Pays about ${ctx.format.num(base * pct)}</span></div></div>
+<div class="grow stack stack-sm"><div class="or-name">${customerName(ctx, o)} would like ${article(tierName)} ${tierName} of ${colorName}</div>
+<div class="or-pay">${iconSvg('coin', { size: 14 })}<span>Pays about ${coinsWord(ctx, base * pct)}</span></div></div>
 </div>
 ${cell
     ? h`<div class="or-done">${iconSvg('check', { size: 16 })}You have one on the shelf</div>${button('Deliver it', { variant: 'primary', block: true, attrs: { 'data-action': 'deliver-container', 'data-order': o.id, 'data-cell': cellIdx } })}`
-    : h`<div class="row between wrap">${tag(`Merge ${article(tierName)} ${tierName} of ${colorName}`, { icon: 'pin' })}${button('Open the shelf', { small: true, attrs: { 'data-action': 'go-shelf' } })}</div>`}
+    : h`<div class="row between wrap"><span class="oq-req">${iconSvg('pin', { size: 12 })}Merge ${article(tierName)} ${tierName} of ${colorName}</span>${button('Open the shelf', { cls: 'oq-btn', attrs: { 'data-action': 'go-shelf' } })}</div>`}
 </div>`;
 }
 
@@ -170,19 +179,20 @@ function boardHtml(state) {
   const bonus = handBonus();
   const rep = Math.max(0, Math.floor(state.orders?.reputation ?? 0));
   const commCount = state.commissions?.open?.length ?? 0;
-  const unlockedComm = (state.phase ?? 1) >= 3;
-  return h`<div class="or-chips"><span class="or-rep">${iconSvg('star', { size: 22 })}${rep}<small>${rep === 1 ? 'star' : 'stars'} of reputation</small></span></div>
+  const lock = commissionLock(ctx, state);
+  const th = S.delivered;
+  return h`<div class="or-chips">${rep >= 1 ? repChip(rep) : h`<span class="small muted">Earn a reputation star with a Perfect match</span>`}</div>
 <div class="small muted" data-countdown></div>
+${th ? h`<div class="card or-thanks" data-thanks>${swatch(th.hex, 44)}<div class="grow"><div class="semi">${th.text}</div><div class="small muted">${th.coins}</div></div></div>` : ''}
 ${bonus > 1 ? h`<div class="card or-badge">${iconSvg('coin', { size: 22 })}<span>Fleet is busy: +${Math.round((bonus - 1) * 100)}% for hand delivery</span></div>` : ''}
-<div class="or-actions">
-${unlockedComm
-    ? button(commCount ? `Commissions (${commCount})` : 'Commissions', { attrs: { 'data-action': 'commissions' } })
-    : h`<div class="card tight or-lock">${tag('Opens in Phase 3', { icon: 'lock' })}</div>`}
+<div class="or-actions${lock ? ' one' : ''}">
+${lock ? '' : button(commCount ? `Commissions (${commCount})` : 'Commissions', { attrs: { 'data-action': 'commissions' } })}
 ${button('Mixing bench', { attrs: { 'data-action': 'bench' } })}
 </div>
+${lock ? h`<div class="oq-lockrow" data-lock>${lock.tag}${lock.more ? h`<span class="more">${lock.more}</span>` : ''}</div>` : ''}
 ${open.length
     ? open.map((o, i) => (o.kind === 'any' ? anyCard(o, i === 0) : o.kind === 'container' && o.container ? containerCard(o, i === 0) : matchCard(o, i === 0)))
-    : h`<div class="card or-empty"><div class="h2">The board is clear</div><p class="muted">New orders arrive over time. Meanwhile, the bench is free.</p></div>`}
+    : h`<div class="card or-empty"><div class="oq-h">Every order is filled</div><p class="muted">New orders arrive over time. Meanwhile, the bench is free.</p></div>`}
 ${state.apprentices?.orderClerk ? h`<div class="card tight"><div class="small"><span class="semi">Order Clerk:</span> fills simple orders from your stock at ${Math.round(ctx.sim.orders.CLERK_PAYOUT * 100)}% pay.</div></div>` : ''}`;
 }
 
@@ -215,12 +225,12 @@ function tickCountdown() {
 // Actions
 // ---------------------------------------------------------------------------
 
-function celebrate(fromEl, res, order, text) {
+function celebrate(fromEl, res, order, text, hex) {
   const { ctx } = S;
   ctx.audio.coins(6);
   ctx.haptics.ripple(3);
   ctx.fx.confetti(['#E2B04A', '#C99A2E', order.target || '#B8433A'], fromEl, { count: 18 });
-  ctx.toast(`${text} +${ctx.format.num(res.coins)}`, { hex: '#E2B04A' });
+  S.delivered = { text, hex: hex || order.target || '#E2B04A', coins: `Paid ${coinsWord(ctx, res.coins)}` };
 }
 
 function offerAny(orderId, fromEl) {
@@ -229,25 +239,30 @@ function offerAny(orderId, fromEl) {
   const order = (stateOf().orders?.open ?? []).find((o) => o.id === orderId);
   if (!colorId || !order) return;
   const name = ctx.sim.displayName(stateOf(), colorId);
+  const who = customerName(ctx, order);
+  const hex = ctx.sim.colorDef(colorId)?.hex;
   const res = ctx.game.act(ctx.sim.orders.submitOrder, { orderId, colorId });
   if (res && res.ok) {
     delete S.pick[orderId];
     if (S.anyOpen === orderId) S.anyOpen = null;
-    celebrate(fromEl, res, order, `${order.customer} loves your ${name}!`);
+    celebrate(fromEl, res, order, `${who} loves your ${name}!`, hex);
   } else {
     ctx.toast('That order is no longer on the board');
   }
   paint(true);
+  if (S.body) S.body.scrollTop = 0;
 }
 
 function deliverContainer(orderId, cell, fromEl) {
   const { ctx } = S;
   const order = (stateOf().orders?.open ?? []).find((o) => o.id === orderId);
   if (!order) return;
+  const who = customerName(ctx, order);
   const res = ctx.game.act(ctx.sim.orders.submitOrder, { orderId, cell: Number(cell) });
-  if (res && res.ok) celebrate(fromEl, res, order, `${order.customer} is delighted!`);
+  if (res && res.ok) celebrate(fromEl, res, order, `${who} is delighted!`, order.target);
   else ctx.toast('That container is not on the shelf anymore');
   paint(true);
+  if (S.body) S.body.scrollTop = 0;
 }
 
 export default {
@@ -256,6 +271,7 @@ export default {
   mount(root, ctx) {
     S.ctx = ctx;
     S.root = root;
+    injectStyles('oq-shared', SHARED_CSS);
     injectStyles('orders', CSS);
     root.innerHTML = String(h`<div class="screen-head is-left"><div class="titles"><div class="title">Orders</div><div class="subtitle">Customers wait as long as it takes</div></div></div><div class="screen-body pad-bottom-tab" data-body></div>`);
     S.body = root.querySelector('[data-body]');
@@ -295,9 +311,10 @@ export default {
     S.down = false;
     S.dirty = false;
     S.bonusAt = -Infinity;
+    S.delivered = null;
     paint(true);
     clearInterval(S.timer);
-    S.timer = setInterval(tickCountdown, 1000);
+    S.timer = setInterval(tickCountdown, 15000);
   },
 
   hide() {
