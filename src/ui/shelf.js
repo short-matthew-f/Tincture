@@ -35,10 +35,15 @@ const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
 const CSS = `
 #screen-shelf .screen-body > *{flex-shrink:0}
+#screen-shelf .h2{font-family:var(--font-ui);font-weight:600}
+#screen-shelf .btn.small{min-height:44px}
 #screen-shelf .sh-info{gap:8px}
+#screen-shelf .sh-unlock{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+#screen-shelf .sh-unlock:empty,#screen-shelf .sh-expand:empty{display:none}
+#screen-shelf .sh-unlock .tag,#screen-shelf .sh-expand .tag{white-space:normal;min-height:28px;font-size:12px;line-height:1.25}
 #screen-shelf .sh-board{background:#7B5236;border-radius:16px;padding:12px 10px 8px;box-shadow:0 4px 0 rgba(42,38,34,.3);display:flex;flex-direction:column;gap:0}
 #screen-shelf .sh-board.is-locked{opacity:.55;pointer-events:none}
-#screen-shelf .sh-row{display:grid;grid-template-columns:minmax(0,1fr) 34px;gap:6px;align-items:end;border-radius:10px;position:relative}
+#screen-shelf .sh-row{display:grid;grid-template-columns:minmax(0,1fr) 56px;gap:6px;align-items:end;border-radius:10px;position:relative}
 #screen-shelf .sh-row.is-tidy{box-shadow:0 0 0 2px rgba(226,176,74,.95),0 0 14px rgba(226,176,74,.55)}
 #screen-shelf .sh-cells{display:grid;gap:6px}
 #screen-shelf .sh-plank{height:8px;background:#8A5F3F;border-radius:3px;box-shadow:0 2px 0 rgba(0,0,0,.25),inset 0 1px 0 rgba(255,255,255,.18);margin:3px -4px 9px}
@@ -51,13 +56,18 @@ const CSS = `
 #screen-shelf .sh-cell.is-target.is-mergeable{box-shadow:inset 0 0 0 3px #E2B04A,0 0 10px rgba(226,176,74,.7)}
 #screen-shelf .sh-cell.is-lifted svg{transform:scale(1.06);filter:drop-shadow(0 4px 0 rgba(0,0,0,.3))}
 #screen-shelf .sh-cell.is-ghosted svg{opacity:.3}
-#screen-shelf .sh-tag{height:44px;border-radius:4px 10px 10px 4px;background:#F7F4EC;box-shadow:0 2px 0 rgba(0,0,0,.25);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:10px;font-weight:700;color:#5E5148;margin-bottom:0}
-#screen-shelf .sh-tag i{display:block;width:14px;height:14px;border-radius:50%;box-shadow:inset 0 0 0 1.5px rgba(42,38,34,.3)}
-#screen-shelf .sh-tag i.none{background:transparent;box-shadow:inset 0 0 0 1.5px rgba(42,38,34,.25);border-style:dashed}
-#screen-shelf .sh-tag .tidy{color:#7A5410}
+#screen-shelf .sh-tag{position:relative;height:44px;min-width:56px;padding:2px 3px 2px 9px;border-radius:4px 10px 10px 4px;background:#F7F4EC;box-shadow:0 2px 0 rgba(0,0,0,.25);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;font-size:12px;font-weight:700;line-height:1.1;color:#5E5148;margin-bottom:0}
+#screen-shelf .sh-tag::before{content:'';position:absolute;left:4px;top:50%;width:4px;height:4px;margin-top:-2px;border-radius:50%;background:#7B5236;box-shadow:inset 0 0 0 1px rgba(0,0,0,.25)}
+#screen-shelf .sh-tag:active{transform:translateY(2px);box-shadow:0 0 0 rgba(0,0,0,.25)}
+#screen-shelf .sh-tag i{display:block;width:11px;height:11px;border-radius:50%;box-shadow:inset 0 0 0 1.5px rgba(42,38,34,.3)}
+#screen-shelf .sh-tag.is-unset{color:var(--ink-soft);font-weight:600}
+#screen-shelf .sh-tag .tidy{color:#7A5410;font-size:11px}
 #screen-shelf .sh-dock{flex:0 0 auto;margin:0 14px calc(10px + var(--safe-bottom));padding:10px 12px;flex-direction:row;align-items:center;gap:10px}
 #screen-shelf .sh-dock[hidden]{display:none}
-#screen-shelf .sh-ess{display:inline-flex;align-items:center;gap:6px;font-weight:700;font-variant-numeric:tabular-nums}
+#screen-shelf .sh-ess{display:flex;align-items:center;gap:8px;font-weight:700;font-variant-numeric:tabular-nums}
+#screen-shelf .sh-ess[hidden]{display:none}
+#screen-shelf .sh-ess.is-zero [data-ref=ess]{display:none}
+#screen-shelf .sh-dock .tiny{font-size:12px}
 #screen-shelf .sh-layer{position:absolute;inset:0;z-index:20;background:rgba(42,38,34,.45);display:flex;align-items:flex-end;justify-content:center;animation:fade-in 160ms ease-out both}
 #screen-shelf .sh-layer[hidden]{display:none}
 #screen-shelf .sh-fams{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
@@ -110,6 +120,19 @@ const geometry = (st) => (st.shelf.cols >= 6
   ? { size: 38, cellh: 62 }
   : { size: 46, cellh: 74 });
 
+/** The Essence mark (a gold disc with a star); falls back to the plain star until kit has it. */
+function essenceIcon(size) {
+  const e = iconSvg('essence', { size });
+  return String(e) ? e : iconSvg('star', { size });
+}
+
+/** Minutes only, never seconds: "about 9 min" / "about 2 h". */
+function aboutMinutes(ms) {
+  const m = Math.max(1, Math.ceil(ms / 60000));
+  if (m < 90) return `about ${m} min`;
+  return `about ${Math.round(m / 60)} h`;
+}
+
 function cellName(st, c) {
   if (!c) return '';
   const tierName = CONTAINER_NAMES[c.tier] || 'Container';
@@ -146,8 +169,8 @@ function boardHtml(st) {
     const label = s.rowLabels[r];
     rows.push(h`<div class="sh-row${tidy[r] ? ' is-tidy' : ''}" data-row="${r}">
   <div class="sh-cells" style="grid-template-columns:repeat(${s.cols},minmax(0,1fr))">${cells}</div>
-  <button type="button" class="sh-tag" data-tap data-action="label" data-row="${r}" aria-label="${label ? `Row label: ${label}${tidy[r] ? ', tidy shelf bonus' : ''}` : 'Set a row label'}">
-    ${label ? h`<i style="background:${FAMILY_HEX[label] || '#9A9288'}"></i>` : h`<i class="none"></i>`}
+  <button type="button" class="sh-tag${label ? '' : ' is-unset'}" data-tap data-action="label" data-row="${r}" aria-label="${label ? `Row label: ${label}${tidy[r] ? ', tidy shelf bonus' : ''}. Change it` : 'Add a row label'}">
+    ${label ? h`<i style="background:${FAMILY_HEX[label] || '#9A9288'}"></i><span>${cap(label)}</span>` : h`<span>Label</span>`}
     ${tidy[r] ? h`<span class="tidy">+10%</span>` : ''}
   </button>
 </div><div class="sh-plank"></div>`);
@@ -164,15 +187,13 @@ function skeleton() {
 </div>
 <div class="screen-body" data-ref="body">
   <div class="card sh-info">
-    <div class="row between top">
-      <div class="grow"><div class="semi" data-ref="next"></div><div class="small muted" data-ref="cap"></div></div>
-      <div class="sh-ess shrink0" title="Essence stars">${iconSvg('star', { size: 20 })}<span data-ref="ess">0</span><span class="small muted" style="font-weight:500" data-ref="essnote"></span></div>
-    </div>
-    <div data-ref="unlocktag"></div>
-    <div data-ref="expand"></div>
+    <div><div class="semi" data-ref="next"></div><div class="small muted" data-ref="cap"></div></div>
+    <div class="sh-ess" title="Essence stars">${essenceIcon(20)}<span data-ref="ess">0</span><span class="small muted" style="font-weight:500" data-ref="essnote"></span></div>
+    <div class="sh-unlock" data-ref="unlocktag"></div>
+    <div class="sh-expand" data-ref="expand"></div>
   </div>
   <div class="sh-board" data-ref="board" data-coach="shelf"></div>
-  <div class="hint center">Merging never changes a color. Tidy rows of one family earn +10%.</div>
+  <div class="hint center">Merging never changes a color. A row of one family earns +10%: tap Label on a row to set its family.</div>
 </div>
 <div class="card sh-dock" data-ref="dock" hidden></div>
 <div class="sh-layer" data-ref="layer" data-action="close-sheet" hidden></div>`);
@@ -191,35 +212,37 @@ function updateHeader(st, now) {
   const free = s.cells.length - used;
   let next;
   if (!unlocked) next = 'The shelf is waiting for its first colors';
-  else if (free === 0) next = 'The shelf is full. Merge or sell to make room.';
-  else if (!(s.nextSpilloverAt > 0)) next = s.pausedRemainingMs > 0 ? `Mixers are paused. Next vial ${ctx.format.duration(s.pausedRemainingMs)} after they run` : 'Vials arrive while your mixers run';
+  else if (free === 0) next = 'Every spot is taken: merge or sell to make room';
+  else if (!(s.nextSpilloverAt > 0)) next = s.pausedRemainingMs > 0 ? `Mixers are paused. The next vial comes ${aboutMinutes(s.pausedRemainingMs)} after they run` : 'Vials arrive while your mixers run';
   else {
     const ms = s.nextSpilloverAt - now;
-    next = ms <= 1000 ? 'A vial is on its way' : `Next vial in ${ctx.format.duration(ms)}`;
+    next = ms <= 60000 ? 'A vial is on its way' : `Next vial in ${aboutMinutes(ms)}`;
   }
   q('[data-ref=next]').textContent = next;
-  q('[data-ref=cap]').textContent = `${free} free ${free === 1 ? 'spot' : 'spots'} of ${s.cells.length}`;
-  if (!ui.anim) {
-    const essEl = q('[data-ref=ess]');
-    const n = totalEssence(st);
-    if (essEl.textContent !== String(n)) essEl.textContent = String(n);
-  }
+  q('.sh-ess').hidden = !unlocked;
+  q('[data-ref=cap]').textContent = !unlocked ? '' : free === 0
+    ? `All ${s.cells.length} spots hold a container`
+    : `${free} free ${free === 1 ? 'spot' : 'spots'}`;
+  const essEl = q('[data-ref=ess]');
+  const n = totalEssence(st);
+  if (!ui.anim && essEl.textContent !== String(n)) essEl.textContent = String(n);
+  if (!ui.anim) q('.sh-ess').classList.toggle('is-zero', n === 0);
   const ec = essenceColors(st);
-  q('[data-ref=essnote]').textContent = ec ? `in ${ec} ${ec === 1 ? 'color' : 'colors'}` : 'none yet';
+  q('[data-ref=essnote]').textContent = ec ? `Essence in ${ec} ${ec === 1 ? 'color' : 'colors'}` : 'First star from a Cask';
   const tg = q('[data-ref=unlocktag]');
-  const n = sim().discoveredCount(st);
-  const tgHtml = unlocked ? '' : String(h`${tag(`Opens at ${UNLOCK_COLORS} colors`)} <span class="small semi">${UNLOCK_COLORS - n} more ${UNLOCK_COLORS - n === 1 ? 'color' : 'colors'}</span>`);
+  const have = sim().discoveredCount(st);
+  const more = Math.max(0, UNLOCK_COLORS - have);
+  const tgHtml = unlocked ? '' : String(tag(`Opens at ${UNLOCK_COLORS} colors: ${more} more ${more === 1 ? 'color' : 'colors'}`));
   if (tg.dataset.k !== tgHtml) { tg.dataset.k = tgHtml; tg.innerHTML = tgHtml; }
-  // expand button
+  // expand: a live button once she can afford it, a quiet goal tag before that
   const ex = q('[data-ref=expand]');
   let exHtml = '';
   if (unlocked && s.cols < sim().shelf.EXPANDED.cols) {
     const cost = sim().shelf.EXPAND_COST;
-    const afford = (st.coins || 0) >= cost;
-    exHtml = String(button(`Expand to ${sim().shelf.EXPANDED.cols} x ${sim().shelf.EXPANDED.rows} for ${ctx.format.num(cost)}`, {
-      variant: afford ? 'primary' : 'paper', small: true, block: true, icon: 'plus',
-      attrs: { 'data-action': 'expand', 'aria-disabled': afford ? null : 'true' },
-    }));
+    const dims = `${sim().shelf.EXPANDED.cols} x ${sim().shelf.EXPANDED.rows}`;
+    exHtml = (st.coins || 0) >= cost
+      ? String(button(`Expand to ${dims} for ${ctx.format.num(cost)}`, { variant: 'primary', block: true, icon: 'plus', attrs: { 'data-action': 'expand' } }))
+      : String(tag(`${ctx.format.num(Math.max(1, cost - (st.coins || 0)))} more Coins to expand to ${dims}`, { icon: 'plus' }));
   }
   if (ex.dataset.k !== exHtml) { ex.dataset.k = exHtml; ex.innerHTML = exHtml; }
 }
@@ -267,10 +290,14 @@ function updateDock(st, now) {
     dock.hidden = false;
     dock.innerHTML = String(h`
   <div class="shrink0" style="width:30px">${containerSvg(c.tier, hexOf(c.color), { golden: !!c.golden, size: 30 })}</div>
-  <div class="grow"><div class="semi ellipsis">${cellName(st, c)}</div><div class="small muted"><span data-ref="dockval"></span></div></div>
+  <div class="grow"><div class="semi ellipsis">${cellName(st, c)}</div><div class="small muted"><span data-ref="dockval"></span></div><div class="tiny muted" data-ref="docklabel"></div></div>
   ${button('Done', { small: true, attrs: { 'data-action': 'done' } })}
   ${button('Sell', { small: true, variant: 'primary', attrs: { 'data-action': 'sell' } })}`);
   }
+  const rowLabel = st.shelf.rowLabels[Math.floor(i / st.shelf.cols)];
+  q('[data-ref=docklabel]').textContent = tidy ? '' : rowLabel
+    ? 'A row of one family earns +10%.'
+    : 'A row of one family earns +10%. Tap its Label to start one.';
   q('[data-ref=dockval]').textContent = `Sells for ${ctx.format.num(value)} Coins${tidy ? ', tidy bonus included' : ''}${c.golden ? '. Golden: merge it to double a partner.' : ''}`;
 }
 
@@ -413,6 +440,7 @@ async function playMerge(from, to, before, after, res, essBefore) {
     await wait(650); // the dot's flight to the catalog tab
     const essEl = q('[data-ref=ess]');
     const essNow = totalEssence(state());
+    if (essEl) q('.sh-ess').classList.remove('is-zero');
     if (essEl) await fx.rollNumber(essEl, essBefore, essNow, { ms: 400, format: (v) => String(Math.round(v)) });
   }
   toEl.removeAttribute('data-essence-from');
@@ -497,7 +525,7 @@ function openLabelSheet(row) {
   const layer = q('[data-ref=layer]');
   layer.hidden = false;
   layer.innerHTML = String(h`<div class="sheet" role="dialog" aria-label="Row label">
-  <div class="center"><div class="h2">Label this row</div><div class="hint">A row holding only one family earns a +10% tidy bonus.</div></div>
+  <div class="center"><div class="h2">Label this row</div><div class="hint">A label says which family the row holds. A row of one family earns +10%.</div></div>
   <div class="sh-fams">${FAMILIES.map((f) => h`<button type="button" class="chip" data-tap data-action="set-label" data-family="${f}" aria-pressed="${cur === f}"><i style="background:${FAMILY_HEX[f]}"></i>${cap(f)}</button>`)}</div>
   ${button('No label', { block: true, attrs: { 'data-action': 'set-label', 'data-family': '' } })}
 </div>`);

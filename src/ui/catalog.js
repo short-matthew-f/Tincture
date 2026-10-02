@@ -19,7 +19,7 @@
  * milestone meter.
  */
 
-import { h, raw, button, iconSvg, safeHex, progressBar } from './kit.js';
+import { h, raw, button, tag, iconSvg, safeHex, progressBar } from './kit.js';
 import { hueFamily } from '../color.js';
 import { COLORS_BY_PAGE, PAGES, EVENT_COLORS_BY_EVENT, getColor } from '../content/catalog.js';
 import { getEvent } from '../content/events.js';
@@ -35,7 +35,7 @@ const PAGE_NOTES = {
   shades: 'Deeper shades, found on grading boards.',
   earths: 'Earth tones from clay and stone, found by mixing.',
   wild: 'Wild hues cannot be mixed. Your hunters find them on expeditions.',
-  event: 'A limited event page. It comes back when the event reruns.',
+  event: 'Found during the event. This page comes back when the event reruns.',
 };
 const PAGE_BORDER = {
   wheel: 'conic-gradient(#B8433A,#D39B2A,#8FA77A,#3E6A9E,#6E4A7E,#B8433A)',
@@ -49,33 +49,39 @@ const FAMILY_HEX = {
   red: '#B8433A', orange: '#D9792E', yellow: '#D9A93A', green: '#6E9A55', teal: '#3F8F8A',
   blue: '#3E6A9E', violet: '#7A5A9A', pink: '#D98A9F', neutral: '#9A9288',
 };
-const BY_SHORT = { mix: 'by mixing', grade: 'by grading', hunt: 'by a hunter', commission: 'by commission', event: 'at the event', accident: 'by a happy accident', start: 'from the start' };
 const MAX_PINS = 3;
+const FAMILY_WORD = { red: 'red', orange: 'orange', yellow: 'yellow', green: 'green', teal: 'teal', blue: 'blue', violet: 'violet', pink: 'pink', neutral: 'neutral' };
 const STAR = '<svg viewBox="0 0 24 24" width="8" height="8" aria-hidden="true"><path d="M12 2.5l2.7 5.8 6.3.8-4.6 4.3 1.2 6.3-5.6-3.1-5.6 3.1 1.2-6.3L3 9.1l6.3-.8z" fill="#E2B04A" stroke="#8C6512" stroke-width="1.6" stroke-linejoin="round"/></svg>';
 const STAR_OFF = '<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d="M12 2.5l2.7 5.8 6.3.8-4.6 4.3 1.2 6.3-5.6-3.1-5.6 3.1 1.2-6.3L3 9.1l6.3-.8z" fill="none" stroke="#B7BDB3" stroke-width="1.6" stroke-linejoin="round"/></svg>';
 const STAR_ON = STAR.replace('width="8" height="8"', 'width="12" height="12"');
 
 const CSS = `
 #screen-catalog .screen-body > *{flex-shrink:0}
+#screen-catalog .h2,#screen-catalog .card-title{font-family:var(--font-ui);font-weight:600}
+#screen-catalog .btn.small{min-height:44px}
 #screen-catalog .cat-wrap{position:relative;display:block}
-#screen-catalog .cat-pages{display:flex;gap:8px;overflow-x:auto;overflow-y:hidden;padding:2px 2px 6px;margin:0 -2px;scrollbar-width:none}
+#screen-catalog .cat-strip{position:relative;margin:0 -2px}
+#screen-catalog .cat-strip::before,#screen-catalog .cat-strip::after{content:'';position:absolute;top:0;bottom:6px;width:28px;pointer-events:none;opacity:0;transition:opacity 160ms;z-index:2}
+#screen-catalog .cat-strip::before{left:0;background:linear-gradient(to right,var(--plaster),rgba(0,0,0,0))}
+#screen-catalog .cat-strip::after{right:0;background:linear-gradient(to left,var(--plaster),rgba(0,0,0,0))}
+#screen-catalog .cat-strip.can-left::before,#screen-catalog .cat-strip.can-right::after{opacity:1}
+#screen-catalog .cat-pages{position:relative;display:flex;gap:8px;overflow-x:auto;overflow-y:hidden;padding:2px 2px 6px;scrollbar-width:none;scroll-snap-type:x proximity;scroll-padding:0 24px}
 #screen-catalog .cat-pages::-webkit-scrollbar{display:none}
-#screen-catalog .cat-pages .chip{flex:0 0 auto;flex-direction:column;gap:0;padding:4px 14px;line-height:1.15;justify-content:center}
-#screen-catalog .cat-pages .chip .sub{font-size:11px}
-#screen-catalog .cat-pages .tag{flex:0 0 auto;min-height:44px;align-self:center}
+#screen-catalog .cat-pages .chip{flex:0 0 auto;flex-direction:column;gap:0;padding:4px 16px;min-height:44px;line-height:1.15;justify-content:center;scroll-snap-align:start}
+#screen-catalog .cat-pages .chip .sub{font-size:12px}
+#screen-catalog .cat-eras{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
+#screen-catalog .cat-eras .tag{white-space:normal;min-height:28px}
 #screen-catalog .cat-book{position:relative;border-radius:16px;padding:10px;background:rgba(247,244,236,.55);box-shadow:inset 0 0 0 1.5px rgba(42,38,34,.08)}
 #screen-catalog .cat-book.is-complete{padding:13px;background:var(--paper);border:3px solid transparent;background-image:linear-gradient(#FFF8E4,#FFF8E4),var(--bd);background-origin:border-box;background-clip:padding-box,border-box;box-shadow:var(--cut)}
 #screen-catalog .cat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(76px,1fr));gap:8px}
-#screen-catalog .cat-cell{display:flex;flex-direction:column;align-items:stretch;gap:3px;background:var(--paper);border-radius:10px;padding:6px 6px 5px;box-shadow:var(--cut-sm);min-width:0;text-align:center;position:relative}
+#screen-catalog .cat-cell{display:flex;flex-direction:column;align-items:stretch;gap:3px;background:var(--paper);border-radius:10px;padding:6px 6px 5px;box-shadow:var(--cut-sm);min-width:0;min-height:44px;text-align:center;position:relative}
 #screen-catalog .cat-cell:active{transform:translateY(2px);box-shadow:var(--cut-press)}
 #screen-catalog .cat-sw{display:block;aspect-ratio:1 / .8;border-radius:7px;box-shadow:inset 0 0 0 1px rgba(42,38,34,.12);position:relative;overflow:hidden}
-#screen-catalog .cat-name{font-family:var(--font-display);font-size:11px;line-height:1.15;min-height:2.3em;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
+#screen-catalog .cat-name{font-family:var(--font-display);font-size:12px;line-height:1.15;min-height:2.3em;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
 #screen-catalog .cat-stars{display:flex;justify-content:center;gap:1px;min-height:8px}
-#screen-catalog .cat-cell.is-missing{background:rgba(247,244,236,.6);box-shadow:none}
-#screen-catalog .cat-cell.is-missing .cat-sw{background:var(--fam);opacity:.25;box-shadow:none}
+#screen-catalog .cat-cell.is-missing{background:rgba(247,244,236,.45);box-shadow:none;padding:6px}
+#screen-catalog .cat-cell.is-missing .cat-sw{background:var(--fam);opacity:.25;box-shadow:none;aspect-ratio:1 / 1}
 #screen-catalog .cat-cell.is-missing .cat-sw::after{content:'';position:absolute;inset:0;background:linear-gradient(105deg,transparent 30%,rgba(255,255,255,.95) 50%,transparent 70%);transform:translateX(-120%);animation:cat-shimmer 3.6s ease-in-out infinite;animation-delay:var(--d,0s)}
-#screen-catalog .cat-pos{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);text-align:center;font-size:12px;font-weight:700;color:#2A2622;opacity:1;z-index:1}
-#screen-catalog .cat-cell.is-missing .cat-name{font-family:var(--font-ui);font-size:10.5px;color:var(--ink-soft)}
 #screen-catalog .cat-pin{position:absolute;right:4px;top:4px;color:var(--ink);z-index:2}
 #screen-catalog .cat-cell.is-new{animation:cat-in 520ms var(--ease-out) both;box-shadow:0 0 0 3px #E2B04A,var(--cut-sm)}
 #screen-catalog .cat-goal{display:flex;gap:10px;align-items:center}
@@ -93,6 +99,7 @@ const CSS = `
 #screen-catalog .cat-input{flex:1 1 auto;min-width:0;min-height:48px;border-radius:12px;border:0;padding:0 14px;background:#fff;box-shadow:inset 0 0 0 2px rgba(42,38,34,.18);font-family:var(--font-display);font-size:18px;user-select:text;-webkit-user-select:text}
 #screen-catalog .cat-input:focus{outline:none;box-shadow:inset 0 0 0 2px #2A2622}
 #screen-catalog .cat-ess{display:flex;gap:2px;justify-content:center}
+@media (prefers-reduced-motion:reduce){#screen-catalog .cat-cell.is-missing .cat-sw::after,#screen-catalog .cat-big.ghost::after{animation:none}}
 @keyframes cat-shimmer{0%,55%{transform:translateX(-120%)}100%{transform:translateX(120%)}}
 @keyframes cat-in{from{opacity:0;transform:translateY(-14px) scale(.9)}to{opacity:1;transform:none}}
 `;
@@ -203,13 +210,12 @@ function cellHtml(c, pos, st) {
 </button>`;
   }
   const pinned = (st.catalog?.pinned || []).includes(c.id);
-  const fam = FAMILY_HEX[famOf(c)] || '#9A9288';
-  const short = BY_SHORT[c.foundBy] || '';
-  return h`<button type="button" class="cat-cell is-missing" data-tap data-action="cell" data-color="${c.id}" aria-label="Color number ${pos}, not found yet${short ? ', ' + short : ''}${pinned ? ', pinned goal' : ''}">
+  const famId = famOf(c);
+  const fam = FAMILY_HEX[famId] || '#9A9288';
+  // A quiet hue-family silhouette: no number, no label. The detail sheet has the hint.
+  return h`<button type="button" class="cat-cell is-missing" data-tap data-action="cell" data-color="${c.id}" aria-label="A ${FAMILY_WORD[famId] || 'special'} color waiting to be found${pinned ? ', pinned goal' : ''}">
   ${pinned ? h`<span class="cat-pin">${iconSvg('pin', { size: 14 })}</span>` : ''}
-  <span class="cat-wrap"><span class="cat-sw" style="--fam:${fam};--d:${(pos % 7) * 0.45}s"></span><span class="cat-pos" aria-hidden="true">${pos}</span></span>
-  <span class="cat-name">${short}</span>
-  <span class="cat-stars"></span>
+  <span class="cat-sw" style="--fam:${fam};--d:${(pos % 7) * 0.45}s"></span>
 </button>`;
 }
 
@@ -217,7 +223,7 @@ function goalsHtml(st) {
   const pins = (st.catalog?.pinned || []).map((id) => getColor(id)).filter(Boolean).filter((c) => !isFound(c.id));
   if (!pins.length) return '';
   return h`<div class="card" aria-label="Pinned goals">
-  <div class="row between"><div class="card-title">Pinned goals</div><div class="small muted">${pins.length} of ${MAX_PINS}</div></div>
+  <div class="row between"><div class="card-title">Pinned goals</div><div class="small muted">${pins.length >= MAX_PINS ? 'All goal spots in use' : `Room for ${MAX_PINS - pins.length} more`}</div></div>
   ${pins.map((c) => {
     const step = nextStep(c);
     return h`<div class="cat-goal">
@@ -234,7 +240,7 @@ function build() {
   const count = sim().discoveredCount(st);
   const pages = pagesOf(st);
   if (!ui.page || !pages.some((p) => p.id === ui.page)) {
-    ui.page = (pages.find((p) => p.colors.some((c) => !isFound(c.id))) || pages[0]).id;
+    ui.page = 'wheel'; // the swatch book opens on the Wheel page
   }
   const page = pages.find((p) => p.id === ui.page);
   const have = page.colors.filter((c) => isFound(c.id)).length;
@@ -245,7 +251,9 @@ function build() {
   const bonus = Math.floor(count / 10) * 2;
   const scrollEl = q('.screen-body');
   const scroll = scrollEl ? scrollEl.scrollTop : 0;
-  const pageScroll = q('.cat-pages') ? q('.cat-pages').scrollLeft : 0;
+  const incomeNote = bonus > 0
+    ? `+${bonus}% income from your catalog now. A new canvas arrives at ${nextCanvas} colors.`
+    : `First +2% at 10 colors. A new canvas arrives at ${nextCanvas} colors.`;
 
   root.innerHTML = String(h`
 <div class="screen-head is-left">
@@ -255,24 +263,28 @@ function build() {
   <div class="card" data-coach="catalog" aria-label="Catalog milestone">
     <div class="semi">${toNext} more ${toNext === 1 ? 'color' : 'colors'} to +2% income</div>
     ${progressBar((10 - toNext) / 10, { label: 'Progress to the next catalog bonus' })}
-    <div class="small muted">+${bonus}% income from your catalog now. A new canvas arrives at ${nextCanvas} colors.</div>
+    <div class="small muted">${incomeNote}</div>
   </div>
   ${goalsHtml(st)}
-  <div class="cat-pages" role="tablist" aria-label="Catalog pages">
-    ${pages.map((p) => {
-      const l = p.colors.length - p.colors.filter((c) => isFound(c.id)).length;
-      return h`<button type="button" class="chip" role="tab" data-tap data-action="page" data-page="${p.id}" aria-pressed="${p.id === ui.page}" aria-selected="${p.id === ui.page}">${p.name}<span class="sub">${l === 0 ? 'Complete' : `${l} more`}</span></button>`;
-    })}
-    ${ERAS.filter((e) => e.id > 1).map((e) => h`<button type="button" class="tag" data-tap data-action="later" data-era="${e.id}" aria-label="Era ${e.id}, ${e.name}, coming in a later update">${iconSvg('lock', { size: 12 })}Era ${e.id} ${e.name}: coming in a later update</button>`)}
+  <div class="cat-strip" data-ref="strip">
+    <div class="cat-pages" role="tablist" aria-label="Catalog pages">
+      ${pages.map((p) => {
+        const l = p.colors.length - p.colors.filter((c) => isFound(c.id)).length;
+        return h`<button type="button" class="chip" role="tab" data-tap data-action="page" data-page="${p.id}" aria-pressed="${p.id === ui.page}" aria-selected="${p.id === ui.page}">${p.name}<span class="sub">${l === 0 ? 'Complete' : `${l} more`}</span></button>`;
+      })}
+    </div>
   </div>
   <div class="card flat tight" style="padding:10px 14px">
     <div class="row between"><div class="h2">${page.name}</div>
       <div class="small semi">${complete ? 'Page complete' : `${left} more to complete`}</div></div>
     ${progressBar(page.colors.length ? have / page.colors.length : 0, { label: `${page.name} page progress` })}
-    ${(complete || page.id === 'wild' || page.id === 'event') ? h`<div class="hint">${PAGE_NOTES[page.id] || ''}${complete ? ' You earned a golden border for this page.' : ''}</div>` : ''}
+    <div class="hint">${complete ? 'You earned a golden border for this page.' : (PAGE_NOTES[page.id] || '')}</div>
   </div>
   <div class="cat-book${complete ? ' is-complete' : ''}" style="--bd:${PAGE_BORDER[page.id] || PAGE_BORDER.event}">
     <div class="cat-grid">${page.colors.map((c, i) => cellHtml(c, i + 1, st))}</div>
+  </div>
+  <div class="cat-eras">
+    ${ERAS.filter((e) => e.id > 1).map((e) => tag(`Era ${e.id} ${e.name}: coming in a later update`))}
   </div>
 </div>
 <div class="cat-layer" data-ref="layer" data-action="close-sheet" hidden></div>`);
@@ -280,13 +292,34 @@ function build() {
   const body = q('.screen-body');
   if (body) body.scrollTop = scroll;
   const pg = q('.cat-pages');
-  if (pg) pg.scrollLeft = pageScroll;
+  if (pg) {
+    centerSelectedTab(pg);
+    updateStripFade();
+  }
   if (ui.scrollTo) {
     const cell = root.querySelector(`[data-color="${ui.scrollTo}"]`);
     if (cell && cell.scrollIntoView) cell.scrollIntoView({ block: 'center' });
     ui.scrollTo = null;
   }
   if (ui.sheet) renderSheet(); // the layer is rebuilt with the page; keep the open sheet
+}
+
+/** Bring the selected page tab into view (centered when it can be). */
+function centerSelectedTab(pg) {
+  const sel = pg.querySelector('[aria-selected="true"]');
+  if (!sel) return;
+  const want = sel.offsetLeft - (pg.clientWidth - sel.offsetWidth) / 2;
+  const max = Math.max(0, pg.scrollWidth - pg.clientWidth);
+  pg.scrollLeft = Math.max(0, Math.min(max, want));
+}
+
+/** Edge fades on the page strip show when there is more to scroll to. */
+function updateStripFade() {
+  const pg = q('.cat-pages');
+  const strip = q('[data-ref=strip]');
+  if (!pg || !strip) return;
+  strip.classList.toggle('can-left', pg.scrollLeft > 4);
+  strip.classList.toggle('can-right', pg.scrollLeft + pg.clientWidth < pg.scrollWidth - 4);
 }
 
 function signature() {
@@ -345,9 +378,9 @@ function foundSheet(st, c, d, s) {
     ? h`<div class="stack stack-sm"><div class="row"><input class="cat-input" data-ref="nameinput" type="text" maxlength="24" value="${name}" aria-label="New name" autocomplete="off">${button('Save', { variant: 'primary', attrs: { 'data-action': 'rename-save' } })}</div>
         <div class="hint" data-ref="msg">${s.msg || 'Letters, spaces, apostrophes and hyphens, up to 24. Your orders and vats will use it.'}</div>
         <div>${button('Cancel', { small: true, attrs: { 'data-action': 'rename-cancel' } })}</div></div>`
-    : h`<div class="center stack stack-sm"><div class="h1" style="font-size:22px">${name}</div><div>${button('Rename', { small: true, attrs: { 'data-action': 'rename' } })}</div>${s.msg ? h`<div class="hint">${s.msg}</div>` : ''}</div>`}
+    : h`<div class="center stack stack-sm"><div class="serif" style="font-size:22px;line-height:1.15">${name}</div><div>${button('Rename', { small: true, cls: 'cat-rename', attrs: { 'data-action': 'rename' } })}</div>${s.msg ? h`<div class="hint">${s.msg}</div>` : ''}</div>`}
   <div class="cat-ess" aria-label="${stars} of 10 Essence stars">${raw(Array.from({ length: 10 }, (_, i) => (i < stars ? STAR_ON : STAR_OFF)).join(''))}</div>
-  <div class="center small muted">${stars ? `${stars} Essence ${stars === 1 ? 'star' : 'stars'}: +${stars * 5}% production, purity and price.` : 'No Essence yet. Merge a Cask of this color on the shelf to earn a star.'}</div>
+  <div class="center small muted">${stars ? `${stars} Essence ${stars === 1 ? 'star' : 'stars'}: +${stars * 5}% production, purity and price.` : 'First star from a Cask: merge a Cask of this color on the shelf.'}</div>
   <div>
     <div class="cat-kv"><span class="k">Recipe</span><span class="v">${recipeWords(c)}</span></div>
     <div class="cat-kv"><span class="k">Price</span><span class="v num">${ctx.format.num(price)} Coins a jar</span></div>
@@ -366,16 +399,21 @@ function missingSheet(st, c) {
   const pinned = pins.includes(c.id);
   const step = nextStep(c);
   const page = pagesOf(st).find((p) => p.colors.some((x) => x.id === c.id));
-  const pos = page ? page.colors.findIndex((x) => x.id === c.id) + 1 : 0;
-  return h`<div class="sheet cat-sheet" role="dialog" aria-label="A color not found yet">
+  const roomLeft = Math.max(0, MAX_PINS - pins.length);
+  const pinNote = pinned
+    ? 'Pinned as a goal. It shows at the top of your catalog and in the Morning Ledger.'
+    : roomLeft > 0
+      ? `Pin up to ${MAX_PINS} missing colors as goals. Room for ${roomLeft} more.`
+      : `All ${MAX_PINS} goal spots are in use. Unpin one to make room.`;
+  return h`<div class="sheet cat-sheet" role="dialog" aria-label="A color waiting to be found">
   <div class="cat-big ghost" style="--fam:${FAMILY_HEX[famOf(c)] || '#9A9288'}"></div>
-  <div class="center"><div class="h1" style="font-size:22px">Not found yet</div>
-    <div class="hint">${page ? `Number ${pos} on the ${page.name} page` : ''}</div></div>
+  <div class="center"><div class="h2">A ${FAMILY_WORD[famOf(c)] || 'special'} color is waiting</div>
+    <div class="hint">${page ? `It belongs on the ${page.name} page` : ''}</div></div>
   <div>
     <div class="cat-kv"><span class="k">How</span><span class="v">${foundByText(c)}</span></div>
     <div class="cat-kv"><span class="k">Next step</span><span class="v">${step.text}</span></div>
   </div>
-  <div class="small muted center">${pinned ? 'Pinned as a goal. It shows at the top of your catalog and in the Morning Ledger.' : `Pin up to ${MAX_PINS} missing colors as goals. ${pins.length} of ${MAX_PINS} pinned.`}</div>
+  <div class="small muted center">${pinNote}</div>
   <div class="row">
     ${button(pinned ? 'Unpin goal' : 'Pin as a goal', { variant: pinned ? 'paper' : 'primary', block: true, cls: 'grow', attrs: { 'data-action': pinned ? 'unpin' : 'pin', 'data-color': c.id } })}
     ${button(step.cta, { block: true, cls: 'grow', attrs: { 'data-action': 'go', 'data-color': c.id } })}
@@ -419,11 +457,6 @@ function onClick(e) {
       ui.page = t.dataset.page;
       refresh(true);
       break;
-    case 'later': {
-      const era = ERAS.find((x) => x.id === Number(t.dataset.era));
-      ctx.toast(`Era ${era ? era.id + ': ' + era.name : ''} is coming in a later update.`);
-      break;
-    }
     case 'cell':
       ui.sheet = { id, rename: false, msg: '' };
       renderSheet();
@@ -492,15 +525,17 @@ const screen = {
     injectCss();
     root.addEventListener('click', onClick);
     root.addEventListener('keydown', onKey);
+    root.addEventListener('scroll', (e) => { if (e.target && e.target.classList && e.target.classList.contains('cat-pages')) updateStripFade(); }, true);
     if (ctx.game && ctx.game.on) {
       ctx.game.on('discover', (p) => {
         const id = p && (p.colorId || (p.payload && p.payload.colorId));
         if (!id) return;
+        markFresh(id);
+        if (!visible) return; // the next visit opens on the Wheel, or on this page via show({colorId})
         const pg = pageOfColor(state(), id);
         if (pg) ui.page = pg;
         ui.scrollTo = id;
-        markFresh(id);
-        if (visible) refresh(true);
+        refresh(true);
       });
     }
   },

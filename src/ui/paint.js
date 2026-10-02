@@ -19,13 +19,16 @@
  * hang, archive, undo, export, share, pick, family, close-sheet.
  */
 
-import { h, raw, backButton, button, safeHex, escapeHtml } from './kit.js';
+import { h, raw, backButton, button, tag, safeHex, escapeHtml } from './kit.js';
 import { textColorOn } from '../color.js';
 import fxDefault from './fx.js';
 import audioDefault from './audio.js';
 import hapticsDefault from './haptics.js';
 
 export const PAPER_PANE = '#FBF8F1';
+
+/** One-shot hint for the Gallery after this screen closes ("Paint another" lands on its canvases). */
+export const paintIntent = { focus: null };
 
 /** One representative hex per hue family (used for hints; never an exact catalog color). */
 export const FAMILY_HEX = Object.freeze({
@@ -60,7 +63,7 @@ export function canvasSvgMarkup(canvas, fills = {}, { interactive = false, label
   const panes = (canvas.regions || []).map((r, i) => {
     const fill = safeHex(fills[r.id] || '', PAPER_PANE);
     const a = interactive
-      ? ` class="pane" data-region="${escapeHtml(r.id)}" role="button" tabindex="0" aria-label="Pane ${i + 1}, ${fills[r.id] ? 'painted' : 'not painted yet'}"`
+      ? ` class="pane" stroke="transparent" stroke-width="4" stroke-linejoin="round" data-region="${escapeHtml(r.id)}" role="button" tabindex="0" aria-label="Pane ${i + 1}, ${fills[r.id] ? 'painted' : 'not painted yet'}"`
       : '';
     return `<path${a} d="${escapeHtml(r.d)}" fill="${fill}"/>`;
   }).join('');
@@ -131,6 +134,9 @@ export async function exportPieceImage(canvas, fills, { title = '', share = fals
 // ---------------------------------------------------------------------------
 
 const CSS = `
+#screen-paint .h2{font-family:var(--font-ui);font-weight:600}
+#screen-paint .btn.small{min-height:44px}
+#screen-paint .pt-sign-tag .tag{white-space:normal;max-width:140px;min-height:36px;text-align:left;line-height:1.2;font-size:12px}
 #screen-paint .pt-stage{flex:1 1 0;min-height:0;display:flex;align-items:center;justify-content:center;padding:2px 20px}
 #screen-paint .pt-stage svg{height:100%;width:100%;max-height:100%;overflow:visible}
 #screen-paint .pane{cursor:pointer;transition:opacity 120ms}
@@ -140,16 +146,22 @@ const CSS = `
 #screen-paint .pt-tools{flex:0 0 auto;display:flex;gap:8px;align-items:center;padding:0 16px 8px}
 #screen-paint .pt-tools .grow{flex:1 1 auto}
 #screen-paint .pt-palette{flex:0 0 auto;margin:0 14px calc(14px + var(--safe-bottom));border-radius:16px;padding:12px 14px;gap:8px}
-#screen-paint .pt-chips{display:grid;grid-auto-flow:column;grid-template-rows:repeat(2,48px);grid-auto-columns:56px;gap:10px;overflow-x:auto;overflow-y:hidden;padding:8px 10px 10px;margin:0 -10px;scrollbar-width:none}
+#screen-paint .pt-fade{position:relative}
+#screen-paint .pt-fade::before,#screen-paint .pt-fade::after{content:'';position:absolute;top:0;bottom:0;width:26px;pointer-events:none;opacity:0;transition:opacity 160ms;z-index:2}
+#screen-paint .pt-fade::before{left:0;background:linear-gradient(to right,var(--paper),rgba(0,0,0,0))}
+#screen-paint .pt-fade::after{right:0;background:linear-gradient(to left,var(--paper),rgba(0,0,0,0))}
+#screen-paint .pt-fade.can-left::before,#screen-paint .pt-fade.can-right::after{opacity:1}
+#screen-paint .pt-chips{display:grid;grid-auto-flow:column;grid-template-rows:repeat(2,48px);grid-auto-columns:56px;gap:10px;overflow-x:auto;overflow-y:hidden;padding:8px 10px 10px;margin:0 -10px;scrollbar-width:none;scroll-snap-type:x proximity}
+#screen-paint .pt-chips.is-empty{display:block;overflow:visible;padding:4px 0}
 #screen-paint .pt-chips.one-row{grid-template-rows:48px}
 #screen-paint .pt-chips::-webkit-scrollbar{display:none}
-#screen-paint .pt-chip{position:relative;width:56px;height:48px;border-radius:12px;box-shadow:0 3px 0 rgba(42,38,34,.25);transition:transform 120ms}
+#screen-paint .pt-chip{scroll-snap-align:start;position:relative;width:56px;height:48px;border-radius:12px;box-shadow:0 3px 0 rgba(42,38,34,.25);transition:transform 120ms}
 #screen-paint .pt-chip.is-sel{box-shadow:0 0 0 3px #F7F4EC,0 0 0 6px #2A2622;transform:translateY(-1px)}
 #screen-paint .pt-chip.is-low{opacity:.55}
 #screen-paint .pt-chip .n{position:absolute;right:5px;bottom:3px;font-size:11px;font-weight:700;font-variant-numeric:tabular-nums}
-#screen-paint .pt-suggest{display:flex;gap:6px;align-items:center;overflow-x:auto;scrollbar-width:none}
+#screen-paint .pt-suggest{display:flex;gap:6px;align-items:center;overflow-x:auto;scrollbar-width:none;padding:0 2px}
 #screen-paint .pt-suggest::-webkit-scrollbar{display:none}
-#screen-paint .pt-fam{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 10px;border-radius:999px;background:#E3E6E0;font-size:12px;font-weight:600;white-space:nowrap;flex:0 0 auto}
+#screen-paint .pt-fam{display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:0 12px;border-radius:999px;background:#E3E6E0;font-size:13px;font-weight:600;white-space:nowrap;flex:0 0 auto}
 #screen-paint .pt-fam i{width:12px;height:12px;border-radius:50%;box-shadow:inset 0 0 0 1px rgba(42,38,34,.25)}
 #screen-paint .pt-fam[aria-pressed="true"]{background:#2A2622;color:#F7F4EC}
 #screen-paint .pt-scrim{position:absolute;inset:0;z-index:20;background:rgba(42,38,34,.45);display:flex;align-items:flex-end;justify-content:center;animation:fade-in 160ms ease-out both}
@@ -157,9 +169,10 @@ const CSS = `
 #screen-paint .pt-sheet{width:100%;max-width:520px;max-height:92%}
 #screen-paint .pt-title-input{width:100%;min-height:48px;border-radius:12px;border:0;padding:0 14px;background:#fff;box-shadow:inset 0 0 0 2px rgba(42,38,34,.18);font-family:var(--font-display);font-size:18px;user-select:text;-webkit-user-select:text}
 #screen-paint .pt-title-input:focus{outline:none;box-shadow:inset 0 0 0 2px #2A2622}
-#screen-paint .pt-value{font-family:var(--font-display);font-size:44px;line-height:1;text-align:center;font-variant-numeric:tabular-nums}
+#screen-paint .pt-value{font-family:var(--font-ui);font-weight:800;font-size:44px;line-height:1;text-align:center;font-variant-numeric:tabular-nums}
 #screen-paint .pt-bd{display:flex;justify-content:space-between;font-size:14px;padding:3px 0}
 #screen-paint .pt-bd + .pt-bd{border-top:1px solid rgba(42,38,34,.08)}
+#screen-paint .pt-name{font-family:var(--font-display);font-size:20px;line-height:1.2}
 #screen-paint .pt-mini{width:96px;margin:0 auto}
 #screen-paint .pt-mini svg{width:100%;height:auto}
 `;
@@ -225,11 +238,12 @@ function costs(cv) {
 }
 
 function costLine(cv) {
-  if (ui.lastCost) return `That pane uses ${ui.lastCost} jars`;
+  const jars = (n) => `${n} ${n === 1 ? 'jar' : 'jars'}`;
+  if (ui.lastCost) return `That pane uses ${jars(ui.lastCost)}`;
   const c = costs(cv);
   if (!c.length) return '';
-  if (c.length === 1) return `Uses ${c[0]} jars a pane`;
-  return `Uses ${c[0]} jars a pane, more for big ones`;
+  if (c.length === 1) return `Uses ${jars(c[0])} a pane`;
+  return `Uses ${jars(c[0])} a pane, more for big ones`;
 }
 
 function stockColors() {
@@ -270,12 +284,13 @@ function buildAll() {
 </div>
 <div class="card pt-palette" data-ref="palette" ${signed ? 'hidden' : ''}>
   <div class="row between"><div class="serif" style="font-size:17px" data-ref="selname"></div><div class="small muted" data-ref="jars"></div></div>
-  ${fam.length ? h`<div class="pt-suggest" data-ref="suggest"><span class="small muted nowrap">Suggested</span>${fam.map((f) => h`<button type="button" class="pt-fam" data-tap data-action="family" data-family="${f}" aria-pressed="false"><i style="background:${FAMILY_HEX[f] || '#9A9288'}"></i>${FAMILY_NAME[f] || f}</button>`)}</div>` : ''}
-  <div class="pt-chips" data-ref="chips"></div>
+  ${fam.length ? h`<div class="pt-fade" data-fade><div class="pt-suggest" data-ref="suggest"><span class="small muted nowrap">Suggested</span>${fam.map((f) => h`<button type="button" class="pt-fam" data-tap data-action="family" data-family="${f}" aria-pressed="false"><i style="background:${FAMILY_HEX[f] || '#9A9288'}"></i>${FAMILY_NAME[f] || f}</button>`)}</div></div>` : ''}
+  <div class="pt-fade" data-fade><div class="pt-chips" data-ref="chips"></div></div>
   <div class="hint" data-ref="hint">Pick a color, then tap a pane. Any color can go anywhere.</div>
 </div>
 <div class="pt-scrim" data-ref="layer" data-action="close-sheet" hidden></div>`);
   ui.chipSig = '';
+  requestAnimationFrame(updateFades);
   if (navigator.canShare && typeof File === 'function') {
     try {
       if (navigator.canShare({ files: [new File([''], 'x.png', { type: 'image/png' })] })) {
@@ -310,9 +325,10 @@ function updateChips() {
   if (sig !== ui.chipSig) {
     ui.chipSig = sig;
     wrap.classList.toggle('one-row', list.length <= 6);
+    wrap.classList.toggle('is-empty', list.length === 0);
     wrap.innerHTML = list.length
       ? String(h`${list.map((c) => h`<button type="button" class="pt-chip ${c.id === ui.sel ? 'is-sel' : ''} ${c.jars < 3 ? 'is-low' : ''}" data-tap data-action="pick" data-color="${c.id}" aria-label="${sim().displayName(st, c.id)}, ${Math.floor(c.jars)} jars" aria-pressed="${c.id === ui.sel}" style="background:${safeHex(c.hex)};color:${textColorOn(safeHex(c.hex))}"><span class="n" data-jars="${c.id}">${Math.floor(c.jars)}</span></button>`)}`)
-      : String(h`<div class="small muted" style="grid-row:1;grid-column:1 / span 6;align-self:center">${ui.family ? 'None of those colors are in stock yet. Clear the filter to see all.' : 'Your vats are empty for now. Let the mixers run, then come back to paint.'}</div>`);
+      : String(h`<div class="small muted">${ui.family ? 'None of those colors are in stock yet. Clear the filter to see all.' : 'Your vats are empty for now. Let the mixers run, then come back to paint.'}</div>`);
   } else {
     for (const c of list) {
       const n = wrap.querySelector(`[data-jars="${CSS_ESC(c.id)}"]`);
@@ -320,9 +336,20 @@ function updateChips() {
     }
   }
   const selEntry = stockColors().find((c) => c.id === ui.sel);
-  q('[data-ref=selname]').textContent = ui.sel ? sim().displayName(st, ui.sel) : 'No paint in stock';
+  q('[data-ref=selname]').textContent = ui.sel ? sim().displayName(st, ui.sel) : 'Paint comes from your vats';
   q('[data-ref=jars]').textContent = selEntry ? `${Math.floor(selEntry.jars)} jars left` : '';
   root.querySelectorAll('.pt-fam').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.family === ui.family)));
+}
+
+/** Edge fades on the horizontal strips (suggested families, palette chips). */
+function updateFades() {
+  if (!root) return;
+  root.querySelectorAll('[data-fade]').forEach((w) => {
+    const sc = w.firstElementChild;
+    if (!sc) return;
+    w.classList.toggle('can-left', sc.scrollLeft > 4);
+    w.classList.toggle('can-right', sc.scrollLeft + sc.clientWidth < sc.scrollWidth - 4);
+  });
 }
 
 function update() {
@@ -335,16 +362,19 @@ function update() {
   q('[data-ref=title]').textContent = signed ? (p.title || cv.name) : cv.name;
   q('[data-ref=progress]').textContent = signed
     ? 'Signed and finished'
-    : done >= total ? 'All painted. Ready to sign.' : `${done} painted, ${total - done} to go`;
+    : done >= total ? 'All painted. Ready to sign.' : `${total - done} ${total - done === 1 ? 'pane' : 'panes'} to fill`;
   const slot = q('[data-ref=signslot]');
   const slotKey = signed ? 'signed' : done >= total ? 'ready' : 'wait';
   if (slot.dataset.key !== slotKey) {
     slot.dataset.key = slotKey;
     slot.innerHTML = signed
-      ? String(button('Signed', { variant: 'paper', disabled: true, attrs: { 'aria-label': 'Signed' } }))
-      : String(button('Sign', { variant: 'primary', disabled: done < total, attrs: { 'data-action': 'sign' } }));
+      ? String(tag('Signed', { icon: 'check' }))
+      : done < total
+        ? String(h`<span class="pt-sign-tag">${tag('Sign when every pane is painted')}</span>`)
+        : String(button('Sign', { variant: 'primary', attrs: { 'data-action': 'sign' } }));
   }
   q('[data-ref=undo]').disabled = signed || ui.undo.length === 0;
+  updateFades();
   if (!signed) {
     // keep fills in step with state (skipping panes mid-pour)
     for (const r of cv.regions) {
@@ -398,7 +428,8 @@ function applyPaint(rid, colorId, ev, { fromUndo = false } = {}) {
   ui.lastCost = cost;
   const have = sim().storage.stockOf(state(), colorId);
   if (have + 1e-9 < cost) {
-    gently(`${sim().displayName(state(), colorId)}: ${Math.floor(have)} of ${cost} jars. A little more time in the vats and it's yours to pour.`);
+    const more = Math.max(1, cost - Math.floor(have));
+    gently(`${sim().displayName(state(), colorId)} needs ${more} more ${more === 1 ? 'jar' : 'jars'}. A little more time in the vats and it's yours to pour.`);
     update();
     return false;
   }
@@ -500,12 +531,12 @@ function onSignConfirm() {
   layer.hidden = false;
   layer.innerHTML = String(h`<div class="sheet pt-sheet" role="dialog" aria-label="Your signed piece">
   <div class="pt-mini">${raw(canvasSvgMarkup(cv, fillsOf(np)))}</div>
-  <div class="center"><div class="h2" data-ref="signedtitle"></div><div class="hint">is worth</div></div>
+  <div class="center"><div class="pt-name" data-ref="signedtitle"></div><div class="hint">is worth</div></div>
   <div class="pt-value" data-ref="value" aria-live="polite">0</div>
   <div class="center small muted">Coins, and ${perSec >= 0.05 ? `about ${ctx.format.rate(perSec)}` : 'a gentle trickle'} in admission once it hangs.</div>
   <div>${rows.map(([k, v]) => h`<div class="pt-bd"><span>${k}</span><span class="num bold">${v}</span></div>`)}</div>
-  <div class="row">${button('Keep in archive', { block: true, cls: 'grow', attrs: { 'data-action': 'archive' } })}${button('Hang it', { variant: 'primary', block: true, cls: 'grow', disabled: free <= 0, attrs: { 'data-action': 'hang' } })}</div>
-  ${free <= 0 ? h`<div class="hint center">Your walls are full. It will wait safely in the archive until you take one down.</div>` : ''}
+  <div class="row">${button('Paint another', { block: true, cls: 'grow', attrs: { 'data-action': 'archive' } })}${button('Hang it', { variant: 'primary', block: true, cls: 'grow', attrs: { 'data-action': 'hang' } })}</div>
+  <div class="hint center">${free <= 0 ? 'Your walls are full, so this one waits safely in the archive until you take another down.' : 'Painting another leaves this one resting safely in your archive.'}</div>
 </div>`);
   layer.querySelector('[data-ref=signedtitle]').textContent = np.title || cv.name;
   update();
@@ -558,13 +589,13 @@ function onClick(e) {
   const a = t.dataset.action;
   if (a === 'close-sheet') { if (e.target === t && ui.sheet === 'sign') closeSheet(); return; }
   if (a === 'pick') { ui.sel = t.dataset.color; ui.lastCost = 0; ui.chipSig = ''; update(); return; }
-  if (a === 'family') { ui.family = ui.family === t.dataset.family ? null : t.dataset.family; ui.chipSig = ''; updateChips(); return; }
+  if (a === 'family') { ui.family = ui.family === t.dataset.family ? null : t.dataset.family; ui.chipSig = ''; updateChips(); updateFades(); return; }
   if (a === 'undo') onUndo();
   else if (a === 'sign') openSheet('sign');
   else if (a === 'sign-cancel') closeSheet();
   else if (a === 'sign-confirm') onSignConfirm();
   else if (a === 'hang') onHang();
-  else if (a === 'archive') afterReveal();
+  else if (a === 'archive') { paintIntent.focus = 'canvases'; afterReveal(); }
   else if (a === 'export') onExport(false);
   else if (a === 'share') onExport(true);
 }
@@ -590,6 +621,7 @@ const screen = {
     injectCss();
     root.addEventListener('click', onClick);
     root.addEventListener('keydown', onKey);
+    root.addEventListener('scroll', (e) => { if (e.target && e.target.closest && e.target.closest('[data-fade]')) updateFades(); }, true);
   },
 
   show(params = {}) {

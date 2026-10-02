@@ -15,7 +15,7 @@
  */
 
 import { h, raw, backButton, button, tag, safeHex, progressBar } from './kit.js';
-import { canvasSvgMarkup, exportPieceImage, FAMILY_HEX } from './paint.js';
+import { canvasSvgMarkup, exportPieceImage, FAMILY_HEX, paintIntent } from './paint.js';
 import fxDefault from './fx.js';
 import audioDefault from './audio.js';
 import hapticsDefault from './haptics.js';
@@ -28,6 +28,9 @@ const PLURAL = Object.freeze({
 
 const CSS = `
 #screen-gallery .screen-body > *{flex-shrink:0}
+#screen-gallery .h2{font-family:var(--font-ui);font-weight:600}
+#screen-gallery .btn.small{min-height:44px}
+#screen-gallery .gl-name{font-family:var(--font-display);font-size:20px;line-height:1.2}
 #screen-gallery .gl-sec{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-top:6px}
 #screen-gallery .gl-walls{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
 #screen-gallery .gl-tile{display:flex;flex-direction:column;gap:4px;align-items:stretch;text-align:left;min-width:0}
@@ -35,8 +38,9 @@ const CSS = `
 #screen-gallery .gl-frame svg{width:100%;height:auto;display:block}
 #screen-gallery .gl-t{font-family:var(--font-display);font-size:13px;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #screen-gallery .gl-r{font-size:12px;color:var(--ink-soft);font-variant-numeric:tabular-nums}
-#screen-gallery .gl-empty{min-height:130px;border-radius:10px;border:2px dashed rgba(42,38,34,.22);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:var(--ink-soft);font-size:12px;text-align:center;padding:8px}
-#screen-gallery .gl-taste{display:flex;align-items:center;gap:10px}
+#screen-gallery .gl-empty{min-height:130px;border-radius:10px;background:rgba(247,244,236,.7);box-shadow:inset 0 3px 8px rgba(42,38,34,.12),0 2px 0 rgba(42,38,34,.12);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:var(--ink-soft);font-size:12px;text-align:center;padding:8px}
+#screen-gallery .gl-taste{display:flex;flex-direction:row;align-items:center;gap:10px}
+#screen-gallery .gl-door .progress{align-self:stretch}
 #screen-gallery .gl-dot{width:26px;height:26px;border-radius:50%;flex:0 0 auto;box-shadow:inset 0 0 0 1.5px rgba(42,38,34,.25)}
 #screen-gallery .gl-bubble{display:flex;gap:10px;align-items:flex-start;background:#fff;border-radius:14px 14px 14px 4px;padding:9px 12px;box-shadow:0 2px 0 rgba(42,38,34,.14);font-size:14px}
 #screen-gallery .gl-bubble .gl-dot{width:14px;height:14px;margin-top:3px}
@@ -45,6 +49,8 @@ const CSS = `
 #screen-gallery .gl-cv .gl-frame{width:100px}
 #screen-gallery .gl-door{align-items:center;text-align:center;gap:10px;padding:18px 16px}
 #screen-gallery .gl-door > svg{width:140px;height:auto}
+#screen-gallery .gl-door .tag,#screen-gallery .gl-note .tag{white-space:normal;text-align:left;min-height:28px;line-height:1.25;font-size:13px}
+#screen-gallery .gl-note{align-items:center;text-align:center;gap:8px}
 #screen-gallery .gl-layer{position:absolute;inset:0;z-index:20;background:rgba(42,38,34,.45);display:flex;align-items:flex-end;justify-content:center;animation:fade-in 160ms ease-out both}
 #screen-gallery .gl-layer[hidden]{display:none}
 #screen-gallery .gl-sheet{width:100%;max-width:520px;max-height:92%}
@@ -119,12 +125,11 @@ function doorView(st) {
   </svg>
   <div class="h2">The Gallery Wing</div>
   <div class="hint">Quiet white walls, waiting for your first paintings. Hang your art, and visitors pay to see it.</div>
-  ${tag(`Opens at ${need} colors with the Gallery Wing`)}
   ${left > 0
-    ? h`<div class="small semi">${left} more ${left === 1 ? 'color' : 'colors'} to go</div>${progressBar(Math.min(1, n / need), { label: 'Colors toward the Gallery Wing' })}`
+    ? h`${tag(`Opens at ${need} colors with the Gallery Wing: ${left} more`)}${progressBar(Math.min(1, n / need), { label: 'Colors toward the Gallery Wing' })}`
     : hasRoom
-      ? h`<div class="small semi">The painters are hanging the last lamps. Check back in a moment.</div>`
-      : h`<div class="small semi">You have the colors. Build the Gallery Wing in the workshop.</div>${button('Go to the workshop', { variant: 'primary', attrs: { 'data-action': 'goto-workshop' } })}`}
+      ? h`${tag('The Gallery Wing opens in just a moment')}<div class="small semi">The painters are hanging the last lamps. Check back in a moment.</div>`
+      : h`${tag('Opens when you build the Gallery Wing')}<div class="small semi">You have the colors. Build the Gallery Wing in the workshop.</div>${button('Go to the workshop', { variant: 'primary', attrs: { 'data-action': 'goto-workshop' } })}`}
 </div>`;
 }
 
@@ -157,6 +162,7 @@ function wallsView(st, now) {
   const walls = Math.max(1, Math.min(24, g.walls || 4));
   const hung = (g.hung || []).map(pieceById).filter(Boolean);
   const total = sim().gallery.admissionRate(st, now);
+  const freeWalls = Math.max(0, walls - hung.length);
   const tiles = [];
   for (let i = 0; i < walls; i++) {
     const p = hung[i];
@@ -166,12 +172,12 @@ function wallsView(st, now) {
   <span class="gl-t">${p.title || canvasOf(p)?.name || 'Untitled'}</span>
   <span class="gl-r">${ctx.format.rate(pieceRate(p, now))}</span></button>`);
     } else {
-      tiles.push(h`<button type="button" class="gl-empty" data-tap data-action="empty-wall" aria-label="Empty wall"><span class="semi">Empty wall</span><span>${hasArchive() ? 'Hang a piece' : 'Paint one'}</span></button>`);
+      tiles.push(h`<button type="button" class="gl-empty" data-tap data-action="empty-wall" aria-label="Empty wall"><span class="semi">A wall for your art</span><span>${hasArchive() ? 'Hang a piece' : 'Paint one'}</span></button>`);
     }
   }
   return h`
 <div class="gl-sec"><div class="h2">On the walls</div>
-  <div class="small muted num">${hung.length} of ${walls} walls${total > 0 ? h` · ${ctx.format.rate(total)} total` : ''}</div></div>
+  <div class="small muted num">${walls} ${walls === 1 ? 'wall' : 'walls'}, ${freeWalls > 0 ? `${freeWalls} free` : 'all in use'}${total > 0 ? h` · ${ctx.format.rate(total)} total` : ''}</div></div>
 <div class="gl-walls" data-coach="gallery">${tiles}</div>
 ${hung.length === 0 ? h`<div class="hint">Hang a signed piece and visitors start paying admission.</div>` : ''}`;
 }
@@ -216,15 +222,31 @@ function easelView() {
     const total = cv ? cv.regions.length : 0;
     const done = paintedCount(p);
     return h`<div class="card tight"><div class="gl-row"><div class="shrink0" style="width:46px">${mini(p)}</div>
-      <div class="grow"><div class="semi">${cv?.name || 'Canvas'}</div><div class="small muted">${done} painted, ${Math.max(0, total - done)} to go</div></div>
+      <div class="grow"><div class="semi">${cv?.name || 'Canvas'}</div><div class="small muted">${total - done > 0 ? `${total - done} ${total - done === 1 ? 'pane' : 'panes'} to fill` : 'All painted: ready to sign'}</div></div>
       ${button('Continue', { small: true, variant: 'primary', attrs: { 'data-action': 'continue', 'data-piece': p.id } })}</div></div>`;
   })}</div>`;
 }
 
-function canvasesView() {
+function nextCanvasAt(st) {
+  return (Math.floor(sim().discoveredCount(st) / 20) + 1) * 20;
+}
+
+function canvasesView(st) {
   const list = (gal().canvases || []).map((id) => ctx.content.getCanvas(id)).filter(Boolean);
+  if (!list.length) {
+    const at = nextCanvasAt(st);
+    const more = Math.max(1, at - sim().discoveredCount(st));
+    return h`
+<div class="gl-sec"><div class="h2">Canvases</div></div>
+<div class="card gl-note" data-ref="canvases">
+  <div class="semi">Your first canvas is on its way</div>
+  <div class="small muted">New canvases arrive with catalog milestones, postcard sets, events and commissions.</div>
+  ${tag(`Next canvas at ${at} colors: ${more} more`, { icon: null })}
+  ${button('See your catalog', { attrs: { 'data-action': 'goto-catalog' } })}
+</div>`;
+  }
   return h`
-<div class="gl-sec"><div class="h2">Canvases</div><div class="small muted">${list.length} to paint</div></div>
+<div class="gl-sec" data-ref="canvases"><div class="h2">Canvases</div><div class="small muted">${list.length} to paint</div></div>
 <div class="gl-grid2">${list.map((cv) => h`<div class="card gl-cv">
   <span class="gl-frame">${raw(canvasSvgMarkup(cv, {}, { label: cv.name }))}</span>
   <div class="semi" style="font-family:var(--font-display);font-size:14px">${cv.name}</div>
@@ -237,7 +259,16 @@ ${list.length < 12 ? h`<div class="hint">New canvases arrive with catalog milest
 function archiveView(st) {
   const g = gal();
   const list = (g.pieces || []).filter((p) => p.signedAt && !p.hung).sort((a, b) => b.signedAt - a.signedAt);
-  if (!list.length) return '';
+  if (!list.length) {
+    const hasCanvas = (g.canvases || []).length > 0;
+    return h`
+<div class="gl-sec"><div class="h2">Archive</div></div>
+<div class="card gl-note">
+  <div class="semi">Signed pieces rest here</div>
+  <div class="small muted">Finish a painting and sign it. It waits safely here until you hang it on a wall.</div>
+  ${hasCanvas ? button('Pick a canvas', { attrs: { 'data-action': 'goto-canvases' } }) : ''}
+</div>`;
+  }
   const free = Math.max(0, (g.walls || 0) - (g.hung || []).length);
   return h`
 <div class="gl-sec"><div class="h2">Archive</div><div class="small muted">${list.length} resting</div></div>
@@ -246,7 +277,7 @@ function archiveView(st) {
     <span class="gl-frame">${mini(p)}</span>
     <span class="gl-t">${p.title || 'Untitled'}</span>
     <span class="gl-r">worth ${ctx.format.num(p.value || 0)}</span></button>
-  ${button(free > 0 ? 'Hang' : 'Walls full', { small: true, block: true, disabled: free <= 0, attrs: { 'data-action': 'hang', 'data-piece': p.id } })}
+  ${button('Hang', { small: true, block: true, attrs: { 'data-action': 'hang', 'data-piece': p.id } })}
 </div>`)}</div>
 ${free <= 0 ? h`<div class="hint">Every wall is in use. Take one down to rotate a new piece in. Nothing is ever lost.</div>` : ''}`;
 }
@@ -267,7 +298,12 @@ function signature(st, now) {
 }
 
 function headSubtitle(st, now) {
-  if (!gal().unlocked) return 'Coming soon';
+  if (!gal().unlocked) {
+    const room = ctx.content.getRoom ? ctx.content.getRoom('gallery-wing') : null;
+    const need = (room && room.colorsRequired) || UNLOCK_COLORS;
+    const left = Math.max(0, need - sim().discoveredCount(st));
+    return left > 0 ? `Opens at ${need} colors: ${left} more` : 'Build the Gallery Wing to open it';
+  }
   const r = sim().gallery.admissionRate(st, now);
   return r > 0 ? `${ctx.format.rate(r)} from visitors` : 'Hang a piece to welcome visitors';
 }
@@ -284,7 +320,7 @@ function build(st, now) {
 </div>
 <div class="screen-body">
   ${unlocked
-    ? h`${tasteView(st, now)}${offerView(st)}${wallsView(st, now)}${commentsView()}${easelView()}${canvasesView()}${archiveView(st)}`
+    ? h`${tasteView(st, now)}${offerView(st)}${wallsView(st, now)}${commentsView()}${easelView()}${canvasesView(st)}${archiveView(st)}`
     : doorView(st)}
 </div>
 <div class="gl-layer" data-ref="layer" data-action="close-sheet" hidden></div>`);
@@ -316,17 +352,23 @@ function openPiece(id) {
   layer.hidden = false;
   layer.innerHTML = String(h`<div class="sheet gl-sheet" role="dialog" aria-label="${p.title || cv.name}">
   <div class="gl-big"><span class="gl-frame">${mini(p)}</span></div>
-  <div class="center"><div class="h2">${p.title || cv.name}</div>
+  <div class="center"><div class="gl-name">${p.title || cv.name}</div>
     <div class="hint">${signed ? `Signed ${when} · worth ${ctx.format.num(p.value || 0)} Coins` : 'Not signed yet'}${p.hung ? ` · ${ctx.format.rate(pieceRate(p, now))}` : ''}</div></div>
   <div class="row">
     ${button('Save image', { block: true, cls: 'grow', attrs: { 'data-action': 'export', 'data-piece': p.id } })}
     ${signed
       ? (p.hung
         ? button('Take down', { variant: 'primary', block: true, cls: 'grow', attrs: { 'data-action': 'unhang', 'data-piece': p.id } })
-        : button(free > 0 ? 'Hang it' : 'Walls full', { variant: 'primary', block: true, cls: 'grow', disabled: free <= 0, attrs: { 'data-action': 'hang', 'data-piece': p.id } }))
+        : button('Hang it', { variant: 'primary', block: true, cls: 'grow', attrs: { 'data-action': 'hang', 'data-piece': p.id } }))
       : button('Continue', { variant: 'primary', block: true, cls: 'grow', attrs: { 'data-action': 'continue', 'data-piece': p.id } })}
   </div>
+  ${signed && !p.hung && free <= 0 ? h`<div class="hint center">Every wall is in use. Take one down to rotate this in. Nothing is ever lost.</div>` : ''}
 </div>`);
+}
+
+function scrollToCanvases() {
+  const el = q('[data-ref=canvases]');
+  if (el && el.scrollIntoView) el.scrollIntoView({ block: 'start', behavior: fx.isReducedMotion() ? 'auto' : 'smooth' });
 }
 
 function act(fn, args) { return ctx.game.act(fn, args); }
@@ -338,6 +380,8 @@ function onClick(e) {
   const id = t.dataset.piece;
   if (a === 'close-sheet') { if (e.target === t) closeSheet(); return; }
   if (a === 'goto-workshop') { ctx.navigate('workshop'); return; }
+  if (a === 'goto-catalog') { ctx.navigate('catalog'); return; }
+  if (a === 'goto-canvases') { scrollToCanvases(); return; }
   if (a === 'piece') { openPiece(id); return; }
   if (a === 'empty-wall') {
     if (hasArchive()) {
@@ -439,6 +483,10 @@ const screen = {
   reveal() {
     ui.commentsAt = 0;
     refresh(true);
+    if (paintIntent.focus === 'canvases') {
+      paintIntent.focus = null;
+      setTimeout(scrollToCanvases, 60);
+    }
   },
 };
 

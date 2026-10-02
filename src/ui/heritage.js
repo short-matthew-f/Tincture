@@ -11,13 +11,18 @@
  * data-actions: renovate-ask, renovate-cancel, renovate-go, buy.
  */
 
-import { h, raw, backButton, button, tag } from './kit.js';
+import { h, raw, backButton, button, tag, iconSvg } from './kit.js';
 import { HERITAGE_TREE, HERITAGE_DIVISOR, HERITAGE_INCOME, heritageCost } from '../content/heritage.js';
 import fxDefault from './fx.js';
 import audioDefault from './audio.js';
 import hapticsDefault from './haptics.js';
 
-const GEM = '<svg class="icon" width="16" height="16" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2 L17 8 L10 18 L3 8 Z" fill="#C99A2E" stroke="#8C6512" stroke-width="1.4" stroke-linejoin="round"/><path d="M3 8 H17 M7 8 L10 2 L13 8 L10 18 Z" fill="none" stroke="#8C6512" stroke-width="1" stroke-linejoin="round"/></svg>';
+const GEM_FALLBACK = '<svg class="icon" width="16" height="16" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2 L17 8 L10 18 L3 8 Z" fill="#C99A2E" stroke="#8C6512" stroke-width="1.4" stroke-linejoin="round"/><path d="M3 8 H17 M7 8 L10 2 L13 8 L10 18 Z" fill="none" stroke="#8C6512" stroke-width="1" stroke-linejoin="round"/></svg>';
+/** The Heritage mark from kit (a little homestead); the old gem until kit has it. */
+function gem(size = 16) {
+  const e = String(iconSvg('heritage', { size }));
+  return raw(e || GEM_FALLBACK.replace('width="16" height="16"', `width="${size}" height="${size}"`));
+}
 const CHECK = '<svg class="icon" width="16" height="16" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10.5 L8.5 15 L16 6" fill="none" stroke="#2A2622" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const FRESH = '<svg class="icon" width="16" height="16" viewBox="0 0 20 20" aria-hidden="true"><path d="M16 10 A6 6 0 1 1 13.5 5.1 M16 3.5 V6.5 H13" fill="none" stroke="#5E5148" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
@@ -38,7 +43,11 @@ const RESETS = [
 
 const CSS = `
 #screen-heritage .screen-body > *{flex-shrink:0}
-#screen-heritage .hr-big{font-family:var(--font-display);font-size:30px;line-height:1.1;font-variant-numeric:tabular-nums;display:flex;align-items:center;gap:8px}
+#screen-heritage .h2,#screen-heritage .card-title{font-family:var(--font-ui);font-weight:600}
+#screen-heritage .hr-node .card-title{font-family:var(--font-display);font-weight:400}
+#screen-heritage .btn.small{min-height:44px}
+#screen-heritage .tag{white-space:normal;min-height:28px;line-height:1.25;font-size:13px}
+#screen-heritage .hr-big{font-family:var(--font-ui);font-weight:700;font-size:30px;line-height:1.1;font-variant-numeric:tabular-nums;display:flex;align-items:center;gap:8px}
 #screen-heritage .hr-list{display:flex;flex-direction:column;gap:6px}
 #screen-heritage .hr-li{display:flex;gap:8px;align-items:flex-start;font-size:14px}
 #screen-heritage .hr-li .icon{margin-top:2px}
@@ -94,14 +103,33 @@ function effectLines(node, level) {
   return { per, now };
 }
 
+/** The real goal for Renovate, from state: 30 colors and the Loading Yard (checkPhase). */
+function renovateGoal(st) {
+  const gate = (sim().PHASE_GATES && sim().PHASE_GATES[3]) || { colors: 30, room: 'loading-yard' };
+  const more = Math.max(0, gate.colors - sim().discoveredCount(st));
+  const hasYard = (st.rooms || []).includes(gate.room);
+  const colors = `${more} more ${more === 1 ? 'color' : 'colors'}`;
+  if (more > 0 && !hasYard) return `Renovate opens at ${gate.colors} colors and the Loading Yard: ${colors}`;
+  if (more > 0) return `Renovate opens at ${gate.colors} colors: ${colors}`;
+  if (!hasYard) return 'Renovate opens with the Loading Yard: build it in the workshop';
+  return 'Renovate opens in just a moment';
+}
+
 function renovateHtml(st) {
   const chk = sim().prestige.canRenovate(st);
   const gain = chk.gain;
   const inc = Math.round(gain * HERITAGE_INCOME * 100);
   if (!chk.ok) {
     return h`<div class="card">
-  <div class="row between"><div class="card-title">Renovate</div>${tag('Opens in Phase 3')}</div>
-  <div class="small">When your workshop reaches Phase 3 you can renovate: rebuild from the bench with a permanent income boost called Heritage.</div>
+  <div class="card-title">Renovate</div>
+  <div>${tag(renovateGoal(st))}</div>
+  <div class="small">Renovating rebuilds your workshop from the bench in return for a permanent income boost called Heritage. Your catalog and art stay.</div>
+  <div class="stack stack-sm">
+    <div class="semi small">Stays with you</div>
+    <div class="hr-list">${STAYS.map((t) => h`<div class="hr-li">${raw(CHECK)}<span>${t}</span></div>`)}</div>
+    <div class="semi small" style="margin-top:4px">Starts fresh</div>
+    <div class="hr-list hr-fresh">${RESETS.map((t) => h`<div class="hr-li">${raw(FRESH)}<span>${t}</span></div>`)}</div>
+  </div>
 </div>`;
   }
   const suggest = sim().prestige.shouldSuggest(st);
@@ -125,25 +153,29 @@ function renovateHtml(st) {
         <div><div class="semi">Ready to renovate?</div><div class="small muted">Everything under "Starts fresh" begins again, and you gain +${gain} Heritage right away. Your catalog and art are safe.</div></div>
         <div class="row">${button('Not yet', { block: true, cls: 'grow', attrs: { 'data-action': 'renovate-cancel' } })}${button('Renovate now', { variant: 'primary', block: true, cls: 'grow', attrs: { 'data-action': 'renovate-go' } })}</div>
       </div>`
-    : button(gain > 0 ? 'Renovate...' : 'Keep going', { variant: 'primary', block: true, disabled: gain <= 0, attrs: { 'data-action': 'renovate-ask' } })}
+    : (gain > 0 ? button('Renovate...', { variant: 'primary', block: true, attrs: { 'data-action': 'renovate-ask' } }) : '')}
 </div>`;
 }
 
-function nodeHtml(st, n) {
+function nodeHtml(st, n, { preview = false } = {}) {
   const level = Math.min(n.maxLevel, (st.heritageSpent && st.heritageSpent[n.id]) || 0);
   const cost = heritageCost(n.id, level);
   const avail = sim().prestige.heritageAvailable(st);
   const { per, now } = effectLines(n, level);
   const maxed = cost === null;
   const short = !maxed && avail < cost ? cost - avail : 0;
-  return h`<div class="card" data-node="${n.id}">
-  <div class="row between"><div class="card-title">${n.name}</div><div class="small muted">Level ${level} of ${n.maxLevel}</div></div>
+  const left = n.maxLevel - level;
+  let action;
+  if (preview) action = h`<div>${tag('Opens with your first Heritage', { icon: 'lock' })}</div>`;
+  else if (maxed) action = h`<div>${tag('Complete', { icon: 'check' })}</div>`;
+  else if (short) action = h`<div>${tag(`${short} more Heritage to buy this`, { icon: null })}</div>`;
+  else action = button(h`Buy ${gem(16)} ${cost} Heritage`, { variant: 'primary', block: true, attrs: { 'data-action': 'buy', 'data-node': n.id } });
+  return h`<div class="card hr-node" data-node="${n.id}">
+  <div class="row between"><div class="card-title">${n.name}</div><div class="small muted">${maxed ? 'All levels grown' : level ? `${left} more ${left === 1 ? 'level' : 'levels'}` : `${left} ${left === 1 ? 'level' : 'levels'} to grow`}</div></div>
   <div class="hr-pips" aria-hidden="true">${Array.from({ length: n.maxLevel }, (_, i) => h`<span class="hr-pip${i < level ? ' on' : ''}"></span>`)}</div>
   <div class="small">${n.blurb}</div>
   <div class="small muted">${per}${now ? ' ' + now : ''}</div>
-  ${maxed
-    ? h`<div>${tag('Complete', { icon: 'check' })}</div>`
-    : button(h`Buy ${raw(GEM)} ${cost} Heritage${short ? h` · ${short} more to go` : ''}`, { variant: short ? 'paper' : 'primary', small: true, block: true, attrs: { 'data-action': 'buy', 'data-node': n.id, 'aria-disabled': short ? 'true' : null } })}
+  ${action}
 </div>`;
 }
 
@@ -154,6 +186,8 @@ function build() {
   const total = st.heritage || 0;
   const avail = sim().prestige.heritageAvailable(st);
   const pct = Math.round(total * HERITAGE_INCOME * 100);
+  // Before her first Heritage the tree is a single preview, not five dead Buy buttons.
+  const preview = total <= 0 && !sim().prestige.canRenovate(st).ok;
   root.innerHTML = String(h`
 <div class="screen-head">
   ${backButton('Back')}
@@ -163,13 +197,15 @@ function build() {
 <div class="screen-body">
   <div class="card">
     <div class="small muted">Heritage to spend</div>
-    <div class="hr-big">${raw(GEM.replace('width="16" height="16"', 'width="28" height="28"'))}<span class="num">${avail}</span></div>
+    <div class="hr-big">${gem(28)}<span class="num">${avail}</span></div>
     <div class="small muted">${total} earned in all. Each Heritage adds +${Math.round(HERITAGE_INCOME * 100)}% to all income, spent or not.</div>
   </div>
   ${renovateHtml(st)}
   <div class="h2" style="margin-top:4px">Heritage tree</div>
   <div class="hint">Spend Heritage so every new run starts a little smoother.</div>
-  ${HERITAGE_TREE.map((n) => nodeHtml(st, n))}
+  ${preview
+    ? h`${nodeHtml(st, HERITAGE_TREE[0], { preview: true })}<div class="hint center">${HERITAGE_TREE.length - 1} more upgrades grow here after your first Renovate.</div>`
+    : HERITAGE_TREE.map((n) => nodeHtml(st, n))}
 </div>`);
   const nb = q('.screen-body');
   if (nb) nb.scrollTop = scroll;
@@ -181,6 +217,7 @@ function signature() {
   const need = Math.max(0, (chk.gain + 1) * (chk.gain + 1) * HERITAGE_DIVISOR - (st.runEarned || 0));
   return JSON.stringify([
     st.heritage, st.heritageSpent, st.phase, chk.gain, chk.ok, ui.confirm,
+    sim().discoveredCount(st), (st.rooms || []).includes('loading-yard'),
     chk.gain > 0 ? '' : ctx.format.num(need), sim().prestige.shouldSuggest(st),
   ]);
 }
@@ -202,7 +239,7 @@ function onClick(e) {
   if (a === 'renovate-go') {
     ui.confirm = false;
     const res = ctx.game.act(sim().prestige.renovate, {});
-    if (!res || !res.ok) ctx.toast('Renovating opens in Phase 3. Your workshop is almost there.');
+    if (!res || !res.ok) ctx.toast(`${renovateGoal(state())}.`);
     refresh(true);
     return;
   }
