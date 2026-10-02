@@ -169,3 +169,26 @@ test('randomHexNear stays close and is deterministic per rng', () => {
   assert.equal(C.randomHexNear('#d39b2a', 5, rng(1)), C.randomHexNear('#d39b2a', 5, rng(1)));
   assert.equal(C.randomHexNear('#d39b2a', 0, rng(1)), '#d39b2a');
 });
+
+import { dialRamp, mixOklab, rgbToOklab as _lab, hexToRgb as _rgb } from '../src/color.js';
+
+test('dialRamp: starts from whichever of ink or white contrasts more, always with room to spare', () => {
+  assert.equal(dialRamp('#24385a').startsWith, 'white', 'a navy target starts from white');
+  assert.equal(dialRamp('#2a2622').startsWith, 'white', 'an ink-colored target starts from white');
+  assert.equal(dialRamp('#efebe0').startsWith, 'ink', 'a pale target starts from ink');
+  assert.equal(dialRamp('#de7a2e').startsWith, 'ink');
+  let seed = 7;
+  const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+  for (let i = 0; i < 500; i++) {
+    const hex = '#' + [0, 0, 0].map(() => Math.floor(rnd() * 256).toString(16).padStart(2, '0')).join('');
+    const r = dialRamp(hex);
+    assert.ok(r.contrast >= 0.36, `${hex} contrast ${r.contrast}`);
+    assert.equal(r.end, hex);
+  }
+});
+
+test('mixOklab hits both ends and stays valid', () => {
+  assert.equal(mixOklab('#2a2622', '#de7a2e', 0), '#2a2622');
+  assert.equal(mixOklab('#2a2622', '#de7a2e', 1), '#de7a2e');
+  assert.match(mixOklab('#ffffff', '#3e6a9e', 0.5), /^#[0-9a-f]{6}$/);
+});

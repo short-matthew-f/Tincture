@@ -13,6 +13,7 @@
  * `reset`, `submit`, `back-orders`.
  */
 
+import * as colorLib from '../color.js';
 import { h, raw, iconSvg, button, backButton, tag, swatch, safeHex, lighten, escapeHtml } from './kit.js';
 
 // ---------------------------------------------------------------------------
@@ -210,13 +211,24 @@ function dripInto(svg, hex, ratio, fx) {
 
 // -- the closeness dial -----------------------------------------------------
 
-const DIAL_ZONES = [
-  [0, 0.667, '#C4C9BE'], // close enough
-  [0.667, 0.833, '#C9A277'], // good
-  [0.833, 0.933, '#7B5236'], // great
-  [0.933, 1, '#C99A2E'], // perfect
-];
-const needleDeg = (c) => -90 + 180 * Math.max(0, Math.min(1, Number(c) || 0));
+// Closeness (ΔE-based, 0..1) maps onto the arc piecewise so Perfect gets a
+// readable share of the dial: score boundaries -> where they sit on the arc.
+const SCORE_AT = [0, 0.667, 0.833, 0.933, 1];
+const ARC_AT = [0, 0.45, 0.70, 0.84, 1];
+const GOLD = '#DAA520';
+const needleDeg = (c) => -90 + 180 * arcPos(c);
+
+/** Closeness 0..1 -> position on the arc 0..1 (piecewise linear, Perfect widened). */
+export function arcPos(c) {
+  const x = Math.max(0, Math.min(1, Number(c) || 0));
+  for (let i = 0; i < SCORE_AT.length - 1; i++) {
+    if (x <= SCORE_AT[i + 1]) {
+      const f = (x - SCORE_AT[i]) / (SCORE_AT[i + 1] - SCORE_AT[i]);
+      return ARC_AT[i] + f * (ARC_AT[i + 1] - ARC_AT[i]);
+    }
+  }
+  return 1;
+}
 
 function arcPath(c0, c1, r, cx = 100, cy = 96) {
   const pt = (c) => {
@@ -226,11 +238,28 @@ function arcPath(c0, c1, r, cx = 100, cy = 96) {
   return `M${pt(c0)} A${r} ${r} 0 0 1 ${pt(c1)}`;
 }
 
-/** dialSvg() -> the closeness gauge; the needle is `[data-needle]` (rotate via setNeedle). */
-export function dialSvg() {
-  const arcs = DIAL_ZONES.map(([a, b, col]) => `<path d="${arcPath(a + 0.004, b - 0.004, 78)}" fill="none" stroke="${col}" stroke-width="14"/>`).join('');
-  return raw(`<svg class="mx-dial" viewBox="0 0 200 108" role="img" aria-label="Closeness to their color" data-dial>
-${arcs}
+/**
+ * dialSvg(targetHex) -> the closeness gauge. The arc fades from ink (or white,
+ * when their color is too close to ink) to their own color, so the end of the
+ * meter is the color being made. A goldenrod rim marks Perfect. Zone gaps are
+ * drawn at the tier boundaries so the tiers read without color. The needle is
+ * `[data-needle]` (rotate via setNeedle).
+ */
+export function dialSvg(targetHex) {
+  const hex = safeHex(targetHex || '#888888');
+  const ramp = colorLib.dialRamp(hex);
+  const N = 60;
+  let arcs = '';
+  for (let i = 0; i < N; i++) {
+    const c0 = i / N;
+    const c1 = Math.min(1, (i + 1) / N + 0.004);
+    arcs += `<path d="${arcPath(c0, c1, 78)}" fill="none" stroke="${colorLib.mixOklab(ramp.start, ramp.end, (c0 + c1) / 2)}" stroke-width="14"/>`;
+  }
+  const outline = `<path d="${arcPath(0, 1, 78)}" fill="none" stroke="#5E5148" stroke-width="17.5" stroke-linecap="butt"/>`;
+  const rim = `<path d="${arcPath(ARC_AT[3] + 0.005, 0.995, 91)}" fill="none" stroke="${GOLD}" stroke-width="3.5" stroke-linecap="round"/>`;
+  const gaps = ARC_AT.slice(1, 4).map((a) => `<path d="${arcPath(a - 0.004, a + 0.004, 78)}" fill="none" stroke="#F7F4EC" stroke-width="20"/>`).join('');
+  return raw(`<svg class="mx-dial" viewBox="0 0 200 108" role="img" aria-label="Closeness to their color" data-dial data-dial-from="${ramp.startsWith}">
+${outline}${arcs}${gaps}${rim}
 <g class="mx-needle" data-needle style="transform:rotate(-90deg)"><path d="M100 96 L100 28" stroke="#2A2622" stroke-width="4" stroke-linecap="round"/><circle cx="100" cy="96" r="8" fill="#2A2622"/><circle cx="100" cy="96" r="3" fill="#F7F4EC"/></g>
 </svg>`);
 }
@@ -467,7 +496,7 @@ function build() {
 </div>
 </div>
 <div class="card mx-gauge" data-gauge>
-${dialSvg()}
+${dialSvg(order.target)}
 <div class="stack stack-sm grow"><div class="mx-tier" data-tier>Add a drop</div><div class="mx-pay" data-pay-hint></div><div class="small muted" data-hint>Tap a drop below to start mixing.</div></div>
 </div>
 ${chipsHtml()}
@@ -584,7 +613,7 @@ function submit() {
 <div class="mx-col"><div class="mx-target" style="background:${safeHex(target)}" role="img" aria-label="Their swatch"></div><div class="cap">Their swatch</div></div>
 <div class="mx-col"><div class="mx-mine" style="background:${safeHex(mixHex)}" role="img" aria-label="Your mix"></div><div class="cap">Your mix</div></div>
 </div>
-${dialSvg()}
+${dialSvg(target)}
 <div class="big" data-tier-done>${tier === 'perfect' ? 'Perfect!' : tier === 'close' ? 'Close enough' : `${TIER_NAMES[tier] ?? 'Lovely'} match`}</div>
 <div class="muted small">${praise}</div>
 <div class="mx-paid" data-paid-wrap style="opacity:0">${iconSvg('coin', { size: 26 })}<span data-paid class="num">${coinsText(ctx, res.coins)}</span><small>${Math.max(1, Math.round(res.coins)) === 1 ? 'coin' : 'coins'}</small></div>

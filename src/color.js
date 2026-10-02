@@ -372,3 +372,33 @@ export function randomHexNear(hex, maxDeltaE, rng = Math.random) {
   }
   return labToSafeHex(lab);
 }
+
+// ---------------------------------------------------------------------------
+// Closeness dial palette (Matching screen)
+// ---------------------------------------------------------------------------
+
+/** Interpolate two hexes in OKLab; t in [0,1]. */
+export function mixOklab(hexA, hexB, t) {
+  const a = rgbToOklab(hexToRgb(hexA));
+  const b = rgbToOklab(hexToRgb(hexB));
+  const k = Math.max(0, Math.min(1, t));
+  return rgbToHex(oklabToRgb({ L: a.L + (b.L - a.L) * k, a: a.a + (b.a - a.a) * k, b: a.b + (b.b - a.b) * k }));
+}
+
+/**
+ * dialRamp(targetHex) -> {start, end, startsWith, contrast}
+ * The dial runs from `start` (nothing like their color) to `end` (their color).
+ * Start is ink unless the target is too close to ink in lightness, then white;
+ * whichever of the two is further from the target in OKLab lightness wins, so
+ * the ends never blend (contrast is at least ~0.37 L, checked in tests).
+ */
+export function dialRamp(targetHex) {
+  const INK = '#2a2622';
+  const WHITE_START = '#ffffff';
+  const L = rgbToOklab(hexToRgb(targetHex)).L;
+  const dInk = Math.abs(L - rgbToOklab(hexToRgb(INK)).L);
+  const dWhite = Math.abs(L - 1);
+  return dInk >= dWhite
+    ? { start: INK, end: targetHex, startsWith: 'ink', contrast: dInk }
+    : { start: WHITE_START, end: targetHex, startsWith: 'white', contrast: dWhite };
+}
