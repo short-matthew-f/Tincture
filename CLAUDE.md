@@ -6,4 +6,4 @@
 - Content is referenced by string id in state. Never store objects from content in the save.
 - UI copy uses positive framing. Wrong answers are never red. No energy, streaks, countdowns, gacha.
 - Run `npm test` before finishing any change. Keep tests fast (< 20 s total).
-- Bump the version with `node tools/bump-version.js <semver>` whenever shipped files change; it rewrites `sw.js`, `version.json` and `src/app.js` together.
+- Bump the version with `node tools/bump-version.js <semver>` whenever shipped files change; it rewrites `sw.js`, `version.json` and `src/version.js` together.
