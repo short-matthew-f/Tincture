@@ -16,6 +16,8 @@ import {
 } from '../src/sim/shipping.js';
 import { syncSlots, claimAccident, buyApprentice } from '../src/sim/factory.js';
 import { colorFamily } from '../src/sim/economy.js';
+import { STATION_KINDS } from '../src/content/stations.js';
+import { SOURCES_BY_ID } from '../src/content/sources.js';
 
 const NOW = Date.UTC(2026, 9, 2, 12);
 const HOUR = 3600e3;
@@ -38,10 +40,12 @@ test('economy: cost curves grow 1.15 (vats 1.10), milestones double output', () 
   assert.ok(close(stationCost('vat', 21) / stationCost('vat', 20), 1.10, 1e-9));
   assert.ok(close(stationCost('vats', 3) / stationCost('vats', 2), 1.10, 1e-9));
   // output(L) = b * L * 2^m
-  assert.equal(stationOutput('mixer', 9), 0.5 * 9);
-  assert.equal(stationOutput('mixer', 10), 0.5 * 10 * 2);
-  assert.equal(stationOutput('mixer', 25), 0.5 * 25 * 4);
-  assert.equal(stationOutput('source', 1, 'saffron'), 1.6);
+  // Base outputs are tuned by tools/balance (TUNING.md); the formula is what is fixed.
+  const b = STATION_KINDS.mixer.baseOutput;
+  assert.equal(stationOutput('mixer', 9), b * 9);
+  assert.equal(stationOutput('mixer', 10), b * 10 * 2);
+  assert.equal(stationOutput('mixer', 25), b * 25 * 4);
+  assert.equal(stationOutput('source', 1, 'saffron'), SOURCES_BY_ID.saffron.baseRate);
   assert.equal(stationOutput('vat', 0), 0);
   assert.equal(nextMilestone(1), 10);
   assert.equal(nextMilestone(10), 25);

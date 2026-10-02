@@ -26,11 +26,11 @@ export function milestonesPassed(level) {
  *  vehicle capacity multiplier per level (vehicles carry VEHICLES[x].capacity at level 1)
  */
 export const STATION_KINDS = Object.freeze({
-  source:  Object.freeze({ id: 'source',  name: 'Source',  baseCost: 10,   costGrowth: 1.15, baseOutput: 1.0,  milestones: MILESTONES }),
-  grinder: Object.freeze({ id: 'grinder', name: 'Grinder', baseCost: 100,  costGrowth: 1.15, baseOutput: 2.0,  milestones: MILESTONES }),
-  mixer:   Object.freeze({ id: 'mixer',   name: 'Mixer',   baseCost: 250,  costGrowth: 1.15, baseOutput: 0.5,  milestones: MILESTONES }),
-  vat:     Object.freeze({ id: 'vat',     name: 'Display vat', baseCost: 60, costGrowth: 1.10, baseOutput: 50, milestones: MILESTONES }),
-  shop:    Object.freeze({ id: 'shop',    name: 'Shop counter', baseCost: 40, costGrowth: 1.15, baseOutput: 0.5, milestones: MILESTONES }),
+  source:  Object.freeze({ id: 'source',  name: 'Source',  baseCost: 10,   costGrowth: 1.15, baseOutput: 0.08,  milestones: MILESTONES }),
+  grinder: Object.freeze({ id: 'grinder', name: 'Grinder', baseCost: 100,  costGrowth: 1.15, baseOutput: 0.16,  milestones: MILESTONES }),
+  mixer:   Object.freeze({ id: 'mixer',   name: 'Mixer',   baseCost: 250,  costGrowth: 1.15, baseOutput: 0.04,  milestones: MILESTONES }),
+  vat:     Object.freeze({ id: 'vat',     name: 'Display vat', baseCost: 60, costGrowth: 1.10, baseOutput: 400, milestones: MILESTONES }),
+  shop:    Object.freeze({ id: 'shop',    name: 'Shop counter', baseCost: 40, costGrowth: 1.15, baseOutput: 0.04, milestones: MILESTONES }),
   vehicle: Object.freeze({ id: 'vehicle', name: 'Fleet vehicle', baseCost: 2000, costGrowth: 1.15, baseOutput: 1.0, milestones: MILESTONES }),
 });
 
@@ -42,20 +42,20 @@ export function getStationKind(kind) {
 
 // Mixer batch: one batch yields `batchJars` jars and takes `batchSeconds` at level 1
 // (output rate above = batchJars / batchSeconds per level before milestones).
-export const MIXER = Object.freeze({ batchJars: 5, batchSeconds: 10, pigmentPerJar: 1 });
+export const MIXER = Object.freeze({ batchJars: 5, batchSeconds: 125, pigmentPerJar: 1 });
 
 // Display vat / cellar capacity (jars). Cellar capacity is a single shared number
 // that the Cellar room multiplies (rooms.js adds.cellarMult).
-export const VAT = Object.freeze({ baseCapacity: 50 });
-export const CELLAR = Object.freeze({ baseCapacity: 200, baseCost: 150, costGrowth: 1.10, capacityPerLevel: 100 });
+export const VAT = Object.freeze({ baseCapacity: 400 });
+export const CELLAR = Object.freeze({ baseCapacity: 1600, baseCost: 150, costGrowth: 1.10, capacityPerLevel: 800 });
 
 // Grinders: Mortar, then Millstone, then Roller Mill. throughput = pigment/s at level 1.
 // purityBonus is added to the pure/flawless chance of a batch; upgradeCost is the Coin
 // price to swap this slot to the next kind (null on the last).
 export const GRINDER_KINDS = Object.freeze([
-  { id: 'mortar', name: 'Mortar', throughput: 2, purityBonus: 0, upgradeCost: 1500, next: 'millstone' },
-  { id: 'millstone', name: 'Millstone', throughput: 12, purityBonus: 0.05, upgradeCost: 25000, next: 'roller-mill' },
-  { id: 'roller-mill', name: 'Roller Mill', throughput: 60, purityBonus: 0.12, upgradeCost: null, next: null },
+  { id: 'mortar', name: 'Mortar', throughput: 0.16, purityBonus: 0, upgradeCost: 1500, next: 'millstone' },
+  { id: 'millstone', name: 'Millstone', throughput: 0.96, purityBonus: 0.05, upgradeCost: 25000, next: 'roller-mill' },
+  { id: 'roller-mill', name: 'Roller Mill', throughput: 4.8, purityBonus: 0.12, upgradeCost: null, next: null },
 ].map((g) => Object.freeze(g)));
 
 export const GRINDER_KINDS_BY_ID = Object.freeze(Object.fromEntries(GRINDER_KINDS.map((g) => [g.id, g])));
@@ -95,7 +95,7 @@ export function vehiclesForEra(era) {
 export const RUSH_COOLDOWN_MS = 10 * MIN;
 
 // Standing shop (slow, automatic income): jars/s at level 1, +1% price per level.
-export const SHOP = Object.freeze({ baseSellRate: 0.5, priceBonusPerLevel: 0.01 });
+export const SHOP = Object.freeze({ baseSellRate: 0.04, priceBonusPerLevel: 0.01 });
 
 // Packing bonus for a well-packed crate (spec "Packing (sorting tie-in)").
 export const PACKING_BONUS = 0.25;

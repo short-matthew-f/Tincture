@@ -14,19 +14,19 @@ export const MAX_SOURCES_ERA1 = 8;
 
 export const SOURCES = Object.freeze([
   // Starters (the three Era 1 primaries).
-  { id: 'madder', name: 'Madder Patch', pigment: 'madder', baseRate: 1.0, baseCost: 10, unlock: { type: 'start' } },
-  { id: 'ochre', name: 'Ochre Pit', pigment: 'ochre', baseRate: 1.0, baseCost: 10, unlock: { type: 'start' } },
-  { id: 'woad', name: 'Woad Vat', pigment: 'woad', baseRate: 1.0, baseCost: 10, unlock: { type: 'start' } },
+  { id: 'madder', name: 'Madder Patch', pigment: 'madder', baseRate: 0.08, baseCost: 10, unlock: { type: 'start' } },
+  { id: 'ochre', name: 'Ochre Pit', pigment: 'ochre', baseRate: 0.08, baseCost: 10, unlock: { type: 'start' } },
+  { id: 'woad', name: 'Woad Vat', pigment: 'woad', baseRate: 0.08, baseCost: 10, unlock: { type: 'start' } },
   // Hunter-unlocked.
-  { id: 'saffron', name: 'Saffron Field', pigment: 'saffron', baseRate: 1.6, baseCost: 120, unlock: { type: 'region', region: 'meadow' } },
-  { id: 'umber', name: 'Umber Quarry', pigment: 'umber', baseRate: 2.2, baseCost: 400, unlock: { type: 'region', region: 'quarry' } },
-  { id: 'lapis', name: 'Lapis Seam', pigment: 'lapis', baseRate: 3.0, baseCost: 1500, unlock: { type: 'region', region: 'quarry' } },
-  { id: 'murex', name: 'Murex Cove', pigment: 'murex', baseRate: 3.5, baseCost: 2500, unlock: { type: 'region', region: 'coast' } },
-  { id: 'chalk-white', name: 'Chalk Cliff', pigment: 'chalk-white', baseRate: 2.6, baseCost: 900, unlock: { type: 'region', region: 'coast' } },
-  { id: 'indigo', name: 'Indigo Terrace', pigment: 'indigo', baseRate: 4.0, baseCost: 6000, unlock: { type: 'region', region: 'jungle' } },
-  { id: 'cochineal', name: 'Cochineal Grove', pigment: 'cochineal', baseRate: 4.5, baseCost: 9000, unlock: { type: 'region', region: 'jungle' } },
-  { id: 'sulfur', name: 'Sulfur Vent', pigment: 'sulfur', baseRate: 5.5, baseCost: 24000, unlock: { type: 'region', region: 'volcano' } },
-  { id: 'bone-black', name: 'Soot Hearth', pigment: 'bone-black', baseRate: 5.0, baseCost: 20000, unlock: { type: 'region', region: 'volcano' } },
+  { id: 'saffron', name: 'Saffron Field', pigment: 'saffron', baseRate: 0.128, baseCost: 120, unlock: { type: 'region', region: 'meadow' } },
+  { id: 'umber', name: 'Umber Quarry', pigment: 'umber', baseRate: 0.176, baseCost: 400, unlock: { type: 'region', region: 'quarry' } },
+  { id: 'lapis', name: 'Lapis Seam', pigment: 'lapis', baseRate: 0.24, baseCost: 1500, unlock: { type: 'region', region: 'quarry' } },
+  { id: 'murex', name: 'Murex Cove', pigment: 'murex', baseRate: 0.28, baseCost: 2500, unlock: { type: 'region', region: 'coast' } },
+  { id: 'chalk-white', name: 'Chalk Cliff', pigment: 'chalk-white', baseRate: 0.208, baseCost: 900, unlock: { type: 'region', region: 'coast' } },
+  { id: 'indigo', name: 'Indigo Terrace', pigment: 'indigo', baseRate: 0.32, baseCost: 6000, unlock: { type: 'region', region: 'jungle' } },
+  { id: 'cochineal', name: 'Cochineal Grove', pigment: 'cochineal', baseRate: 0.36, baseCost: 9000, unlock: { type: 'region', region: 'jungle' } },
+  { id: 'sulfur', name: 'Sulfur Vent', pigment: 'sulfur', baseRate: 0.44, baseCost: 24000, unlock: { type: 'region', region: 'volcano' } },
+  { id: 'bone-black', name: 'Soot Hearth', pigment: 'bone-black', baseRate: 0.4, baseCost: 20000, unlock: { type: 'region', region: 'volcano' } },
 ].map((x) => Object.freeze({ ...x, unlock: Object.freeze(x.unlock) })));
 
 export const SOURCES_BY_ID = Object.freeze(Object.fromEntries(SOURCES.map((s) => [s.id, s])));

@@ -40,7 +40,7 @@ test('sources: starters and hunter-unlocked match the spec', () => {
   assert.deepEqual([...STARTING_SOURCES].sort(), ['madder', 'ochre', 'woad']);
   for (const id of STARTING_SOURCES) {
     const s = getSource(id);
-    assert.equal(s.baseRate, 1.0);
+    assert.equal(s.baseRate, STATION_KINDS.source.baseOutput); // starters share the station default (tools/balance/TUNING.md)
     assert.equal(s.baseCost, 10);
   }
   assert.ok(MAX_SOURCES_ERA1 === 8);
@@ -114,7 +114,7 @@ test('stations: growth, milestones, vehicles, shop, rush', () => {
   assert.deepEqual(eraOf(2), ['delivery-truck', 'steam-train']);
   assert.deepEqual(eraOf(3), ['airship', 'beam-relay', 'pneumatic-tube']);
   assert.equal(RUSH_COOLDOWN_MS, 10 * min);
-  assert.equal(SHOP.baseSellRate, 0.5);
+  assert.equal(SHOP.baseSellRate, STATION_KINDS.shop.baseOutput); // value tuned in tools/balance/TUNING.md
   assert.equal(SHOP.priceBonusPerLevel, 0.01);
   for (const e of ERAS) for (const v of e.vehicles) assert.equal(getVehicle(v)?.era, e.id, v);
 });
