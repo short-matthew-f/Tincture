@@ -186,7 +186,7 @@ Tokens from the spec: `--plaster:#E3E6E0 --paper:#F7F4EC --walnut:#7B5236 --ink:
 ## PWA and updates (src/pwa.js, sw.js, version.json)
 
 - `sw.js` follows the proven pattern in the author's other games: `CACHE_VERSION` string, precache `SHELL` list (every file under the repo that the app loads), network-first for navigations/JS/CSS/HTML/manifest/json, cache-first for icons, `skipWaiting` **only on message** `{type:'SKIP_WAITING'}` (not automatically, so the game never reloads mid-session), `clients.claim()` on activate, old caches deleted.
-- `version.json` holds the same version string as `sw.js` and `APP_VERSION` in `src/app.js`. `tools/bump-version.js <semver>` rewrites all three and the SHELL list (it globs the files).
+- `version.json` holds the same version string as `sw.js` and `APP_VERSION` in `src/version.js`. `tools/bump-version.js <semver>` rewrites all three and the SHELL list (it globs the files).
 - `pwa.js`:
   - `registerSW()` → registers `./sw.js`, listens for `updatefound` → `installed` with an existing controller → sets `updateReady = true` and fires `onUpdateReady` (Settings shows "Update ready: Restart"; a quiet toast appears once).
   - `checkForUpdates()` → `Promise<{status:'up-to-date'|'update-ready'|'downloading'|'offline'|'unsupported', current, latest}>`: fetches `./version.json?ts=…` with `cache:'no-store'` and `registration.update()`; `update-ready` when a waiting worker exists or the fetched version differs from `APP_VERSION`.
