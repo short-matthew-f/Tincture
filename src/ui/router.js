@@ -27,6 +27,10 @@
 
 export const TABS = Object.freeze(['workshop', 'orders', 'puzzles', 'map', 'catalog']);
 
+/** Screens that always hide the tab bar (their own bottom controls need the room). */
+export const FULLSCREEN_IDS = Object.freeze(['matching', 'bench', 'commissions', 'grading', 'purify', 'packing',
+  'paint', 'naming', 'phase-beat']);
+
 export function createRouter({
   screens, root = null, tabbar = null, onChange = null, overlay = null, afterRender = null,
   tabs = TABS, home = 'workshop', history: hist = (typeof window !== 'undefined' ? window.history : null),
@@ -91,7 +95,8 @@ export function createRouter({
         if (b.dataset.tab === base) b.setAttribute('aria-current', 'page');
         else b.removeAttribute('aria-current');
       });
-      const full = stack.some((s) => (s.params && s.params.fullscreen) || mod(s.id).fullscreen);
+      const full = stack.some((s) => (s.params && s.params.fullscreen) || mod(s.id).fullscreen
+        || FULLSCREEN_IDS.includes(s.id));
       tabbar.hidden = !!full;
     }
   }

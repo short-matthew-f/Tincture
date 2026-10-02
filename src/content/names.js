@@ -88,11 +88,8 @@ const FAMILY_ADJECTIVES = {
   neutral: ['Stone', 'Quarry', 'Attic'],
 };
 
-/** "-ish" color words for the "Noun Adj-ish" pattern. */
-const ISH = {
-  red: 'Reddish', orange: 'Orangey', yellow: 'Yellowish', green: 'Greenish', teal: 'Tealish',
-  blue: 'Bluish', violet: 'Purplish', pink: 'Pinkish', neutral: 'Greyish',
-};
+/** Place words for the "Place Noun" pattern ("Abbey Marigold", "Quarry Slate"). */
+const PLACE_WORDS = ['Abbey', 'Orchard', 'Market', 'Quarry', 'Lantern', 'Attic', 'Ferry', 'Garden', 'Mill', 'Lighthouse'];
 
 // ---------------------------------------------------------------------------
 // Names
@@ -139,14 +136,16 @@ function candidate(hex, rng) {
     return adj + ' ' + noun;
   }
   if (r < 0.75) return pickFrom(rng, nouns); // "Noun"
-  return pickFrom(rng, nouns) + ' ' + ISH[family]; // "Noun Adj-ish"
+  const noun = pickFrom(rng, nouns);
+  const place = pickFrom(rng, PLACE_WORDS);
+  return noun.split(' ').includes(place) ? noun : place + ' ' + noun; // "Place Noun"
 }
 
 /**
  * suggestName(hex, rng, {taken}) -> a fresh name for a color.
  * Builds names from word lists keyed by hue family, lightness band
  * (dark/mid/light) and chroma band (muted/vivid) with three patterns
- * ("Adj Noun", "Noun", "Noun Adj-ish"). Never returns a name in `taken`
+ * ("Adj Noun", "Noun", "Place Noun"). Never returns a name in `taken`
  * (compared case-insensitively): retries, then appends a roman numeral.
  */
 export function suggestName(hex, rng, { taken } = {}) {

@@ -28,9 +28,16 @@ function hashString(s) {
   return h >>> 0;
 }
 
-/** Special markets hunters have found (ids). */
+/**
+ * Special markets hunters have found (ids). `state.discoveredMarkets` is the
+ * canonical list; `state.routesDiscovered` is the hunters' legacy mirror and is
+ * folded in so a market found by either path opens its route.
+ */
 export function discoveredMarkets(state) {
-  return state?.discoveredMarkets ?? [];
+  const a = Array.isArray(state?.discoveredMarkets) ? state.discoveredMarkets : [];
+  const b = Array.isArray(state?.routesDiscovered) ? state.routesDiscovered : [];
+  if (!b.length) return a;
+  return [...new Set([...a, ...b])];
 }
 
 /** discoverMarket(state, {routeId}) — called by hunters when a trip finds a special market. */

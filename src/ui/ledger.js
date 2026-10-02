@@ -239,13 +239,11 @@ function landStamp() {
 function checkCaughtUp() {
   if (stamped || !visible) return;
   if (lines.length && done.size < lines.length) return;
-  const s = S();
-  if (s.ledger && s.ledger.pending) {
-    const res = ctx.game.act(sim().ledger.markCaughtUp);
-    if (res && res.ok) landStamp();
-  } else if (sim().ledger.isAllCaughtUp(s)) {
-    landStamp();
-  }
+  // markCaughtUp clears the pending summary and, when nothing else waits, records
+  // the moment and emits 'allCaughtUp' (also when she handled things elsewhere first).
+  if (!sim().ledger.isAllCaughtUp(S()) && !(S().ledger && S().ledger.pending)) return;
+  const res = ctx.game.act(sim().ledger.markCaughtUp);
+  if (res && res.ok) landStamp();
 }
 
 function soundFor(ln) {

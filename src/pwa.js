@@ -59,6 +59,7 @@ export async function registerSW({ onUpdateReady } = {}) {
   } catch (e) {
     return null;
   }
+  if (!registration) return null; // some hosts (automation, locked-down browsers) resolve to nothing
   const watch = (worker) => {
     if (!worker) return;
     worker.addEventListener('statechange', () => {

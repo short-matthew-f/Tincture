@@ -17,7 +17,8 @@
  * `[data-coach="…"]` targets that screens expose (first-order, grading,
  * flow-meter, shelf, mill-room, map-window, gallery-door, close-up; on the
  * shelf the seeded cell `[data-cell="N"]`). A missing target shows a centered
- * card instead. Nothing blocks play: every mark has "Got it" (advances the
+ * card instead. Nothing blocks play: a pointing tag lets taps through to what
+ * lies under it (only its button is tappable), every mark has "Got it" (advances the
  * script) and steps also complete on their own from domain events and state.
  *
  * Pure helpers (fn(state, args, now), used through game.act and in tests):
@@ -74,7 +75,7 @@ export function seedFirstOrder(state, args = {}, now = 0) {
     recipe: [{ pigment: 'madder', weight: 1 }, { pigment: 'ochre', weight: 1 }],
     container: null,
     postedAt: now,
-    customer: base.customer || 'A neighbor',
+    customer: 'A neighbor',
     pay: Number.isFinite(base.pay) ? base.pay : 1,
     minutes: Number.isFinite(base.minutes) ? base.minutes : 3,
     tutorial: true,
@@ -151,8 +152,8 @@ const STEPS = {
   2: { screen: 'puzzles', targets: ['[data-coach="grading"]'],
     text: 'Try a Relaxed grading board: slide the tiles into a smooth gradient. A solved board can reveal a new tint.',
     away: 'A grading board is ready in Puzzles. Solved boards can reveal new tints.' },
-  3: { screen: 'workshop', targets: ['[data-coach="flow-meter"]'],
-    text: 'The flow meter glows at your slowest step. Tap it to buy the upgrade that helps most.',
+  3: { screen: 'workshop', targets: ['[data-screen="workshop"] [data-action="suggestion"]', '[data-coach="flow-meter"]'],
+    text: 'The flow meter above finds your slowest step, and this button fixes it: tap it for the upgrade that helps most.',
     away: 'Your workshop has coins to spend. The flow meter shows what to upgrade.' },
   4: { screen: 'shelf', targets: [],
     text: 'The Merge Shelf is open. Drag the left vial onto its twin and watch it chain.',
@@ -179,7 +180,8 @@ injectStyle('onboarding-style', `
 #coach-layer { position: fixed; inset: 0; z-index: 30; pointer-events: none; }
 #coach-layer .coach-tag { position: fixed; left: 0; top: 0; width: min(300px, calc(100vw - 24px)); pointer-events: auto; background: var(--paper); color: var(--ink); border-radius: 12px; padding: 12px 12px 10px; box-shadow: 0 3px 0 var(--shadow); display: flex; flex-direction: column; gap: 8px; font-size: 14px; line-height: 1.35; animation: pop-in 200ms var(--ease-out) both; }
 #coach-layer .coach-tag::before { content: ''; position: absolute; left: var(--arrow-x, 50%); width: 14px; height: 14px; background: var(--paper); transform: translateX(-50%) rotate(45deg); }
-#coach-layer .coach-tag:not(.card) { border: 2px solid var(--glow-ring); background: var(--glow); }
+#coach-layer .coach-tag:not(.card) { border: 2px solid var(--glow-ring); background: var(--glow); pointer-events: none; }
+#coach-layer .coach-tag:not(.card) button { pointer-events: auto; }
 #coach-layer .coach-tag:not(.card)::before { background: var(--glow); }
 #coach-layer .coach-tag.below::before { top: -9px; border-top: 2px solid var(--glow-ring); border-left: 2px solid var(--glow-ring); }
 #coach-layer .coach-tag.above::before { bottom: -9px; border-bottom: 2px solid var(--glow-ring); border-right: 2px solid var(--glow-ring); }
@@ -325,10 +327,25 @@ function visibleTarget(sel, topSection, tabbar) {
   try { list = document.querySelectorAll(sel); } catch (e) { return null; }
   for (const el of list) {
     if (!(topSection && topSection.contains(el)) && !(tabbar && tabbar.contains(el))) continue;
-    const r = el.getBoundingClientRect();
-    if (r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < innerHeight) return el;
+    const r = clipped(el);
+    if (r && r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < innerHeight) return el;
   }
   return null;
+}
+
+/** The part of el's box that its scroll container actually shows (null when none). */
+function clipped(el) {
+  const r = el.getBoundingClientRect();
+  const box = el.closest('.screen-body');
+  if (!box) return r;
+  const c = box.getBoundingClientRect();
+  const top = Math.max(r.top, c.top);
+  const bottom = Math.min(r.bottom, c.bottom);
+  const left = Math.max(r.left, c.left);
+  const right = Math.min(r.right, c.right);
+  // Mostly hidden under the header or the tab bar: not a target to point at.
+  if (bottom - top < Math.min(24, r.height * 0.6) || right - left <= 0) return null;
+  return { top, bottom, left, right, width: right - left, height: bottom - top };
 }
 
 function targetsFor(step, s) {
@@ -357,7 +374,7 @@ function place(target) {
   const tag = layer.querySelector('.coach-tag');
   const ring = layer.querySelector('.coach-ring');
   if (!tag || !target) return;
-  const r = target.getBoundingClientRect();
+  const r = clipped(target) || target.getBoundingClientRect();
   if (ring) {
     ring.style.left = `${Math.round(r.left - 4)}px`;
     ring.style.top = `${Math.round(r.top - 4)}px`;
@@ -390,13 +407,16 @@ function observe(s, top) {
   const def = STEPS[step];
   const topId = top && top.id;
   const modalOpen = !!(document.getElementById('modal') && !document.getElementById('modal').hidden);
-  if (!def || !topId || CEREMONIES.has(topId) || modalOpen || (def.ready && !def.ready(s))
+  const topSection = topId ? document.querySelector(`#app > [data-screen="${topId}"]`) : null;
+  // A screen's own sheet or dialog is up (recipe picker, row labels, ...): never cover it.
+  const dialogOpen = !!(topSection && [...topSection.querySelectorAll('[role="dialog"]')]
+    .some((el) => el.getClientRects().length > 0 && !el.closest('[hidden]')));
+  if (!def || !topId || CEREMONIES.has(topId) || modalOpen || dialogOpen || (def.ready && !def.ready(s))
     || (def.info && ctx.game.now() - (Number(o.flags.stepAt) || 0) < INFO_GAP_MS)
     || (step === 4 && !o.flags.chainSeeded)) {
     if (shownKey) clearLayer();
     return;
   }
-  const topSection = document.querySelector(`#app > [data-screen="${topId}"]`);
   const tabbar = document.getElementById('tabbar');
   let target = null;
   for (const sel of targetsFor(step, s)) {

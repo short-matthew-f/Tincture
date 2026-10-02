@@ -218,7 +218,8 @@ function paintedCount(p, cv) {
 }
 
 function costs(cv) {
-  const set = new Set((cv?.regions || []).map((r) => sim().gallery.regionCost(cv.id, r.id)).filter(Boolean));
+  const p = piece();
+  const set = new Set((cv?.regions || []).map((r) => sim().gallery.regionCost(state(), cv.id, r.id, p?.id)).filter(Boolean));
   return [...set].sort((a, b) => a - b);
 }
 
@@ -392,7 +393,7 @@ function applyPaint(rid, colorId, ev, { fromUndo = false } = {}) {
   if (!p || p.signedAt) return false;
   const region = cv.regions.find((r) => r.id === rid);
   if (!region) return false;
-  const cost = sim().gallery.regionCost(cv.id, rid);
+  const cost = sim().gallery.regionCost(state(), cv.id, rid, p.id);
   ui.lastCost = cost;
   const have = sim().storage.stockOf(state(), colorId);
   if (have + 1e-9 < cost) {
@@ -422,15 +423,6 @@ function applyPaint(rid, colorId, ev, { fromUndo = false } = {}) {
   return true;
 }
 
-const clearRegion = (st, { pieceId, regionId }) => {
-  const p = (st.gallery?.pieces || []).find((x) => x.id === pieceId);
-  if (!p || p.signedAt) return { ok: false };
-  delete p.regions[regionId];
-  if (p.purity) delete p.purity[regionId];
-  if (p.jars) delete p.jars[regionId];
-  return { ok: true };
-};
-
 function onUndo() {
   const p = piece();
   if (!p || p.signedAt || !ui.undo.length) return;
@@ -441,7 +433,7 @@ function onUndo() {
     if (ok) ui.undo.pop();
     else return;
   } else {
-    ctx.game.act(clearRegion, { pieceId: p.id, regionId: last.regionId });
+    ctx.game.act(sim().gallery.clearRegion, { pieceId: p.id, regionId: last.regionId });
     ui.undo.pop();
     ui.pending.add(last.regionId);
     const region = canvas().regions.find((r) => r.id === last.regionId);

@@ -1046,3 +1046,15 @@ The first playable build is Era 1 only, with all four puzzles, three hunters and
 - [ ] **Era 2 and 3 balance:** extend the simulation once Era 1 feels right in prototype.
 - [ ] **Art direction:** style is set (papercut, see Art direction); who is the commissioned artist for postcards and portraits?
 - [ ] **Platform:** PWA first, or straight to a native app for haptics and notifications?
+
+## Implementation deviations
+
+Where the Era 1 build knowingly differs from this spec, and why. Each is a tuning choice that keeps the spec's intent; revisit after playtests.
+
+| Area | Spec says | Build does | Why |
+| --- | --- | --- | --- |
+| Grading floors | Neighbor ΔE 12 / 8 / 5 / 3 (Relaxed / Steady / Tricky / Master) | Boards are validated against half those values, never below 2: 6 / 4 / 2.5 / 2 (`floorFor` in `src/puzzles/grading.js`); `TIERS` still carries the spec numbers | The spec values are not reachable as the *minimum* neighbor step inside sRGB at these grid sizes (an optimizer tops out near 11.5 / 6.5 / 4.8 / 3.9 before following her palette). Halving keeps the tier ordering and passes on well over 90% of boards |
+| Catalog spacing | Catalog colors are clearly distinct (planned ΔE 6 between any two Era 1 colors) | Era 1 colors are at least ΔE 5 apart (closest pair ΔE 5.09); event pages keep ΔE 6 (`ERA1_MIN_DELTA_E`, `tools/gen-catalog.js`) | The 84 mixable cells do not fit at ΔE 6 inside the paint-mixing gamut (the ceiling there is about 60 to 70 colors). ΔE 5 is still above the discovery radius (ΔE 4), so a mix never matches two cells |
+| Master bonus roll | 30% wild-hue fragment, 30% postcard, 40% event cosmetic or Seals | 30% fragment (paid as 30 Seals), 30% postcard from an unlocked region (else Seals), 40% 20 Seals | Fragments and event cosmetics have no inventory yet; Seals keep the value without a new system |
+| Heritage canvases | Unlock with Heritage | The first Renovate grants the Grand Rotunda Window, the third the Heritage Tapestry (granted on the next tick after the Renovate) | No Heritage tree node exists for canvases; tying them to Renovate count keeps them a reward for the loop |
+| Gallery paint cost | Each piece uses 20 minutes of production and hangs at 1.3× its cost | A whole canvas costs 2.5 minutes of her current mixer output (`PAINT_SECONDS = 150` in `src/sim/gallery.js`), split across regions by size and locked when the piece is started | The engine opens up to 24 walls and the painter uses valuable tints, so 20 minutes gave Gallery admission a 48% share of Casual income by day 14. At 2.5 minutes the share is about 15% (target 10 to 20%) |

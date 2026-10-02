@@ -133,6 +133,15 @@ export function flushTints(ctx, s, now = 0) {
     const r = ctx.sim.discovery.tryDiscover(s, { hex, method: 'grade' }, now);
     if (r) found.push({ colorId: r.colorId, hex: r.hex, name: r.name });
   }
+  // DESIGN.md "First ten minutes": her first Relaxed board always reveals a tint,
+  // so the nearest tint the board points at is hers even when it sits past ΔE 4.
+  const ob = s.onboarding && typeof s.onboarding === 'object' ? s.onboarding : null;
+  const first = !!(ob && !ob.done && !(ob.flags && ob.flags.firstTint));
+  if (!found.length && first && list.length) {
+    const r = ctx.sim.discovery.tryDiscover(s, { hex: list[0], method: 'grade', maxDE: Infinity }, now);
+    if (r) found.push({ colorId: r.colorId, hex: r.hex, name: r.name });
+  }
+  if (found.length && ob) ob.flags = { ...(ob.flags || {}), firstTint: true };
   return found;
 }
 

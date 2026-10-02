@@ -346,6 +346,8 @@ function doSwap(i, j, dragOff) {
   res.placed.forEach((p, k) => land(p, k));
   updateHead();
   if (res.solved && res.reward) {
+    // The one 'boardSolved' signal (onboarding step 2 listens): after the act, never from sim.
+    C.game.emit('boardSolved', { puzzle: 'grading', tier: res.reward.tier, tints: res.reward.tints || [] });
     G.celebrating = true; // from here render() leaves the (now cleared) board alone
     G.reward = res.reward;
     later(() => celebrate(res.reward), 220);

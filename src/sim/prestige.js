@@ -15,10 +15,16 @@ import {
 import { createInitialState } from '../state.js';
 import { emit } from './bus.js';
 import { recallAll } from './hunters.js';
+import { addCanvas } from './gallery.js';
 
 const fin = (x, d = 0) => (Number.isFinite(x) ? x : d);
 export const RENOVATE_PHASE = 3;
 const BASE_WALLS = 4;
+/** Heritage canvases (content unlock {type:'heritage'}): granted on the Nth Renovate. */
+export const HERITAGE_CANVASES = Object.freeze([
+  { renovations: 1, canvasId: 'grand-rotunda-window' },
+  { renovations: 3, canvasId: 'heritage-tapestry' },
+]);
 
 /** heritagePreview(state) -> Heritage a Renovate would grant now. */
 export function heritagePreview(state) {
@@ -87,6 +93,23 @@ export function buyHeritageNode(state, { id } = {}) {
   return { ok: true, id, level: lvl + 1, cost };
 }
 
+/**
+ * grantHeritageCanvases(state) -> [canvasId] newly granted. The first Renovate
+ * earns the Grand Rotunda Window, the third the Heritage Tapestry (content
+ * unlock {type:'heritage'}). Runs from the world tick right after a Renovate
+ * (and fixes up saves that renovated before this existed); idempotent.
+ */
+export function grantHeritageCanvases(state) {
+  const n = fin(state && state.lifetime && state.lifetime.renovations);
+  const out = [];
+  if (!(n > 0) || !state.gallery) return out;
+  const have = Array.isArray(state.gallery.canvases) ? state.gallery.canvases : [];
+  for (const hc of HERITAGE_CANVASES) {
+    if (n >= hc.renovations && !have.includes(hc.canvasId) && addCanvas(state, { canvasId: hc.canvasId }).ok) out.push(hc.canvasId);
+  }
+  return out;
+}
+
 /** Fresh starting stations for a new run, with Heritage tree bonuses applied. */
 export function startingStations(state, now) {
   const fresh = createInitialState(now, 1).stations;
@@ -94,8 +117,8 @@ export function startingStations(state, now) {
   for (let i = 0; i < fx.startVats; i++) fresh.vats.push({ level: 1, color: null });
   for (let i = 0; i < fx.startMixers; i++) fresh.mixers.push({ recipe: null, level: 1, progress: 0, rushedAt: 0, accident: null });
   // Sources her hunters opened stay open (back to level 1); only levels reset.
-  for (const id of Object.keys((state.stations && state.stations.sources) || {})) {
-    if (!fresh.sources[id]) fresh.sources[id] = { level: 1 };
+  for (const [id, v] of Object.entries((state.stations && state.stations.sources) || {})) {
+    if (!fresh.sources[id]) fresh.sources[id] = v && v.eventLoan ? { level: 1, eventLoan: v.eventLoan } : { level: 1 };
   }
   return fresh;
 }
@@ -140,13 +163,11 @@ export function renovate(state, a, b) {
   }
   for (const ap of fx.autoApprentices) if (state.apprentices) state.apprentices[ap] = true;
 
-  // Gallery persists; walls fall back to the base 4 until the rooms are rebought.
+  // Gallery persists whole: paintings, wall slots and canvases survive Renovate
+  // (DESIGN.md). Rebuying a room never adds walls twice: factory.syncSlots sets
+  // walls = max(current, rooms-derived).
   if (state.gallery) {
-    state.gallery.walls = BASE_WALLS;
-    const hung = Array.isArray(state.gallery.hung) ? state.gallery.hung : [];
-    const keep = hung.slice(0, BASE_WALLS);
-    for (const p of state.gallery.pieces || []) if (p && !keep.includes(p.id)) p.hung = false;
-    state.gallery.hung = keep;
+    state.gallery.walls = Math.max(BASE_WALLS, fin(state.gallery.walls, BASE_WALLS));
   }
 
   state.lastTick = now;

@@ -26,7 +26,7 @@
  * buy-grinder-kind, mixer-recipe, rush, buy-room, buy-apprentice,
  * steward-toggle, fleet-ship, fleet-route, buy-vehicle, almost, close-up,
  * close-up-reopen, locked.
- * data-coach targets: flow-meter, vats, shelf, map-window, gallery-door,
+ * data-coach targets: flow-meter, vats, shelf, map-window, gallery-door, mill-room,
  * close-up (plus bench, calendar, ledger-book, collect, loading-yard).
  */
 
@@ -303,6 +303,8 @@ const now = () => ctx.game.now();
 const sim = () => ctx.sim;
 const eco = () => ctx.sim.economy;
 const fmt = (n) => ctx.format.num(n);
+/** Per-second rates: small ones keep two decimals so a 0.04 jars/s shop never reads "0". */
+const fmtRate = (n) => (Number.isFinite(n) && n > 0 && n < 0.1 ? n.toFixed(2) : fmt(n));
 const fx = () => ctx.fx || defaultFx;
 const audio = () => ctx.audio || defaultAudio;
 const haptics = () => ctx.haptics || defaultHaptics;
@@ -567,7 +569,7 @@ function panelSpec(key, s, t) {
             key: `source:${id}`,
             lead: swatch(pig?.hex ?? hexOf(id), 36),
             title: def?.name ?? cap1(id),
-            sub: L > 0 ? `Level ${L} · ${fmt(out)} raw/s` : `Found by a hunter · ${fmt(out)} raw/s when built`,
+            sub: L > 0 ? `Level ${L} · ${fmtRate(out)} raw/s` : `Found by a hunter · ${fmtRate(out)} raw/s when built`,
             hint: L > 0 ? milestoneHint(L) : '',
             actions: buyBtn(L > 0 ? 'Level up' : 'Build', eco().stationCost('source', L, id), { 'data-action': 'buy', 'data-kind': 'source', 'data-id': id }),
           });
@@ -610,7 +612,7 @@ function panelSpec(key, s, t) {
             key: `mixer:${i}`,
             lead: h`<button type="button" class="ws-pickbtn" data-action="mixer-recipe" data-mixer="${i}" data-tap aria-label="Choose a recipe for mixer ${i + 1}">${lead}</button>`,
             title: m.recipe ? `Mixer ${i + 1}: ${nameOf(m.recipe)}` : `Mixer ${i + 1}: choose a recipe`,
-            sub: m.recipe ? `Level ${m.level} · ${fmt(rate)} jars/s · tap the swatch to change` : `Level ${m.level} · tap the swatch to pick what it makes`,
+            sub: m.recipe ? `Level ${m.level} · ${fmtRate(rate)} jars/s · tap the swatch to change` : `Level ${m.level} · tap the swatch to pick what it makes`,
             hint: milestoneHint(m.level),
             extra: h`${bar}${m.accident ? button('A happy accident! Tap to claim', { small: true, cls: 'ws-claim', attrs: { 'data-action': 'claim-accident', 'data-mixer': String(i) } }) : ''}`,
             actions: h`${buyBtn('Level up', eco().stationCost('mixer', m.level), { 'data-action': 'buy', 'data-kind': 'mixer', 'data-index': String(i) })}${button('Rush', { small: true, cls: 'ws-rush', attrs: { 'data-action': 'rush', 'data-mixer': String(i), 'data-rush': String(i) } })}`,
@@ -660,7 +662,7 @@ function panelSpec(key, s, t) {
           key: 'shop',
           lead: swatch('#C9A277', 36),
           title: 'Shop counter',
-          sub: `Level ${L} · sells ${fmt(eco().stationOutput('shop', L))} jars/s · prices +${Math.round((eco().shopPriceBonus(s) - 1) * 100)}%`,
+          sub: `Level ${L} · sells ${fmtRate(eco().stationOutput('shop', L))} jars/s · prices +${Math.round((eco().shopPriceBonus(s) - 1) * 100)}%`,
           hint: milestoneHint(L, 'selling'),
           actions: buyBtn('Level up', eco().stationCost('shop', L), { 'data-action': 'buy', 'data-kind': 'shop' }),
         }),
@@ -720,8 +722,8 @@ function patchHead(s, t, c) {
 
   const m = c.meter;
   const set = (el, v) => { if (el.textContent !== v) el.textContent = v; };
-  set(refs.segMake, `${fmt(m.make.rate)} jars/s`);
-  set(refs.segShip, `${fmt(m.ship.rate)} jars/s`);
+  set(refs.segMake, `${fmtRate(m.make.rate)} jars/s`);
+  set(refs.segShip, `${fmtRate(m.ship.rate)} jars/s`);
   const full = sim().storage.isFull(s);
   const fillMs = sim().storage.fillTimeMs(s);
   set(refs.segStore, full ? 'Full' : Number.isFinite(fillMs) ? `Full in ${ctx.format.duration(fillMs).replace(/(\d) ([dhms])/g, '$1$2')}` : `Holds ${fmt(c.cap.total)}`);
@@ -812,7 +814,7 @@ function patchScene(s, t) {
       const svg = art.querySelector('svg');
       if (svg) svg.setAttribute('aria-hidden', 'true');
     }
-    let name = v.color ? nameOf(v.color) : 'Pick color';
+    let name = v.color ? nameOf(v.color) : 'Choose';
     if (name.length > 9) name = `${name.slice(0, 8)}…`;
     if (lab.textContent !== name) {
       lab.textContent = name;
@@ -948,7 +950,7 @@ function patchRooms(s) {
     const req = need > 0 ? `${need} more color${need === 1 ? '' : 's'} to open` : lockedPhase ? `Opens in phase ${r.phase}` : 'Ready to open';
     const blocked = need > 0 || lockedPhase;
     return h`<div class="card" data-coach="rooms"><div class="card-title">Next room</div>
-<div class="ws-row" style="border-top:0;padding:4px 0" data-row="room:${r.id}"><div class="ws-main"><div class="ws-t serif" style="font-family:var(--font-display);font-size:17px">${r.name}</div><div class="ws-s">${r.blurb}</div><div class="ws-hint">${req}</div></div>
+<div class="ws-row" style="border-top:0;padding:4px 0" data-row="room:${r.id}"${r.id === 'mill-room' ? raw(' data-coach="mill-room"') : ''}><div class="ws-main"><div class="ws-t serif" style="font-family:var(--font-display);font-size:17px">${r.name}</div><div class="ws-s">${r.blurb}</div><div class="ws-hint">${req}</div></div>
 <div class="ws-actions">${buyBtn(blocked ? 'Open soon' : 'Open', r.cost, { 'data-action': 'buy-room', 'data-id': r.id, 'data-lock': blocked ? '1' : '0' })}</div></div></div>`;
   });
 }
@@ -1098,6 +1100,41 @@ function openRecipeSheet(mi) {
     onClose() { if (sheet && sheet.api === api) sheet = null; },
   });
   sheet = { api, kind: 'recipe' };
+}
+
+/**
+ * Catalog "Assign to mixer": an idle mixer takes the color straight away;
+ * when every mixer is busy she picks which one switches.
+ */
+function assignFromCatalog(colorId) {
+  const s = S();
+  const mixers = (s.stations && s.stations.mixers) || [];
+  if (!colorId || !mixers.length) return;
+  const apply = (mi) => {
+    const res = act(sim().factory.assignRecipe, { mixer: mi, colorId });
+    if (res && res.ok) {
+      audio().cork();
+      renderAll();
+      fx().squash(root.querySelector(`[data-row="mixer:${mi}"]`));
+      toast(`Mixer ${mi + 1} is making ${nameOf(colorId)}`, { hex: hexOf(colorId) });
+    } else toast('That recipe needs a pigment you do not have a source for yet.');
+  };
+  const already = mixers.findIndex((m) => m && m.recipe === colorId);
+  if (already >= 0) { toast(`Mixer ${already + 1} is already making ${nameOf(colorId)}`, { hex: hexOf(colorId) }); return; }
+  const idle = mixers.findIndex((m) => m && !m.recipe);
+  if (idle >= 0 || mixers.length === 1) { apply(idle >= 0 ? idle : 0); return; }
+  closeSheet();
+  const api = openSheet(root, {
+    title: `Which mixer makes ${nameOf(colorId)}?`,
+    html: String(h`${mixers.map((m, mi) => pickRow({ action: 'assign-to', attrs: { 'data-mixer': String(mi) }, lead: swatch(hexOf(m.recipe), 36), title: `Mixer ${mi + 1}`, sub: m.recipe ? `Making ${nameOf(m.recipe)} now` : 'Resting' }))}`),
+    onAction(name, el) {
+      if (name !== 'assign-to') return;
+      closeSheet();
+      apply(Number(el.dataset.mixer) || 0);
+    },
+    onClose() { if (sheet && sheet.api === api) sheet = null; },
+  });
+  sheet = { api, kind: 'assign' };
 }
 
 function openVatSheet(vi) {
@@ -1618,6 +1655,7 @@ const screen = {
     ticker = setInterval(() => { if (visible && !pointerDown) renderAll(); }, 1000);
     if (params.panel || params.upgrade) focusPanel(params.panel || params.upgrade);
     if (params.sheet === 'yard') openYardSheet();
+    if (params.assign) assignFromCatalog(params.assign);
   },
 
   hide() {

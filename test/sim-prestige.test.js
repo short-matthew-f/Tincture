@@ -71,7 +71,7 @@ test('renovate resets the factory and keeps catalog, gallery, essence, hunters',
   assert.equal(s.gallery.unlocked, true);
   assert.equal(s.gallery.pieces.length, 1);
   assert.deepEqual(s.gallery.canvases, ['harbor-window']);
-  assert.equal(s.gallery.walls, 4);
+  assert.equal(s.gallery.walls, 8); // wall slots survive Renovate
   assert.equal(s.seals, 77);
   assert.equal(s.hunters.roster[0].level, 3);
   assert.ok(s.album.cards['meadow-1']);
@@ -98,4 +98,44 @@ test('Heritage tree: buy nodes, starting bonuses apply on the next run', () => {
   renovate(s, NOW);
   assert.equal(s.coins, 2500);
   assert.equal(s.stations.vats.length, 4);
+});
+
+test('Heritage canvases: the first Renovate grants the Rotunda Window, the third the Tapestry (via tick)', async () => {
+  const { tick } = await import('../src/sim/index.js');
+  const { grantHeritageCanvases } = await import('../src/sim/prestige.js');
+  const s = createInitialState(NOW, 9);
+  s.gallery.canvases = ['harbor-window'];
+  assert.deepEqual(grantHeritageCanvases(s), []);
+  s.lifetime.renovations = 1;
+  tick(s, NOW + 1000);
+  assert.ok(s.gallery.canvases.includes('grand-rotunda-window'));
+  assert.ok(!s.gallery.canvases.includes('heritage-tapestry'));
+  s.lifetime.renovations = 3;
+  assert.deepEqual(grantHeritageCanvases(s), ['heritage-tapestry']);
+  assert.deepEqual(grantHeritageCanvases(s), []);
+});
+
+test('wall slots survive Renovate and rebuying wall rooms does not add them twice', async () => {
+  const { buyRoom } = await import('../src/sim/factory.js');
+  const { ROOMS, slotsForRooms } = await import('../src/content/rooms.js');
+  const s = createInitialState(NOW, 12);
+  s.phase = 3;
+  s.runEarned = 4e8;
+  s.gallery.unlocked = true;
+  s.gallery.walls = 10;
+  s.gallery.pieces = [1, 2, 3, 4, 5, 6].map((n) => ({ id: 'p' + n, canvas: 'harbor-window', title: 'P' + n, regions: {}, signedAt: NOW, value: 10, hung: true }));
+  s.gallery.hung = s.gallery.pieces.map((p) => p.id);
+  assert.equal(renovate(s, NOW).ok, true);
+  assert.equal(s.gallery.walls, 10);
+  assert.equal(s.gallery.hung.length, 6, 'hung paintings stay on their walls');
+  // Rebuy every room that grants walls: walls stay max(current, rooms-derived), never summed again.
+  const wallRooms = ROOMS.filter((r) => r.adds && r.adds.walls > 0);
+  assert.ok(wallRooms.length > 0);
+  for (let i = 0; i < 120; i++) s.catalog.discovered['fake-' + i] = { at: NOW, name: 'F' + i, custom: false, essence: 0 };
+  s.phase = 3;
+  for (const r of ROOMS) { s.coins = 1e15; buyRoom(s, { id: r.id }, NOW); }
+  const derived = slotsForRooms(s.rooms).walls;
+  assert.ok(derived > 10);
+  assert.equal(s.gallery.walls, derived);
+  assert.equal(s.gallery.walls, slotsForRooms(ROOMS.map((r) => r.id)).walls, 'not summed twice');
 });

@@ -10,7 +10,7 @@
  * that is missing or fails to load gets a "Coming soon" placeholder, so one
  * broken screen never takes the app down.
  *
- * Debug handle: window.tincture = {game, ctx, router}.
+ * Debug handle: window.tincture = {game, ctx, router, debug: {advance(ms), discover(colorId)}}.
  */
 
 import { Game } from './game.js';
@@ -247,6 +247,8 @@ async function boot() {
       case 'room': queueCeremony('phase-beat', { ...p, kind: 'room' }); break;
       case 'renovate': queueCeremony('phase-beat', { ...p, kind: 'renovate' }); break;
       case 'allCaughtUp':
+        // The Morning Ledger lands its own stamp (sound, haptic, ring); only celebrate elsewhere.
+        if (router.isOpen('ledger')) break;
         audio.stamp();
         haptics.medium();
         break;
@@ -342,6 +344,8 @@ async function boot() {
   game.on('eventStep', (p, meta) => { if (!quiet(meta)) overlay.toast('A new event reward is ready'); });
   game.on('commissionDone', (p, meta) => {
     if (quiet(meta)) return;
+    // The Commissions screen runs its own "Commission complete!" ceremony; never a second one.
+    if (router.isOpen('commissions')) return;
     const c = content.getCommission && content.getCommission(p.id);
     audio.chord([0.4, 0.55, 0.7, 0.85], 1);
     haptics.success();
@@ -406,8 +410,45 @@ async function boot() {
     },
   });
 
-  window.tincture = { game, ctx, router };
+  window.tincture = { game, ctx, router, debug: makeDebug(game) };
   return { game, ctx, router };
+}
+
+/**
+ * Debug helpers for tests and the console (window.tincture.debug). Never used by
+ * the game itself.
+ *  - advance(ms): pretend `ms` passed while away. Shifts the loop clocks and the
+ *    schedules that wait on absolute times (order refresh, spillover, collector,
+ *    trips) back by `ms`, then resumes (>= 60 s runs the offline catch-up and
+ *    opens the Morning Ledger) or ticks.
+ *  - discover(colorId): discover a color through the real sim (the naming
+ *    ceremony follows as in play).
+ */
+function makeDebug(game) {
+  const back = (o, k, ms) => { if (o && Number.isFinite(o[k]) && o[k] > 0) o[k] -= ms; };
+  return {
+    advance(ms) {
+      const s = game.state;
+      const d = Math.max(0, Number(ms) || 0);
+      back(s, 'lastTick', d);
+      back(s, 'lastSeenAt', d);
+      back(s.orders, 'nextRefreshAt', d);
+      back(s.shelf, 'nextSpilloverAt', d);
+      back(s.gallery, 'nextCollectorAt', d);
+      back(s.gallery, 'lastAdmissionAt', d);
+      back(s.onboarding && s.onboarding.flags, 'stepAt', d); // coach marks that wait after the previous step
+      for (const hn of (s.hunters && s.hunters.roster) || []) {
+        if (hn && hn.trip) { back(hn.trip, 'departedAt', d); back(hn.trip, 'returnsAt', d); back(hn.trip, 'choiceOfferedAt', d); }
+      }
+      for (const v of (s.stations && s.stations.fleet) || []) { back(v, 'departedAt', d); back(v, 'arrivesAt', d); }
+      const summary = game.resume();
+      if (!summary) game.tick();
+      return summary;
+    },
+    discover(colorId) {
+      return game.act(sim.discover, { colorId, method: 'debug' });
+    },
+  };
 }
 
 overlay.injectStyle('app-style', `

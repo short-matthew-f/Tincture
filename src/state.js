@@ -113,7 +113,8 @@ export function createInitialState(now = 0, seed) {
     eventProgress: {},
     commissions: { open: [], done: [] },
     ledger: { pending: null, allCaughtUpAt: now },
-    stats: { sessionStartedAt: now, lastCloseUpAt: 0 },
+    stats: { sessionStartedAt: now, lastCloseUpAt: 0, fastSolves: 0 },
+    activePuzzles: {},         // puzzle id -> in-progress board (grading, purify, ...)
     flags: {},                 // sim bookkeeping (storageFull edge, firstTickAt, ...)
     pendingCollect: 0,         // shop till waiting for Collect
     discoveredMarkets: [],     // route ids found by the Trader / markets
@@ -182,6 +183,13 @@ export function mergeDefaults(state, now = 0) {
   for (const key of ['discoveredMarkets', 'routesDiscovered', 'cosmetics', 'trophies']) {
     if (!Array.isArray(state[key])) state[key] = [];
   }
+  // One list of found markets: fold the hunters' legacy mirror into the canonical list.
+  for (const id of state.routesDiscovered) if (!state.discoveredMarkets.includes(id)) state.discoveredMarkets.push(id);
+  if (!isPlainObject(state.stats)) state.stats = { ...defaults.stats };
+  for (const key of Object.keys(defaults.stats)) {
+    if (state.stats[key] === undefined) state.stats[key] = defaults.stats[key];
+  }
+  if (!isPlainObject(state.activePuzzles)) state.activePuzzles = {};
   if (!Array.isArray(state._events)) state._events = [];
   return state;
 }

@@ -44,10 +44,22 @@ function toHtml(v) {
   return escapeHtml(v);
 }
 
-/** Tagged template: h`<b>${userText}</b>` escapes userText. Returns a Safe. */
+/** True when the template text so far ends inside a quoted attribute value (`name="`). */
+const ATTR_OPEN_RE = /=\s*["']$/;
+
+/**
+ * Tagged template: h`<b>${userText}</b>` escapes userText. Returns a Safe.
+ * Booleans render as nothing in content position (so `${cond && h`...`}`
+ * works) but as "true"/"false" inside a quoted attribute value, so
+ * `aria-pressed="${a === b}"` says what it means.
+ */
 export function h(strings, ...values) {
   let out = strings[0];
-  for (let i = 0; i < values.length; i++) out += toHtml(values[i]) + strings[i + 1];
+  for (let i = 0; i < values.length; i++) {
+    const v = values[i];
+    const inAttr = typeof v === 'boolean' && ATTR_OPEN_RE.test(strings[i]);
+    out += (inAttr ? String(v) : toHtml(v)) + strings[i + 1];
+  }
   return new Safe(out);
 }
 

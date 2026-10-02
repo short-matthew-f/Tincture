@@ -552,10 +552,10 @@ export function sellStock(state, args = {}, now) {
   return { coins, jars: got.taken };
 }
 
-/** unlockSource(state, {id}) — a hunter brought it home: the station appears at level 0 (build it with buyUpgrade). */
+/** unlockSource(state, {id}) — a hunter brought it home: the station appears at level 1, as when hunters.resolveReturns unlocks one. */
 export function unlockSource(state, args = {}) {
   if (!SOURCES_BY_ID[args.id]) return { ok: false };
-  if (!state.stations.sources[args.id]) state.stations.sources[args.id] = { level: 0 };
+  if (!state.stations.sources[args.id]) state.stations.sources[args.id] = { level: 1 };
   if (state.raw && state.raw[args.id] === undefined) state.raw[args.id] = 0;
   return { ok: true };
 }

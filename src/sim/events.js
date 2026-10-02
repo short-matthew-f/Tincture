@@ -10,6 +10,7 @@
 
 import { eventForWeek, getEvent, trackStepsReached, POINTS_PER } from '../content/events.js';
 import { EVENT_REGION_IDS } from '../content/regions.js';
+import { getSource } from '../content/sources.js';
 import { isoWeekKey } from '../format.js';
 import { stateRng, pick } from '../rng.js';
 import { emit } from './bus.js';
@@ -51,8 +52,27 @@ export function currentEvent(state, now = 0) {
     const anyHunters = Array.isArray(h.roster) && h.roster.length > 0;
     if (anyHunters && !h.regionsUnlocked.includes(ev.region)) h.regionsUnlocked.push(ev.region);
   }
+  applySourceTwist(state, ev);
   emit(state, 'eventStarted', { event: ev.id });
   return state.event;
+}
+
+/**
+ * Twist `sourceUnlock` (Deep Sea: "Murex Cove opens for the week"): lends the
+ * source station for the event's week, marked `eventLoan`. At the next week
+ * change a loaned station goes back unless a hunter has since opened it for
+ * good (hunters.js drops the mark then).
+ */
+function applySourceTwist(state, ev) {
+  const st = state.stations && state.stations.sources;
+  if (!st) return;
+  for (const [id, v] of Object.entries(st)) if (v && v.eventLoan && v.eventLoan !== ev.id) delete st[id];
+  const sid = ev.twist && ev.twist.rules && ev.twist.rules.sourceUnlock;
+  if (!sid || !getSource(sid) || st[sid]) return;
+  st[sid] = { level: 1, eventLoan: ev.id };
+  if (state.raw && state.raw[sid] === undefined) state.raw[sid] = 0;
+  if (state.pigment && state.pigment[sid] === undefined) state.pigment[sid] = 0;
+  emit(state, 'sourceUnlocked', { sourceId: sid, event: ev.id });
 }
 
 function activeEventDef(state) {

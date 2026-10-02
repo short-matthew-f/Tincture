@@ -93,7 +93,7 @@ export function rollNumber(elm, from, to, { ms = 500, format = (v) => Math.round
     };
     rolls.set(elm, job);
     const step = (now) => {
-      const t = Math.min(1, (now - start) / ms);
+      const t = Math.max(0, Math.min(1, (now - start) / ms));
       elm.textContent = format(a + (b - a) * easeOutQuart(t));
       if (t < 1) raf = requestAnimationFrame(step);
       else { rolls.delete(elm); elm.textContent = format(b); resolve(); }
@@ -192,7 +192,8 @@ export function pourFill(svgEl, hex, { x, y, clientX, clientY, ms = 380, keep = 
   return new Promise((resolve) => {
     const start = performance.now();
     const step = (now) => {
-      const t = Math.min(1, (now - start) / ms);
+      // rAF's timestamp can precede performance.now() on the first frame: clamp at 0.
+      const t = Math.max(0, Math.min(1, (now - start) / ms));
       c.setAttribute('r', (maxR * easeOutQuart(t)).toFixed(2));
       if (t < 1) requestAnimationFrame(step);
       else { done(); resolve(); }

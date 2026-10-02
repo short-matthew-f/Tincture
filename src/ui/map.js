@@ -448,16 +448,9 @@ function postcardTitle(ctx, id) {
   return c ? c.title : 'a postcard';
 }
 
-/** Postcard chance for one roll (replicates sim's private cardChance; level 10 adds a second roll). */
+/** Postcard chance for a trip (sim.hunters.cardChance per roll; level 10 adds a second roll). */
 function postcardOdds(ctx, hunter, regionId, duration) {
-  const d = ctx.content.DURATIONS[duration];
-  if (!d) return 0;
-  const traits = [hunter && hunter.trait, hunter && hunter.trait2]
-    .filter((t, i, a) => t && a.indexOf(t) === i).map((t) => ctx.content.TRAITS[t]).filter(Boolean);
-  let rel = 1;
-  for (const t of traits) if (t.regions && t.regions.includes(regionId)) rel += t.regionOdds || 0;
-  for (const t of traits) rel += t.cardBonus || 0;
-  const p = Math.min(1, d.card * rel);
+  const p = ctx.sim.hunters.cardChance(hunter, regionId, duration, {});
   const rolls = 1 + (hunter && ctx.content.perksAtLevel(hunter.level ?? 1).some((x) => x.extraPostcardRolls) ? 1 : 0);
   return 1 - Math.pow(1 - p, rolls);
 }

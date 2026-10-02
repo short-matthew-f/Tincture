@@ -14,6 +14,7 @@ import { tickFactory, checkPhase } from './factory.js';
 import { resolveReturns, unlockRegions } from './hunters.js';
 import { refreshOrders, autoFillOrders } from './orders.js';
 import { refresh as refreshCommissions } from './commissions.js';
+import { grantHeritageCanvases } from './prestige.js';
 
 export * from './economy.js';
 export * from './factory.js';
@@ -61,7 +62,7 @@ export { ESSENCE_MAX } from './economy.js';
 /**
  * tick(state, now) — the world step: event week, quest rolls, factory (production,
  * trips, spillover, admission, accidents), hunter returns, orders, commissions,
- * region unlocks, phase gates. Returns {hunters: returnSummaries}.
+ * region unlocks, phase gates, Heritage canvases. Returns {hunters: returnSummaries}.
  */
 export function tick(state, now) {
   if (!state || !Number.isFinite(now)) return { hunters: [] };
@@ -75,6 +76,8 @@ export function tick(state, now) {
   refreshCommissions(state, now);
   unlockRegions(state, {}, now);
   checkPhase(state, {}, now);
+  grantHeritageCanvases(state);
+  // Visiting collectors are scheduled by gallery.tickAdmission (inside tickFactory).
   state.lastTick = Math.max(Number.isFinite(state.lastTick) ? state.lastTick : now, now);
   return { hunters: returns };
 }

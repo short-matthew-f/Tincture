@@ -153,7 +153,7 @@ export function buildReturnSummary(state, before, now = 0) {
   const qr = questsReady(state);
   if (qr) lines.push({ icon: 'quest', text: qr === 1 ? 'A quest is ready to claim' : `${qr} quests are ready to claim`, screen: 'quests' });
   const steps = claimableSteps(state).length;
-  if (steps) lines.push({ icon: 'event', text: steps === 1 ? 'An event reward is ready' : `${steps} event rewards are ready`, screen: 'quests', params: { tab: 'event' } });
+  if (steps) lines.push({ icon: 'event', text: steps === 1 ? 'An event reward is ready' : `${steps} event rewards are ready`, screen: 'quests', params: { section: 'event' } });
 
   // Pinned goals with a suggested next step.
   for (const id of ((state.catalog && state.catalog.pinned) || []).slice(0, 3)) {

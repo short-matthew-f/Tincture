@@ -18,7 +18,7 @@ export default {
 | --- | --- |
 | `ctx.game.state` | the live state object (read-only from the UI) |
 | `ctx.game.act(fn, args)` | runs `fn(state, args, now)` from the sim, saves, emits `change`, returns fn's result |
-| `ctx.game.on(type, fn)` / `off` | events: `'change'` (state), and domain events drained from `state._events` (see `src/sim/bus.js` emit calls: `discover`, `accident`, `milestone`, `chain`, `essence`, `golden`, `collector`, `phase`, `room`, `storageFull`, `hunterReturn`, `postcard`, `setComplete`, `questDone`, `weeklyDone`, `eventStep`, `commissionDone`, `renovate`, `allCaughtUp`, `scoutChoice`, `sourceUnlocked`, `comingSoon`) |
+| `ctx.game.on(type, fn)` / `off` | events: `'change'` (state), and domain events drained from `state._events` (see `src/sim/bus.js` emit calls: `discover`, `accident`, `milestone`, `chain`, `essence`, `golden`, `collector`, `phase`, `room`, `storageFull`, `hunterReturn`, `postcard`, `setComplete`, `questDone`, `weeklyDone`, `eventStep`, `commissionDone`, `renovate`, `allCaughtUp`, `scoutChoice`, `sourceUnlocked`, `comingSoon`); screen-emitted (`ctx.game.emit`): `boardSolved` (grading, after its act), `named`, `namingDone` |
 | `ctx.game.now()` | current time ms |
 | `ctx.game.setSetting(key, value)`, `exportSave()`, `importSave(text)`, `reset()` | settings/save helpers |
 | `ctx.sim` | the namespace `import * as sim from '../sim/index.js'` (all sim functions; also per-module namespaces `sim.factory`, `sim.shelf`, `sim.hunters`, …). Note: use `sim.hunters.unlocked` / `sim.shelf.unlocked`, never a bare `unlocked`. |

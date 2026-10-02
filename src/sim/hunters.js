@@ -356,9 +356,10 @@ export function haulPerPigment(state, hunter, regionId, duration, pigmentId) {
   return fin(mult);
 }
 
-/** Card odds for a hunter on a trip (base x trait, plus scouting). */
-function cardChance(hunter, regionId, duration, scout) {
+/** Card odds for one roll on a trip (base x trait, plus scouting). Exported for the map's send sheet. */
+export function cardChance(hunter, regionId, duration, scout = {}) {
   const d = DURATIONS[duration];
+  if (!d) return 0;
   const traits = traitsOf(hunter);
   let rel = regionOddsMult(traits, regionId);
   for (const t of traits) rel += t.cardBonus || 0;
@@ -468,10 +469,11 @@ function resolveOne(state, hunter, now) {
 
   // 2. A new source station (one per return, Era 1 cap).
   if (region && region.sourcesUnlocked.length) {
-    const owned = Object.keys(state.stations.sources || {});
+    const srcs = state.stations.sources || {};
+    const owned = Object.keys(srcs).filter((sid) => !(srcs[sid] && srcs[sid].eventLoan)); // event loans are not hers yet
     const next = region.sourcesUnlocked.find((sid) => !owned.includes(sid) && getSource(sid));
     if (next && owned.length < MAX_SOURCES_ERA1) {
-      state.stations.sources[next] = { level: 1 };
+      state.stations.sources[next] = { level: Math.max(1, Number(srcs[next] && srcs[next].level) || 0) };
       if (state.raw[next] === undefined) state.raw[next] = 0;
       if (state.pigment && state.pigment[next] === undefined) state.pigment[next] = 0;
       summary.sourceUnlocked = next;
