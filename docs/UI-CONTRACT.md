@@ -25,10 +25,10 @@ export default {
 | `ctx.puzzles` | `import * as puzzles from '../puzzles/index.js'` → `puzzles.grading`, `puzzles.matching`, `puzzles.purify`, `puzzles.packing` |
 | `ctx.content` | one object with every content export merged: `CATALOG`, `getColor`, `PIGMENTS`, `getPigment`, `DROPS`, `ROOMS`, `getRoom`, `STATION_KINDS`, `ROUTES`, `REGIONS`, `HUNTERS`, `TRAITS`, `DURATIONS`, `POSTCARDS`, `cardsForRegion`, `CANVASES`, `getCanvas`, `APPRENTICES`, `COMMISSIONS`, `QUEST_TYPES`, `EVENTS`, `HERITAGE_TREE`, `suggestName`, `VISITOR_COMMENTS`, … (see `src/content/*.js`) |
 | `ctx.color` | `import * as color from '../color.js'` |
-| `ctx.format` | `{ num(n) (honors settings.notation), duration(ms), countdown(ms), rate(perSec), pct(x) }` |
+| `ctx.format` | `{ num(n) (honors settings.notation), duration(ms), countdown(ms), until(ms) (rounded up to the minute: "about 9 m"), rate(perSec), pct(x) }` |
 | `ctx.audio`, `ctx.haptics`, `ctx.fx`, `ctx.kit` | `src/ui/audio.js`, `haptics.js`, `fx.js`, `kit.js` (see their exports) |
 | `ctx.navigate(id, params)` | push a screen (tabs replace the stack; overlays stack) |
-| `ctx.back()` | pop the stack (falls back to workshop) |
+| `ctx.back()` | pop the stack (an overlay with nothing beneath it returns to its home tab) |
 | `ctx.toast(text, {hex, ms})` | small paper toast |
 | `ctx.modal({title, body (html string), actions:[{label, variant, value}], dismissable}) -> Promise<value>` | centered modal |
 | `ctx.sheet({title, body, actions}) -> Promise<value>` | bottom sheet |

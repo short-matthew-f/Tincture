@@ -166,7 +166,6 @@ export function ensureStyles() {
 @keyframes ws-shut { 0% { height: 0; } 70%, 100% { height: 34%; } }
 .ws-switch-row { display: flex; align-items: center; gap: 12px; min-height: 44px; }
 .ws-switch-row .switch { position: relative; }
-.ws-switch-row .switch::after { content: ''; position: absolute; inset: -8px -6px; }
 .ws-need { font-size: 13px; color: var(--ink-soft); }
 `;
   d.head.appendChild(s);
