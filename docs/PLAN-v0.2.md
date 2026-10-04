@@ -10,8 +10,8 @@ No code has changed yet. This is the work order for the next session.
 | 1 | Each subgame needs its own onboarding and should flow into the next | Onboarding only covers the first ten minutes on the workshop; the puzzle, shelf, map, gallery and commission screens open cold with no "how this works" or "what's next" |
 | 2 | Unlocks should cost money, not just colors | Rooms cost coins + colors, but the shelf (5 colors), Gallery door (20 colors + room), hunters (10 colors) and puzzle tiers are color-count gates only |
 | 3 | Things open too fast | Shelf at 5 colors, hunters at 10, Gallery at 20, with discovery handing out 2–3 colors per board. Phase 2 arrives on day 0.2 for Casual in the balance sim (the design doc wanted end of day 1) |
-| 4 | Vial merging has too many colors, scrolls, is overwhelming | Shelf is 5×7 = 35 cells and taller than a phone screen; spillover picks a random *active* color every 10 minutes, so every assigned recipe seeds the shelf; no cap on distinct colors |
-| 5 | Vial sorting (purify) spawns too fast, can't be cleared; ends too early; needs difficulties | Muddy chance is 5% + 1%/mixer level per batch, batches are 125 s, pending cap 6 → with two mixers a new batch every ~20–40 min forever. `isSolved` counts a tube as done when it is uniform even if not full; no tier picker for purify |
+| 4 | Vial merging has too many colors, scrolls, is overwhelming | Shelf is 5×7 = 35 cells and taller than a phone screen; spillover picks a random *active* color every 10 minutes, so every assigned recipe seeds the shelf; no cap on distinct colors. Direction: 6×6, five colors, match-style lines of six |
+| 5 | Vial sorting (purify) spawns too fast (one a second), can't be cleared; ends too early; needs difficulties | Muddy chance is rolled per batch while batch time shrinks as mixers level, so a leveled mixer spawns one every few seconds (bug). Pending cap 6. `isSolved` counts a tube as done when it is uniform even if not full; no tier picker for purify |
 | 6 | Only one color available to mix and to paint with | **One mixer slot at start**; the second comes with the Mill Room (500 coins, 10 colors); the paint palette lists only colors with jars in stock; the shop sells stock down. So the easel shows the one color the single mixer makes |
 | 7 | No way to discard or sell a painting | `gallery.discardPiece` exists in the sim for unsigned pieces; nothing in the UI calls it, and signed pieces have no sell/discard path at all |
 
@@ -60,36 +60,64 @@ to see the price" before. Nothing opens by itself.
 6. **Balance:** re-run `tools/balance/run.js`, keep the always-progress
    test green, re-tune starter costs so the first session still buys ~8
    upgrades. Update TUNING.md and the pacing table in DESIGN.md.
-7. **Tests:** unlock gating (`canBuyUnlock`, reveal vs cost), start state
+7. **Split the workshop page.** The home screen carries the scene, the
+   flow meter, every station panel, rooms, apprentices, fleet and the
+   Almost-there card on one scroll. Split it: the home screen keeps the
+   scene, the flow meter, Collect and Almost there; a segmented control
+   under the scene opens one section at a time: **Stations** (sources,
+   grinders, mixers, vats, cellar, shop), **Shipping** (fleet, routes,
+   yard), **Rooms & staff** (rooms, apprentices, Steward). The ledger's
+   deep links pass `{panel}` as they do now and land on the right section.
+8. **Tests:** unlock gating (`canBuyUnlock`, reveal vs cost), start state
    has 2 mixers, paint palette lists greyed colors, balance assertions.
 
-### Theme B — Merge Shelf (item 4)   → 0.2.1
+### Theme B — Merge Shelf as a match game (item 4)   → 0.2.1
 
-1. **Fits on one screen.** 4 columns × 5 rows = 20 cells, sized to the
-   viewport height (no page scroll on a 390×844 phone, tab bar visible).
-   Expansion goes 4×5 → 5×5 → 5×6, each a coin purchase.
-2. **Fewer colors on the shelf.** Spillover draws from at most **3 colors**:
-   the mixers' current recipes, capped at the three with the most stock.
-   Add a "shelf colors" chooser (a row of 3 chips above the shelf) so she
-   picks which colors the shelf receives; default = the mixers' recipes.
-3. **Shelf never floods.** Spillover pauses when the shelf has fewer than
-   4 empty cells (was: stops only when full), so there is always room to
-   merge.
-4. **Onboarding on the shelf itself** (Theme D does the general pattern;
-   this one is the template): first open shows two matching vials side by
-   side with a "drag one onto the other" mark; the chain-merge seed stays.
-5. **Golden vial** keeps its 1-in-40 rate but only after the first Bottle,
-   so the first session isn't confused by a wildcard.
-6. Tests: cell count, viewport fit (Playwright: `scrollHeight <=
-   clientHeight`), color cap, pause threshold, save migration from 35-cell
-   shelves (keep the containers; drop extras into stock as jars).
+Matthew's direction (2026-10-04): 6×6, five colors, lines of six auto-merge.
+
+1. **6×6 grid, fits one screen.** 36 cells sized to the viewport (no page
+   scroll at 390×844 with the tab bar visible; cells ~52 px). No expansion
+   purchases; the grid is the grid.
+2. **Five colors, chosen by her.** A row of 5 color chips above the shelf
+   sets which colors spillover delivers (default: the mixers' recipes, then
+   the most-stocked colors). Spillover never delivers a sixth color. Changing
+   a chip doesn't remove containers already on the shelf.
+3. **Lines of six.** Whenever a full row, column or main diagonal (two of
+   them) holds six containers of one **hue family** (any tiers, golden
+   counts as any family), the line resolves: the six merge into the highest
+   tier their combined vial-value allows (sum of TIER_VALUES → tier), that
+   container sells immediately at value × 1.5 (a "full shelf" bonus), the
+   six cells clear, the rising scale plays one note per cell, and a Cask
+   formed this way still grants Essence to the family's most-stocked color.
+   Resolution happens after every drop (merge or move), so a drop can
+   trigger a merge and then a line. Rows, columns and diagonals are checked
+   in that order; overlapping lines resolve one at a time.
+4. **Hue family, not exact color.** Line matching uses `hueFamily` so a
+   row of madder, russet, rose and brick counts as red. Ordinary two-piece
+   merges stay exact-color, per the design doc.
+5. **Spillover pacing.** One vial per 10 minutes of production (unchanged),
+   pauses when fewer than 6 cells are empty so a line can always be built.
+6. **Row labels are gone.** The family-line rule replaces the "tidy shelf"
+   +10% bonus; remove the label tags and their sheet.
+7. **Onboarding on the shelf** (template for Theme D): first open shows
+   two matching vials with a "drag one onto the other" mark, then a seeded
+   row of five reds with one gap and a red vial to drop in, so her first
+   session sees a line clear.
+8. Tests: 36 cells, viewport fit (Playwright `scrollHeight <= clientHeight`),
+   five-color cap, line detection on rows/columns/both diagonals, line
+   value and clear, cascade (merge then line), pause threshold, migration
+   of 35-cell saves (containers kept in reading order; extras become jars).
 
 ### Theme C — Purifying (item 5)   → 0.2.2
 
-1. **Spawn rate.** Muddy batches become rare: base 1.5% per batch, +0.5%
-   per mixer level, capped at 20%, and **at most one new muddy batch per
-   hour** across all mixers, pending cap **3**. The ledger line reads
-   "A muddy batch is waiting" (singular) most of the time.
+1. **Spawn rate: fix the bug, then tune.** The "one a second" she saw is
+   a bug: muddy chance is rolled per *batch*, and batch size is fixed in
+   jars while mixer output scales with level, so a high-level mixer at the
+   50% cap turns out a muddy batch every few seconds. Roll muddiness per
+   **minute of production** instead, with a hard ceiling: while mixers run,
+   **one new muddy batch every 2–3 minutes** at most (random in that
+   window), **backlog cap 10**. Offline catch-up adds at most the cap.
+   Purify stays frequent because it is fun; it just can't flood.
 2. **Solved = every tube capped.** `isSolved` requires each non-empty tube
    to be uniform **and full** (capacity 4), i.e. corked. The generator
    already produces states where that is reachable; add a solver check in
@@ -153,7 +181,7 @@ A shared mechanism, then one script per subgame.
 | --- | --- | --- | --- |
 | 1 | A: start state, unlocks block, coin gates, paint palette, shop reserve | 1 sim (Opus) + 1 UI (Sonnet) | |
 | 2 | A: balance re-tune and tests | 1 (Opus, owns balance tooling) | |
-| 3 | B + E: shelf resize/cap/pause + gallery sell/discard | 1 sim (Opus) + 1 UI (Sonnet) | |
+| 3 | B + E: 6×6 match shelf + gallery sell/discard | 1 sim (Opus) + 1 UI (Sonnet) | |
 | 4 | C: purify rate, strict solve, tiers | 1 puzzle+sim (Opus) + 1 UI (Sonnet) | |
 | 5 | D: guide mechanism + 11 scripts + Next strip | 1 app core (Opus) + 2 UI (Sonnet) | |
 | 6 | Integration walk past minute ten, screenshots, version bump, deploy | 1 (Opus) | |
@@ -174,8 +202,8 @@ parallel plus step 6.
 2. **Coin gates survive Renovate?** My recommendation: no, they reset like
    rooms, and the Heritage tree gains "Keep the shelf / map / gallery open"
    nodes so later runs skip the re-buy.
-3. **Shelf size 4×5** (20 cells, fits any phone) versus 5×5 (25, tight on
-   small phones).
+3. **Line bonus on the shelf:** sell at 1.5× (my pick) or keep the merged
+   container on the shelf for her to sell by hand.
 4. **Purify tiers paid in coins or Seals** for the unlock, or free tiers
    with the reward difference as the incentive (the grading tiers are free
    today).
@@ -184,7 +212,7 @@ parallel plus step 6.
 
 All four themes change state. One bump to `SAVE_VERSION = 2` with a
 `migrate` step: add `unlocks` (granted for anything already in use so
-nobody loses access), add a second mixer to saves that have one, shrink
-35-cell shelves to 20 (overflow containers become jars in stock), add
+nobody loses access), add a second mixer to saves that have one, convert
+35-cell shelves to 36 cells (containers kept in reading order), add
 `settings.puzzleTier.purify`, add `onboarding.seen`. Test: a 0.1.3 save
 loads and plays.
