@@ -92,6 +92,19 @@ Matthew's direction (2026-10-04): 6×6, five colors, lines of six auto-merge.
    Resolution happens after every drop (merge or move), so a drop can
    trigger a merge and then a line. Rows, columns and diagonals are checked
    in that order; overlapping lines resolve one at a time.
+   **The line sequence (Matthew, 2026-10-04):** it must have weight.
+   (a) the six containers lift and lean toward the line's centre, one after
+   another from the ends inward (60 ms apart, rising scale note each);
+   (b) they squash together into one big container at the centre, which
+   pops out one size bigger with a ring burst and a heavy haptic;
+   (c) a pause of about 500 ms with the new container sitting there glowing
+   (the player sees what she made);
+   (d) the sell: the container tips, coins pour out in an arc to the coin
+   pill with coin patter rising, the counter rolls up and slows, a stamp
+   "Sold" lands on the empty row with a thunk;
+   (e) the six cells clear with a short shimmer and the shelf settles.
+   Total about 2.2 s, skippable by tap after (b). Reduced motion: fades,
+   same sounds and haptics.
 4. **Hue family, not exact color.** Line matching uses `hueFamily` so a
    row of madder, russet, rose and brick counts as red. Ordinary two-piece
    merges stay exact-color, per the design doc.
@@ -175,6 +188,58 @@ A shared mechanism, then one script per subgame.
 3. Tests: discard refunds nothing, sell pays once and removes the piece,
    hung count updates.
 
+### Theme F — Mobile feel pass (new, 2026-10-04)   → 0.2.4
+
+"Interactions should feel deeply satisfying. Things should have weight.
+Lovely animations." The design doc's Interaction spec table is the
+checklist; today most of it is approximated or missing. One worker per
+screen group, on a real phone-sized viewport with touch events, and a
+shared physics vocabulary so everything feels like one material.
+
+1. **Shared motion vocabulary in fx.js** (one worker first):
+   - `spring(el, {from, to, stiffness, damping})` built on the Web
+     Animations API with a precomputed spring curve, so every move has
+     mass; three presets: `soft` (paper), `firm` (wood), `heavy` (cask).
+   - `lift(el)` / `settle(el)`: scale 1.06 + shadow grows on pointerdown,
+     settles with a 3% overshoot on release.
+   - `drag(el, {onMove, onDrop})`: pointer capture, 8 px threshold, the
+     element follows the finger with a 40 ms lag and a slight tilt in the
+     direction of travel, drops with a bounce; the target cell glows as
+     the finger approaches (magnet radius 24 px).
+   - `pour(svg, hex, from)`: the flood already exists; add a wobble on the
+     surface as it fills and a glug pitched to the region size.
+   - `coinArc(from, to, n)`: coins fan out then converge, with the counter
+     rolling up and slowing; `stamp(el)`: a stamp lands with squash and a
+     thunk; `shimmer`, `ringBurst` keep their current behaviour.
+   - Every effect has a reduced-motion twin (fade) and respects the
+     80 ms haptic throttle.
+2. **Per-screen pass** against the Interaction spec rows:
+   - Buttons everywhere: press down 2 px with the shadow collapsing, spring
+     back; the paper tick; light haptic. Today it's a CSS transform only.
+   - Collect: coins arc to the pill (exists) + the pill squashes on arrival.
+   - Buy an upgrade: the station card squashes 94% → 104% → 100%, the
+     wooden thunk, a chime on milestones; the level number rolls.
+   - Grading tiles: lift on touch, slide with overshoot, the correct tile
+     settles with a one-frame shimmer and its own note; the solve sweep.
+   - Shelf: drag with tilt and magnet; merge lean-in and pop; the line
+     sequence above; chain scale.
+   - Purify: the stream arcs, the layer lands with a wobble, the cork pops
+     with a medium haptic.
+   - Packing: the jar drops with a bounce, the lid closes, the stamp lands.
+   - Paint: the pour floods from the fingertip, the chip lifts when picked.
+   - Postcard: the 3D flip with the stamp landing.
+   - Ledger: the All caught up stamp with ink spread.
+   - Close up shop: lights dim, shutters lower (a drawn shutter over the
+     scene), vats glow, evening bell.
+3. **Touch correctness** on a real device: `touch-action` set per
+   draggable, no 300 ms tap delay, no scroll fighting on the shelf and the
+   board, no double-fire from pointer + click, safe areas respected.
+4. **Verification:** Playwright with touch emulation (`hasTouch`,
+   `isMobile`, iPhone 14 descriptor) driving drags on the shelf and board;
+   a frame-timing probe (no long tasks > 50 ms during a merge chain);
+   screenshots mid-animation for the eye check. Then a thumb test by
+   Matthew.
+
 ## Order of work and cost
 
 | Step | Theme | Workers | Model |
@@ -184,7 +249,8 @@ A shared mechanism, then one script per subgame.
 | 3 | B + E: 6×6 match shelf + gallery sell/discard | 1 sim (Opus) + 1 UI (Sonnet) | |
 | 4 | C: purify rate, strict solve, tiers | 1 puzzle+sim (Opus) + 1 UI (Sonnet) | |
 | 5 | D: guide mechanism + 11 scripts + Next strip | 1 app core (Opus) + 2 UI (Sonnet) | |
-| 6 | Integration walk past minute ten, screenshots, version bump, deploy | 1 (Opus) | |
+| 6 | F: motion vocabulary in fx.js, then per-screen feel pass | 1 fx (Opus) then 3 UI (Sonnet) | |
+| 7 | Integration walk past minute ten, screenshots, version bump, deploy | 1 (Opus) | |
 
 Steps 1–2 must land before 3–5 (they change the start state and unlock
 model everything else reads). 3, 4 and 5 can run in parallel after that.
@@ -195,7 +261,15 @@ Rough size: about the same as the UX pass (five or six workers, one
 integration pass). Budget one session for steps 1–2, one for 3–5 in
 parallel plus step 6.
 
-## Decisions I need from you before starting
+## Decisions (taken 2026-10-04, Matthew's answers or my defaults)
+
+1. Two mixers at start. (default)
+2. Coin gates reset on Renovate; Heritage tree gains nodes to keep them. (default)
+3. Shelf: 6×6, five colors, line-of-six auto-merge, auto-sell at 1.5× with the full sequence. (Matthew)
+4. Purify tiers are free; the reward difference is the incentive. (default)
+5. Purify spawns at most one batch every 2–3 minutes while producing, backlog 10. (Matthew)
+
+## Decisions as originally posed
 
 1. **Two mixers at start** (my recommendation) versus one mixer plus a
    cheap second-mixer purchase in the first two minutes of onboarding.
