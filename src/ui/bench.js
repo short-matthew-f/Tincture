@@ -18,6 +18,7 @@
 import { h, iconSvg, button, backButton, safeHex } from './kit.js';
 import { Mixer, chipsHtml, injectStyles, coinsWord, offerWhatsNext, SHARED_CSS, MIX_CSS } from './matching.js';
 import { howThisWorksHtml, markGuideSeen } from './guide.js';
+import { bindTouchFeel, squashOnce } from './workshop.js';
 
 const PAGE_LABEL = Object.freeze({ wheel: 'Wheel', tints: 'Tints', shades: 'Shades', earths: 'Earths', wild: 'Wild' });
 const NEAR_DE = 4;
@@ -45,6 +46,7 @@ const BENCH_CSS = `
 .bn-sell { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; min-height: 52px; }
 .bn-sell + .bn-sell { border-top: 1px solid rgba(42,38,34,0.08); padding-top: 6px; }
 .bn-sell .btns { display: flex; gap: 6px; }
+.bn-sell .btn, .bn-swatch { touch-action: manipulation; }
 .btn.is-ready { box-shadow: 0 0 0 2px var(--glow-ring), 0 0 12px 2px rgba(185,131,28,0.4), 0 3px 0 #000; }
 @keyframes bn-shim { 0%, 100% { opacity: 0.35; } 50% { opacity: 0.7; } }
 `;
@@ -90,7 +92,14 @@ ${button('Reset jar', { attrs: { 'data-action': 'reset', hidden: true } })}
 ${button('Mix it', { variant: 'primary', cls: 'grow', attrs: { 'data-action': 'mix' } })}
 </div>`);
   S.note = '';
-  S.mixer = new Mixer(ctx, root, { onChange: () => { S.note = ''; update(); } });
+  S.mixer = new Mixer(ctx, root, {
+    onChange: (kind) => {
+      S.note = '';
+      update();
+      // The result swatch settles when the blend changes (a soft spring, 3% at most).
+      if (kind === 'add') ctx.fx.spring(root.querySelector('[data-result]'), { from: { transform: 'scale(0.965)' }, to: { transform: 'scale(1)' }, preset: 'soft' });
+    },
+  });
   S.mixer.setPigments(ctx.sim.discovery.availablePigments(stateOf()));
   S.sellSig = '';
   S.known = ctx.sim.discoveredCount(stateOf());
@@ -203,6 +212,8 @@ function mixIt() {
   const res = ctx.game.act(ctx.sim.discovery.mixAtBench, { parts });
   if (!res || !res.hex) return;
   const swatchEl = root.querySelector('[data-result]');
+  // Mix it squashes the jar (94% to 104% to rest, from its base), whatever the result.
+  if (mixer.svg) { mixer.svg.style.transformOrigin = '50% 100%'; squashOnce(ctx.fx, mixer.svg); }
   if (res.discovered) {
     // The app's naming ceremony takes over; clear the table for the next idea.
     ctx.haptics.success();
@@ -308,6 +319,7 @@ export default {
     injectStyles('oq-shared', SHARED_CSS);
     injectStyles('mix', MIX_CSS);
     injectStyles('bench', BENCH_CSS);
+    bindTouchFeel(root, ctx.fx, { lift: '.mx-chip' });
     const release = () => {
       if (!S.down) return;
       S.down = false;

@@ -22,7 +22,7 @@
 import { h, raw, iconSvg, button, backButton, tag, swatch, progressBar, safeHex, CONTAINER_NAMES } from './kit.js';
 import { injectStyles, coinsWord, offerWhatsNext, SHARED_CSS } from './matching.js';
 import { howThisWorksHtml, markGuideSeen } from './guide.js';
-import { unlockTag, openUnlockSheet, ensureStyles as ensureWorkshopStyles } from './workshop.js';
+import { unlockTag, openUnlockSheet, ensureStyles as ensureWorkshopStyles, bindTouchFeel } from './workshop.js';
 
 const FAMILY_PLURAL = Object.freeze({
   red: 'reds', orange: 'oranges', yellow: 'yellows', green: 'greens', teal: 'teals',
@@ -75,6 +75,8 @@ const CSS = `
 .cm-cele .gifts .g { display: inline-flex; align-items: center; gap: 8px; text-align: left; }
 .cm-empty { text-align: center; align-items: center; padding: 22px 16px; }
 .cm-empty .oq-lockrow { align-items: center; }
+.cm-opt, .cm-step .btn, .cm-empty { touch-action: manipulation; }
+.cm-step .progress > span { transform-origin: 0 50%; }
 .cm-done { display: flex; align-items: center; gap: 12px; min-width: 0; }
 `;
 
@@ -324,7 +326,7 @@ function boardHtml(state) {
   const u = sim.unlocks.status(state, 'commissions');
   if (!u.open) {
     const more = u.colorsLeft > 0 ? `${u.colorsLeft} more ${u.colorsLeft === 1 ? 'color' : 'colors'} to see it` : !u.phaseOk ? 'It opens once the Loading Yard is built' : 'Tap to see what it opens';
-    return h`<div class="card cm-empty is-tap" data-action="unlock-open" data-unlock="commissions" data-tap role="button" tabindex="0" aria-label="What Commissions opens"><div class="oq-h">Commissions are on the way</div><p class="muted">Big projects for the whole town, delivered a few jars at a time.</p>
+    return h`<div class="card cm-empty is-tap" data-lift="1.02" data-action="unlock-open" data-unlock="commissions" data-tap role="button" tabindex="0" aria-label="What Commissions opens"><div class="oq-h">Commissions are on the way</div><p class="muted">Big projects for the whole town, delivered a few jars at a time.</p>
 <div class="oq-lockrow" data-lock>${unlockTag(S.ctx, 'commissions', { cls: 'oq-lock' })}<span class="more">${more}</span></div></div>
 ${previewHtml(state)}`;
   }
@@ -384,6 +386,7 @@ function renderSheet(keepScroll = true) {
   const cur = list.find((c) => c.id === sh.colorId) ?? null;
   const max = cur ? Math.max(0, cur.max) : 0;
   sh.qty = max ? Math.max(1, Math.min(max, sh.qty || 1)) : 0;
+  const again = !S.layer.hidden && !!S.layer.querySelector('.sheet'); // a re-render (stepper, a pick) must not slide the sheet up again
   const prevScroll = keepScroll ? S.layer.querySelector('.cm-list')?.scrollTop ?? 0 : 0;
   const isTier = !!step.tier;
   S.layer.hidden = false;
@@ -393,7 +396,7 @@ function renderSheet(keepScroll = true) {
 <div class="oq-h">Deliver to ${def.name}</div>
 <div class="small muted">${stepLabel(step, rec.steps[sh.stepIndex])}${step.purity ? `, ${PURITY_LABEL[step.purity].toLowerCase()}` : ''}</div>
 ${list.length
-    ? h`<div class="cm-list">${list.map((c) => h`<button type="button" class="cm-opt${c.id === sh.colorId ? ' is-sel' : ''}" data-action="sheet-color" data-color="${c.id}" data-tap>${swatch(c.hex, 36)}<span class="nm">${c.name}</span><span class="have num">${fmt(c.avail)} ${isTier ? (c.avail === 1 ? 'container' : 'containers') : jarsWord(c.avail)}</span></button>`)}</div>`
+    ? h`<div class="cm-list">${list.map((c) => h`<button type="button" class="cm-opt${c.id === sh.colorId ? ' is-sel' : ''}" data-lift="1.02" data-action="sheet-color" data-color="${c.id}" data-tap>${swatch(c.hex, 36)}<span class="nm">${c.name}</span><span class="have num">${fmt(c.avail)} ${isTier ? (c.avail === 1 ? 'container' : 'containers') : jarsWord(c.avail)}</span></button>`)}</div>`
     : h`<div class="card flat"><div class="semi">Nothing in stock fits this step yet</div><div class="small muted">${isTier ? 'Merge a bigger container on the shelf and bring it back.' : 'Keep the workshop running, then bring jars back whenever you like.'}</div></div>`}
 ${cur && !isTier ? h`<div class="cm-stepper">
 ${button('−', { attrs: { 'data-action': 'qty-dec', 'aria-label': 'One fewer jar' }, disabled: sh.qty <= 1 })}
@@ -407,6 +410,12 @@ ${button('Not now', { block: true, attrs: { 'data-action': 'sheet-close' } })}
 </div>`);
   const lst = S.layer.querySelector('.cm-list');
   if (lst) lst.scrollTop = prevScroll;
+  if (again) {
+    S.layer.querySelectorAll('.sheet, .cm-back').forEach((n) => { n.style.animation = 'none'; });
+    const q = S.layer.querySelector('.qty');
+    if (q && sh.qty !== sh.lastQty) S.ctx.fx.spring(q, { from: { transform: 'scale(1.18)' }, to: { transform: 'scale(1)' }, preset: 'firm' });
+  }
+  sh.lastQty = sh.qty;
 }
 
 const REASONS = {
@@ -417,12 +426,30 @@ const REASONS = {
   done: 'That step is already done.',
 };
 
+/** A stand-in "element" for a spot that is about to leave the DOM (flyTo only reads its rect). */
+const rectOf = (el) => {
+  const r = el && el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+  return { getBoundingClientRect: () => r || { left: innerWidth / 2, top: innerHeight / 2, width: 0, height: 0 } };
+};
+
+/** The step's progress bar in the freshly drawn card, plus its previous fill (0..1) read from the old DOM. */
+function stepBar(commissionId, stepIndex) {
+  const card = S.body && S.body.querySelector(`.cm-card[data-commission="${commissionId}"]`);
+  const step = card && card.querySelectorAll('.cm-step')[stepIndex];
+  return step ? step.querySelector('.progress') : null;
+}
+
 function deliver() {
   const { ctx } = S;
+  const fx = ctx.fx;
   const sh = S.sheet;
   if (!sh || !sh.colorId || sh.qty < 1) return;
   const def = defOf(sh.commissionId);
   const step = def?.steps[sh.stepIndex];
+  // Where the jars leave from (the stock row she picked) and how full the bar was, before the redraw.
+  const from = rectOf(S.layer.querySelector('.cm-opt.is-sel') || S.layer.querySelector('[data-action="sheet-go"]'));
+  const oldBar = stepBar(sh.commissionId, sh.stepIndex);
+  const oldFill = oldBar ? Number(oldBar.getAttribute('aria-valuenow')) / 100 : 0;
   const res = ctx.game.act(ctx.sim.commissions.deliver, {
     commissionId: sh.commissionId, stepIndex: sh.stepIndex, colorId: sh.colorId, jars: sh.qty,
   });
@@ -435,13 +462,8 @@ function deliver() {
   const hex = ctx.sim.colorDef(sh.colorId)?.hex ?? '#C99A2E';
   const what = colorName(sh.colorId);
   ctx.haptics.light();
-  if (res.stepDone) {
-    ctx.audio.chord([0.3, 0.47, 0.64, 0.81], 0.5);
-    ctx.fx.confetti([hex, '#E2B04A', '#C99A2E'], null, { count: 14 });
-  } else {
-    ctx.audio.clink(2);
-  }
   if (res.completed && res.completed.ok) {
+    if (res.stepDone) ctx.audio.chord([0.3, 0.47, 0.64, 0.81], 0.5);
     S.note = null;
     celebrate(res.completed);
     return;
@@ -470,6 +492,34 @@ function deliver() {
     cta,
   };
   paint(true);
+
+  // The jars fly from the stock row to the step's bar; the bar holds its old fill until they land, then
+  // springs to the new one. A finished step gets its chord and flakes on arrival; sounds wait for the landing.
+  const bar = stepBar(sh.commissionId, sh.stepIndex);
+  const fill = bar ? Number(bar.getAttribute('aria-valuenow')) / 100 : 0;
+  const span = bar && bar.firstElementChild;
+  const k = fill > 0 ? Math.max(0, Math.min(1, oldFill / fill)) : 1;
+  const hold = !!span && k < 1 && !fx.isReducedMotion();
+  if (hold) span.style.transform = `scaleX(${k})`;
+  const landed = () => {
+    if (hold && span.isConnected) {
+      span.style.transform = '';
+      fx.spring(span, { from: { transform: `scaleX(${k})` }, to: { transform: 'scaleX(1)' }, preset: 'soft' });
+    }
+    if (res.stepDone) {
+      ctx.audio.chord([0.3, 0.47, 0.64, 0.81], 0.5);
+      ctx.haptics.success();
+      if (bar && bar.isConnected) fx.confetti([hex, '#E2B04A', '#C99A2E'], bar, { count: 14 });
+    } else {
+      ctx.audio.clink(2);
+    }
+  };
+  if (bar) {
+    const count = Math.max(3, Math.min(8, Math.round(res.delivered) || 3));
+    Promise.resolve(fx.flyTo(from, bar, hex, { count, ms: 480 })).then(landed, landed);
+  } else {
+    landed();
+  }
 }
 
 function complete(commissionId) {
@@ -499,6 +549,7 @@ function celebrate(res) {
     S.celeRolled = true;
     const wrap = card.querySelector('[data-cele-wrap]');
     if (wrap) wrap.style.opacity = '1';
+    ctx.fx.stamp(card, 'Done', { hold: 900, hex: '#2F6B4F' });
     ctx.fx.confetti(colors, card, { count: 24 });
     ctx.fx.rollNumber(card.querySelector('[data-cele-paid]'), 0, Math.max(1, Math.round(res.coins)), { ms: 800, format: ctx.format.num });
   }, 200);
@@ -523,7 +574,7 @@ function celebrate(res) {
 function startNext(commissionId) {
   S.cele = null;
   paint(true);
-  const card = S.body && S.body.querySelector(`[data-commission="${commissionId}"]`);
+  const card = S.body && S.body.querySelector(`.cm-card[data-commission="${commissionId}"]`);
   if (card) { card.scrollIntoView({ block: 'start', behavior: 'smooth' }); }
 }
 
@@ -564,6 +615,7 @@ export default {
       S.down = false;
       if (S.dirty) { S.dirty = false; later(() => paint(true), 60); }
     };
+    bindTouchFeel(root, ctx.fx, { lift: '.cm-opt, .cm-empty.is-tap' });
     root.addEventListener('pointerdown', () => { S.down = true; }, { passive: true });
     root.addEventListener('pointerup', release, { passive: true });
     root.addEventListener('pointercancel', release, { passive: true });

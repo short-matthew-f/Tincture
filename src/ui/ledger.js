@@ -24,7 +24,7 @@ import { h, raw, button, iconSvg, swatch, backButton, safeHex } from './kit.js';
 import defaultFx from './fx.js';
 import defaultAudio from './audio.js';
 import defaultHaptics from './haptics.js';
-import { ensureStyles, closeUpFlow, waitText } from './workshop.js';
+import { ensureStyles, closeUpFlow, waitText, bindTouchFeel, squashOnce } from './workshop.js';
 
 const num = (x, d = 0) => (Number.isFinite(x) ? x : d);
 const doc = () => (typeof document !== 'undefined' ? document : null);
@@ -45,7 +45,6 @@ function ensureLedgerStyles() {
 .ld-warm { margin-top: 10px; padding: 14px 2px 4px; border-top: 1px dashed #CFC6B8; font-size: 15px; line-height: 1.35; color: var(--ink); }
 .ld-lines { margin-top: 12px; display: flex; flex-direction: column; }
 .ld-line { min-height: 58px; border-top: 1px dashed #CFC6B8; display: flex; align-items: center; gap: 12px; padding: 8px 2px; text-align: left; width: 100%; transition: opacity 160ms; }
-.ld-line:active { transform: translateY(1px); }
 .ld-line.done { opacity: .55; }
 .ld-tile { width: 34px; height: 34px; border-radius: 9px; box-shadow: 0 2px 0 rgba(42,38,34,.25); flex: 0 0 auto; display: flex; align-items: center; justify-content: center; color: var(--paper); }
 .ld-line .tt { font-size: 15px; font-weight: 600; line-height: 1.25; }
@@ -57,8 +56,9 @@ function ensureLedgerStyles() {
 .ld-line .nx { font-size: 13px; color: var(--walnut); margin-top: 2px; }
 .ld-empty { padding: 14px 2px 6px; border-top: 1px dashed #CFC6B8; color: var(--ink-soft); font-size: 14px; }
 .ld-chip { display: inline-block; width: 16px; height: 16px; border-radius: 5px; box-shadow: 0 1px 0 rgba(42,38,34,.25); }
-.ld-stamp { display: block; align-self: center; margin: 14px 0 4px; width: 206px; max-width: 100%; height: auto; transform: rotate(-6deg); pointer-events: none; animation: ld-stamp 420ms var(--ease-out) both; }
-@keyframes ld-stamp { 0% { opacity: 0; transform: rotate(-6deg) scale(1.7); } 70% { opacity: 1; transform: rotate(-6deg) scale(.98); } 100% { opacity: 1; transform: rotate(-6deg) scale(1); } }
+.ld-stampzone { position: relative; align-self: center; width: 100%; height: 88px; margin: 10px 0 2px; pointer-events: none; }
+.ld-line, .ld-almost button { touch-action: manipulation; }
+.ld-line.is-held { background: var(--plaster); border-radius: 12px; box-shadow: 0 4px 0 var(--shadow-soft); }
 .ld-almost { display: flex; flex-direction: column; gap: 4px; }
 .ld-almost button { display: flex; align-items: center; gap: 10px; min-height: 44px; width: 100%; text-align: left; font-size: 14px; }
 [data-screen="ledger"] .card > .card-title { font-family: var(--font-ui); font-weight: 600; font-size: 15px; }
@@ -125,6 +125,7 @@ let summary = null;
 let lines = [];
 let done = new Set();
 let stamped = false;
+let stampSettled = false; // true once the stamp has landed: later repaints draw it already inked
 let rolled = false;
 let closedInfo = null;
 let visible = false;
@@ -185,20 +186,18 @@ function lineHtml(ln, i) {
     ? h`Earned <span data-roll class="num">${fmt(Math.round(summary.coinsEarned))}</span> Coins while you were away`
     : text;
   const action = isDone ? 'Done' : isInfo(ln) ? 'Got it' : st.action;
-  return h`<button type="button" class="ld-line${isDone ? ' done' : ''}" data-action="ledger-line" data-i="${i}" data-tap aria-label="${text}${isDone ? ', done' : ''}">
+  return h`<button type="button" class="ld-line${isDone ? ' done' : ''}" data-action="ledger-line" data-i="${i}" data-lift="1.02" data-tap aria-label="${text}${isDone ? ', done' : ''}">
 <span class="ld-tile" style="background:${safeHex(lineHex(ln))}">${isDone ? iconSvg('check', { size: 18 }) : ''}</span>
 <span class="grow"><span class="tt">${title}</span>${sub ? h`<span class="ss">${sub}</span>` : ''}${st.next ? h`<span class="nx">${st.next}</span>` : ''}</span>
 <span class="aa">${action}${isDone ? '' : iconSvg('back', { size: 14 })}</span></button>`;
 }
 
-function stampSvg() {
-  return raw(`<svg class="ld-stamp" data-stamp viewBox="0 0 210 84" role="img" aria-label="All caught up">
-<defs><filter id="ld-rough" x="-5%" y="-5%" width="110%" height="110%"><feTurbulence type="fractalNoise" baseFrequency="0.05" numOctaves="2" seed="7" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="2.6"/></filter></defs>
-<g filter="url(#ld-rough)">
-<rect x="4" y="4" width="202" height="76" rx="12" fill="rgba(247,244,236,0.85)" stroke="#8E2F2A" stroke-width="4"/>
-<rect x="10" y="10" width="190" height="64" rx="8" fill="none" stroke="#8E2F2A" stroke-opacity="0.35" stroke-width="2"/>
-<text x="105" y="52" text-anchor="middle" fill="#8E2F2A" style="font-family:'Young Serif',Georgia,serif;font-size:27px">All caught up</text>
-</g></svg>`);
+/** The "All caught up" stamp zone. fx.stamp drops the ink stamp into it; once it has landed, repaints draw it already inked. */
+function stampZone() {
+  const inked = stampSettled
+    ? raw('<div class="fx-stamp is-kept is-inked" aria-hidden="true" style="transform:translate(-50%,-50%) rotate(-8deg);--stamp-ink:#8E2F2A"><span>All caught up</span></div>')
+    : '';
+  return h`<div class="ld-stampzone" data-stamp role="img" aria-label="All caught up">${inked}</div>`;
 }
 
 function almostHtml() {
@@ -209,7 +208,7 @@ function almostHtml() {
     const id = p.color || p.colorId;
     let hex = (ICON_STYLE[it.icon] || { hex: '#7B5236' }).hex;
     if (id) { try { hex = hexOf(id); } catch (e) { /* keep */ } }
-    return h`<button type="button" data-action="ledger-almost" data-i="${i}" data-tap><span class="sw" style="background:${safeHex(hex)}"></span><span class="grow">${it.text}</span></button>`;
+    return h`<button type="button" data-action="ledger-almost" data-i="${i}" data-lift="1.02" data-tap><span class="sw" style="background:${safeHex(hex)}"></span><span class="grow">${it.text}</span></button>`;
   })}</div></div>`;
 }
 
@@ -235,7 +234,7 @@ function build() {
     ${calm ? '' : h`<div class="ld-lede">${named ? 'Here is what the workshop got up to. Tap a line to look closer.' : 'A few little things are waiting. Tap a line to look closer.'}</div>`}
     <div class="ld-lines">${calm ? h`<div class="ld-warm">Nothing needs you right now. The workshop is humming along on its own, and your vats keep filling while you rest.</div>` : lines.map(lineHtml)}</div>
     ${stamped && !calm ? h`<div class="ld-warm" data-warm>Everything is tended. Your vats keep filling while you rest.</div>` : ''}
-    ${stamped ? stampSvg() : ''}
+    ${stamped ? stampZone() : ''}
   </div>
   ${almostHtml()}
   <div class="ld-bottom">
@@ -268,11 +267,11 @@ function clearPending() {
 function landStamp() {
   if (stamped) return;
   stamped = true;
+  stampSettled = false;
   paint();
-  const el = root.querySelector('[data-stamp]');
-  audio().stamp();
-  haptics().medium();
-  fx().ringBurst(el, '#8E2F2A', { size: 120 });
+  stampSettled = true;
+  // An ink stamp drops onto the page, squashes on contact, thunks (audio + medium haptic come with it) and the ink spreads.
+  fx().stamp(root.querySelector('[data-stamp]'), 'All caught up', { keep: true, hex: '#8E2F2A' });
 }
 
 /** When every line is handled and nothing else waits, the stamp lands. */
@@ -314,6 +313,7 @@ function onClick(e) {
       soundFor(ln);
       haptics().light();
       paint();
+      squashOnce(fx(), root.querySelector(`.ld-line[data-i="${i}"] .ld-tile`));
       if (isInfo(ln)) checkCaughtUp();
       else {
         clearPending();
@@ -352,6 +352,7 @@ const screen = {
     ensureStyles();
     ensureLedgerStyles();
     root.addEventListener('click', onClick, true);
+    bindTouchFeel(root, fx(), { lift: '.ld-line, .ld-almost button' });
     root.innerHTML = '';
   },
 
@@ -364,6 +365,7 @@ const screen = {
     lines = Array.isArray(summary.lines) ? ordered(summary.lines) : [];
     done = new Set();
     stamped = false;
+    stampSettled = false;
     rolled = false;
     paint();
     checkCaughtUp();

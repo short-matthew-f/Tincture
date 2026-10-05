@@ -17,6 +17,8 @@ import * as colorLib from '../color.js';
 import { h, raw, iconSvg, button, backButton, tag, swatch, safeHex, lighten, escapeHtml } from './kit.js';
 import { howThisWorksHtml, markGuideSeen } from './guide.js';
 import * as overlay from './overlay.js';
+import defaultFx from './fx.js';
+import { bindTouchFeel } from './workshop.js';
 
 // ---------------------------------------------------------------------------
 // Shared helpers (also imported by bench.js and orders.js)
@@ -255,6 +257,37 @@ function dripInto(svg, hex, ratio, fx) {
   } catch (e) { c.remove(); }
 }
 
+/**
+ * A drop of `hex` flies from the chip to the top of the jar (170 ms, an arc, ease in) and calls `landed()`.
+ * Returns false when it cannot fly (reduced motion, no layer, no geometry): the caller pours at once.
+ */
+function flyDrop(fromEl, svg, hex, fx, landed) {
+  if (!fromEl || !svg || fx.isReducedMotion() || typeof document === 'undefined') return false;
+  const layer = document.getElementById('fx-layer');
+  if (!layer || typeof layer.appendChild !== 'function') return false;
+  const a = fromEl.getBoundingClientRect();
+  const b = svg.getBoundingClientRect();
+  if (!a.width || !b.width) return false;
+  const x0 = a.left + a.width / 2;
+  const y0 = a.top + a.height / 2;
+  const x1 = b.left + b.width / 2;
+  const y1 = b.top + (6 / 196) * b.height;
+  const d = document.createElement('div');
+  d.className = 'fx-dot';
+  d.style.background = safeHex(hex);
+  d.style.borderRadius = '50% 6% 50% 50%';
+  layer.appendChild(d);
+  const arc = Math.min(y0, y1) - 28;
+  try {
+    d.animate([
+      { transform: `translate(${x0}px,${y0}px) rotate(-45deg) scale(1.1)`, opacity: 1, offset: 0 },
+      { transform: `translate(${(x0 + x1) / 2}px,${arc}px) rotate(-20deg) scale(1)`, opacity: 1, offset: 0.5, easing: 'ease-in' },
+      { transform: `translate(${x1}px,${y1}px) rotate(0deg) scale(0.8)`, opacity: 1, offset: 1 },
+    ], { duration: 170, easing: 'ease-out', fill: 'both' }).finished.then(() => { d.remove(); landed(); }, () => { d.remove(); landed(); });
+  } catch (e) { d.remove(); return false; }
+  return true;
+}
+
 // -- the closeness dial -----------------------------------------------------
 
 // Closeness (ΔE-based, 0..1) maps onto the arc piecewise so Perfect gets a
@@ -310,18 +343,30 @@ ${outline}${arcs}${gaps}${rim}
 </svg>`);
 }
 
-/** Rotate the needle to closeness 0..1 (CSS-eased; pass `instant` to skip the swing). */
+/** The needle's current angle in degrees (mid-swing included), so a new swing starts where the old one is. */
+function needleNow(n) {
+  try {
+    const m = new DOMMatrix(getComputedStyle(n).transform);
+    return (Math.atan2(m.b, m.a) * 180) / Math.PI;
+  } catch (e) {
+    return Number(n.dataset.deg) || -90;
+  }
+}
+
+/**
+ * Rotate the needle to closeness 0..1 on a soft spring: it swings past a hair and settles (fx.spring replaces a
+ * swing in progress, starting from wherever the needle is). `instant` skips the swing. Reduced motion: a fade.
+ */
 export function setNeedle(root, closeness, { instant = false } = {}) {
   const n = root && root.querySelector('[data-needle]');
   if (!n) return;
-  if (instant) {
-    n.style.transition = 'none';
-    n.style.transform = `rotate(${needleDeg(closeness)}deg)`;
-    void n.getBoundingClientRect();
-    n.style.transition = '';
-  } else {
-    n.style.transform = `rotate(${needleDeg(closeness)}deg)`;
-  }
+  const to = needleDeg(closeness);
+  const from = instant ? to : needleNow(n);
+  if (typeof n.getAnimations === 'function') n.getAnimations().forEach((a) => a.cancel());
+  n.dataset.deg = String(to);
+  n.style.transform = `rotate(${to}deg)`;
+  if (instant || Math.abs(to - from) < 0.5) return;
+  defaultFx.spring(n, { from: { transform: `rotate(${from}deg)` }, to: { transform: `rotate(${to}deg)` }, preset: 'soft' });
 }
 
 // -- the drop mixer ---------------------------------------------------------
@@ -406,8 +451,15 @@ export class Mixer {
     const ratio = jarLevel(this.history.length);
     try { audio.glug(ratio, { fromRatio: jarLevel(prevN), hz: 300 }); } catch (e) { /* audio is optional */ }
     haptics.soft();
-    dripInto(this.svg, p.hex, ratio, fx);
-    fx.pourFill(this.svg, this.hex || p.hex, { x: 80, y: JAR_BOTTOM - ratio * JAR_H + 4, ms: 360 });
+    const pourAt = () => {
+      dripInto(this.svg, p.hex, ratio, fx);
+      fx.pour(this.svg, this.hex || p.hex, { x: 80, y: JAR_BOTTOM - ratio * JAR_H + 4 }, { ms: 360 });
+    };
+    // The chip's drop squashes (it was tapped), then a drop flies from it to the jar's mouth and pours in.
+    const chipBtn = [...this.root.querySelectorAll('.mx-chip')].find((c) => c.getAttribute('data-drop') === id);
+    const chip = chipBtn && chipBtn.querySelector('.mx-drop');
+    if (chip) fx.spring(chip, { from: { transform: 'rotate(-45deg) scale(0.86)' }, to: { transform: 'rotate(-45deg) scale(1)' }, preset: 'firm' });
+    if (!flyDrop(chip, this.svg, p.hex, fx, pourAt)) pourAt();
     this.onChange('add', p);
   }
 
@@ -435,12 +487,12 @@ export function chipsHtml(coach = '') {
 
 export const MIX_CSS = `
 .mx-jar { height: 100%; width: auto; max-width: 100%; overflow: visible; }
-.mx-jar [data-liq] { transition: transform 420ms var(--ease-out); }
+.mx-jar [data-liq] { transition: transform 420ms var(--ease-out) 120ms; }
 .mx-chips { display: grid; grid-template-columns: repeat(auto-fill, minmax(62px, 1fr)); gap: 10px 6px; }
 .mx-chip { min-width: 44px; }
 .mx-chip { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 4px 0 2px; min-height: 92px; border-radius: 12px; }
-.mx-chip:active .mx-drop { transform: rotate(-45deg) translate(2px, -2px) scale(0.94); }
-.mx-drop { width: 44px; height: 44px; margin-top: 6px; border-radius: 50% 6% 50% 50%; transform: rotate(-45deg); box-shadow: inset 0 0 0 1.5px rgba(42,38,34,0.2), 0 3px 0 rgba(42,38,34,0.28); transition: transform 120ms var(--ease-out); }
+.mx-chip { touch-action: manipulation; }
+.mx-drop { width: 44px; height: 44px; margin-top: 6px; border-radius: 50% 6% 50% 50%; transform: rotate(-45deg); box-shadow: inset 0 0 0 1.5px rgba(42,38,34,0.2), 0 3px 0 rgba(42,38,34,0.28); }
 .mx-chip.has .mx-drop { box-shadow: inset 0 0 0 1.5px rgba(42,38,34,0.2), 0 0 0 3px var(--paper), 0 0 0 5px var(--ink); }
 .mx-name { font-size: 13px; font-weight: 600; line-height: 1.1; text-align: center; }
 .mx-count { font-size: 12px; color: var(--ink-soft); }
@@ -461,11 +513,10 @@ const MATCH_CSS = `
 .mx-col .cap { font-size: 13px; font-weight: 600; }
 .mx-target, .mx-mine { height: 168px; border-radius: 14px; box-shadow: 0 3px 0 rgba(42,38,34,0.28); }
 .mx-top.is-joined .mx-target, .mx-top.is-joined .mx-mine { height: 120px; }
-.mx-mine { animation: mx-slide 480ms var(--ease-out) both; }
 .mx-jarbox { height: 168px; display: flex; align-items: flex-end; justify-content: center; }
 .mx-gauge { flex-direction: row; align-items: center; gap: 10px; }
 .mx-gauge .mx-dial { width: 148px; flex: 0 0 auto; overflow: visible; }
-.mx-needle { transform-origin: 100px 96px; transition: transform 720ms cubic-bezier(0.25, 1.12, 0.5, 1); }
+.mx-needle { transform-origin: 100px 96px; }
 .mx-tier { font-family: var(--font-ui); font-weight: 700; font-size: 20px; line-height: 1.15; }
 .mx-pay { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; color: var(--ink-soft); }
 .mx-result { gap: 10px; animation: screen-in 260ms var(--ease-out) both; align-items: center; text-align: center; }
@@ -484,7 +535,6 @@ const MATCH_CSS = `
 .mx-goal { font-size: 13px; color: var(--ink-soft); text-align: center; padding: 2px 8px; }
 .mx-gone { text-align: center; align-items: center; padding: 22px 16px; }
 .mx-tip { font-size: 13px; color: var(--ink-soft); }
-@keyframes mx-slide { from { transform: translateX(34%); opacity: 0.2; } to { transform: none; opacity: 1; } }
 `;
 
 const S = {
@@ -702,8 +752,21 @@ ${S.newColor ? h`<div class="card mx-new" data-newcolor>${swatch(res.discovered.
 <div class="mx-goal">${waiting} ${waiting === 1 ? 'order is' : 'orders are'} waiting on the board${goal ? `. ${goal}.` : '.'}</div>
 </div>
 <div class="mx-actions" data-bar>${barHtml(next)}</div>`);
+  // Her swatch slides in beside the target on a soft spring; then the needle swings and settles.
+  const fxo = ctx.fx || defaultFx;
+  const mine = root.querySelector('.mx-mine');
+  if (mine) fxo.spring(mine, { from: { transform: 'translateX(34%)', opacity: 0.2 }, to: { transform: 'translateX(0%)', opacity: 1 }, preset: 'soft' });
   setNeedle(root, 0, { instant: true });
-  requestAnimationFrame(() => setNeedle(root, closeness));
+  later(() => setNeedle(root, closeness), 200);
+  // The primary button (Next order, or Back to orders) lifts in once the pay has begun to roll.
+  const lead = root.querySelector('[data-bar] .btn.grow');
+  if (lead && !fxo.isReducedMotion()) {
+    lead.style.opacity = '0';
+    later(() => {
+      lead.style.opacity = '';
+      fxo.spring(lead, { from: { transform: 'translateY(18px)', opacity: 0 }, to: { transform: 'translateY(0px)', opacity: 1 }, preset: 'firm' });
+    }, 480);
+  }
 
   // Sounds, haptics, confetti, rolling pay: after the slide lands.
   const hexes = [target, mixHex, ...drops.map((d) => d.hex)];
@@ -718,12 +781,15 @@ ${S.newColor ? h`<div class="card mx-new" data-newcolor>${swatch(res.discovered.
     } else {
       ctx.haptics.light();
     }
-    if (wrap) wrap.style.opacity = '1';
+    if (wrap) {
+      wrap.style.opacity = '1';
+      ctx.fx.spring(wrap, { from: { transform: 'scale(0.9)', opacity: 0 }, to: { transform: 'scale(1)', opacity: 1 }, preset: 'soft' });
+    }
     ctx.fx.rollNumber(paid, 0, res.coins, { ms: 650, format: (v) => coinsText(ctx, v) });
     ctx.audio.coins(tier === 'perfect' ? 7 : 4);
   }, 380);
   // Never leave the pay hidden if the timer is cut short.
-  later(() => { if (wrap) wrap.style.opacity = '1'; }, 1500);
+  later(() => { if (wrap) wrap.style.opacity = '1'; if (lead) lead.style.opacity = ''; }, 1500);
   // After her first filled order: two equal ways on, once the page has settled.
   if (S.offer) S.offer.stop();
   if (orderVeteran(stateOf(), 1)) ctx.game.act(markGuideSeen, { id: 'ordersNext' });
@@ -750,6 +816,7 @@ export default {
     injectStyles('oq-shared', SHARED_CSS);
     injectStyles('mix', MIX_CSS);
     injectStyles('matching', MATCH_CSS);
+    bindTouchFeel(root, ctx.fx || defaultFx, { lift: '.mx-chip' });
     root.addEventListener('click', (e) => {
       const t = e.target.closest('[data-action]');
       if (!t || !root.contains(t) || t.disabled) return;

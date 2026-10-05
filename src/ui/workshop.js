@@ -24,6 +24,8 @@
  * Exports for other screens: openSheet(host, opts) and closeUpFlow(ctx, host) (ledger.js), plus
  * unlockTag(ctx, id), openUnlockSheet(ctx, id, {host}), unlockCeremony(objectId) and
  * openRecipeSheet(ctx, {mixer, colorId, onDone, host}), and ensureStyles().
+ * Theme F (feel): also exports the touch-feel helpers the six order/workshop screens share (bindTouchFeel,
+ * squashOnce, flipLabel; PRESS_SEL), built here because they are not in fx.js yet.
  *
  * data-action names used here: settings, collect (the coin pill), next, segment, open-map,
  * open-album, open-shelf, open-bench, open-gallery, open-quests, open-ledger, open-commissions,
@@ -76,6 +78,123 @@ export function waitText(format, ms) {
 }
 
 // ---------------------------------------------------------------------------
+// Touch feel (built locally for the six screens in this group; these belong in
+// fx.js: bindTouchFeel, squashOnce, flipLabel). The action always fires on
+// release at once (a plain click); everything here is cosmetic and passive, so
+// it never blocks scrolling and never waits for an animation.
+// ---------------------------------------------------------------------------
+
+export const PRESS_SEL = '.btn, .btn-back, .ws-step, .ws-pill[data-collect="on"], .seg-control > button, .ws-panel-head, .ws-almost-row, .switch';
+
+const reduced = (fxo) => !!(fxo && fxo.isReducedMotion && fxo.isReducedMotion());
+const inert = (el) => !el || el.disabled || el.hidden || el.classList.contains('ws-off');
+
+/** Pick-up on pointerdown: scale up with a spring, a grown shadow. `data-lift="1.02"` picks a gentler scale for wide things. */
+function liftEl(fxo, el) {
+  const k = Number(el.dataset.lift);
+  if (!k) { fxo.lift(el); return; }
+  el.classList.add('is-held');
+  if (reduced(fxo)) return;
+  fxo.spring(el, { from: { transform: 'scale(1)' }, to: { transform: `scale(${k})` }, preset: 'firm', fill: 'forwards' });
+}
+
+/** Put-down on release or cancel: the shared settle (a 3% overshoot), then the held style goes. */
+function settleEl(fxo, el) {
+  el.classList.remove('is-held');
+  // fx.lift's forwards-filled spring stops being tracked once it has finished (a hold longer than ~280 ms), so
+  // fx.settle cannot cancel it and the element would stay scaled. Cancel what was running before settle starts;
+  // settle's own animation begins from the current computed transform, so nothing jumps.
+  const stale = typeof el.getAnimations === 'function' ? el.getAnimations().filter((a) => a.constructor === Animation) : [];
+  fxo.settle(el);
+  stale.forEach((a) => { try { a.cancel(); } catch (e) { /* ignore */ } });
+}
+
+/** A pressed button springs back past rest and settles (the CSS :active already collapsed it 2 px). */
+function springBack(fxo, el) {
+  if (reduced(fxo) || typeof el.animate !== 'function') return;
+  try {
+    el.animate([
+      { transform: 'translateY(2px)' },
+      { transform: 'translateY(-1.5px)', offset: 0.55, easing: 'ease-out' },
+      { transform: 'translateY(0)' },
+    ], { duration: 170, easing: 'ease-out' });
+  } catch (e) { /* ignore */ }
+}
+
+const boundRoots = new WeakSet();
+const LIFT_HOLD_MS = 80;
+
+/**
+ * bindTouchFeel(root, fx, {press, lift}) -> one passive pointerdown listener on `root` (and release on
+ * window). `lift` things scale up while held and settle on release; `press` things (default PRESS_SEL)
+ * spring back after the CSS collapse. On touch a lift waits 80 ms (and gives up if the finger moves more than
+ * 6 px or the browser takes the gesture for a scroll), so a scroll that starts on a card or a row never bumps
+ * it; a quick tap lifts and settles at once. pointercancel (a scroll taking over, the iOS edge swipe) puts a
+ * lifted thing down. Never calls preventDefault, never captures the pointer: scrolling is untouched.
+ */
+export function bindTouchFeel(rootEl, fxo, { press = PRESS_SEL, lift = '' } = {}) {
+  if (!rootEl || boundRoots.has(rootEl) || typeof window === 'undefined') return;
+  boundRoots.add(rootEl);
+  let held = null; // {el, kind, lifted, pid, x, y, timer}
+  const end = (cancelled) => {
+    if (!held) return;
+    const h = held;
+    held = null;
+    clearTimeout(h.timer);
+    if (h.kind === 'lift') {
+      if (!h.lifted) { if (cancelled) return; liftEl(fxo, h.el); }
+      settleEl(fxo, h.el);
+    } else if (!cancelled) springBack(fxo, h.el);
+  };
+  rootEl.addEventListener('pointerdown', (e) => {
+    if (held) end(false);
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    const t = e.target;
+    if (!t || !t.closest) return;
+    let el = lift ? t.closest(lift) : null;
+    if (el && rootEl.contains(el) && !inert(el)) {
+      const h = { el, kind: 'lift', lifted: false, pid: e.pointerId, x: e.clientX, y: e.clientY, timer: 0 };
+      held = h;
+      if (e.pointerType === 'mouse') { h.lifted = true; liftEl(fxo, el); } else {
+        h.timer = setTimeout(() => { if (held === h) { h.lifted = true; liftEl(fxo, el); } }, LIFT_HOLD_MS);
+      }
+      return;
+    }
+    el = press ? t.closest(press) : null;
+    if (el && rootEl.contains(el) && !inert(el)) held = { el, kind: 'press', lifted: false, pid: e.pointerId, x: e.clientX, y: e.clientY, timer: 0 };
+  }, { passive: true });
+  rootEl.addEventListener('pointermove', (e) => {
+    if (!held || held.kind !== 'lift' || held.lifted || e.pointerId !== held.pid) return;
+    if (Math.abs(e.clientX - held.x) > 6 || Math.abs(e.clientY - held.y) > 6) end(true); // a scroll, not a press
+  }, { passive: true });
+  window.addEventListener('pointerup', () => end(false), { passive: true });
+  window.addEventListener('pointercancel', () => end(true), { passive: true });
+}
+
+/** One squash per element per frame, and a new one replaces a running one: rapid taps never queue. */
+const squashing = new WeakMap();
+export function squashOnce(fxo, el) {
+  if (!el) return Promise.resolve();
+  if (squashing.has(el)) return squashing.get(el);
+  const prev = typeof el.getAnimations === 'function' ? el.getAnimations().filter((a) => a.constructor === Animation && a.effect && a.effect.getTiming().duration === 250) : [];
+  prev.forEach((a) => a.cancel());
+  const p = Promise.resolve(fxo.squash(el));
+  squashing.set(el, p);
+  requestAnimationFrame(() => squashing.delete(el));
+  return p;
+}
+
+/** A tiny paper flip when a button's label changes: fade and scale in, 120 ms. */
+export function flipLabel(fxo, el) {
+  if (!el) return Promise.resolve();
+  if (reduced(fxo)) return fxo.fade(el);
+  if (typeof el.animate !== 'function') return Promise.resolve();
+  try {
+    return el.animate([{ opacity: 0.25, transform: 'scale(0.96)' }, { opacity: 1, transform: 'scale(1)' }], { duration: 120, easing: 'ease-out' }).finished.then(() => undefined, () => undefined);
+  } catch (e) { return Promise.resolve(); }
+}
+
+// ---------------------------------------------------------------------------
 // Styles (injected once; shared with ledger.js)
 // ---------------------------------------------------------------------------
 
@@ -108,7 +227,6 @@ export function ensureStyles() {
 .ws-scene { position: relative; margin: 0 calc(-1 * var(--gutter)); line-height: 0; }
 .ws-svg { width: 100%; height: auto; display: block; }
 .ws-hit { cursor: pointer; outline: none; -webkit-tap-highlight-color: transparent; }
-.ws-hit:active { transform: translateY(2px); }
 .ws-hit:focus-visible > .ws-focus { stroke: var(--ink); stroke-width: 3; }
 .ws-focus { fill: transparent; stroke: transparent; }
 .ws-off { display: none; }
@@ -152,7 +270,10 @@ export function ensureStyles() {
 .ws-sheet-title { font-family: var(--font-ui); font-weight: 700; font-size: 20px; line-height: 1.15; }
 .ws-sheet-body { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; min-height: 0; }
 .ws-pick { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 52px; padding: 6px 8px; border-radius: 12px; background: var(--paper); box-shadow: var(--cut-sm); text-align: left; }
-.ws-pick:active { transform: translateY(2px); box-shadow: var(--cut-press); }
+.ws-pick.is-held, .ws-sugg.is-held { box-shadow: 0 5px 0 var(--shadow); }
+.ws-hit, .ws-pick, .ws-step, .ws-pill, .ws-panel-head, .ws-sugg { touch-action: manipulation; }
+.ws-halo { pointer-events: none; }
+.ws-halo.pulse { transform-box: fill-box; transform-origin: 50% 50%; animation-duration: 1.8s; }
 .ws-pick.is-on { box-shadow: 0 0 0 2px var(--ink), var(--cut-sm); }
 .ws-pick .pt { font-size: 15px; font-weight: 600; line-height: 1.2; }
 .ws-pick .ps { font-size: 13px; color: var(--ink-soft); }
@@ -164,11 +285,13 @@ export function ensureStyles() {
 .ws-step[aria-disabled="true"] { opacity: .4; }
 .ws-actions-row { display: flex; gap: 10px; }
 .ws-actions-row > .btn { flex: 1 1 0; }
-.ws-dusk { position: absolute; inset: 0; z-index: 45; pointer-events: none; background: rgba(42, 38, 34, .38); animation: ws-dusk 1.5s ease-in-out both; display: flex; align-items: center; justify-content: center; }
-.ws-dusk .shutter { position: absolute; left: 0; right: 0; top: 0; height: 34%; background: repeating-linear-gradient(#8A6A4C 0 14px, #6F5238 14px 16px); box-shadow: 0 4px 0 rgba(0,0,0,.35); animation: ws-shut 1.3s ease-in-out both; }
-.ws-dusk .cap { position: relative; padding: 10px 18px; border-radius: 999px; background: var(--paper); font-weight: 600; font-size: 16px; box-shadow: var(--cut); }
-@keyframes ws-dusk { 0% { background: rgba(42,38,34,0); } 30%, 80% { background: rgba(42,38,34,.38); } 100% { background: rgba(42,38,34,0); } }
-@keyframes ws-shut { 0% { height: 0; } 70%, 100% { height: 34%; } }
+.ws-dusk { position: absolute; inset: 0; z-index: 45; touch-action: manipulation; }
+.ws-shutter { position: absolute; inset: 0; z-index: 3; overflow: hidden; border-radius: inherit; pointer-events: none; display: flex; align-items: flex-end; justify-content: center; line-height: 1.3;
+  background: repeating-linear-gradient(#8A6A4C 0 14px, #6F5238 14px 16px); box-shadow: inset 0 -12px 0 rgba(0,0,0,.28), 0 5px 0 rgba(0,0,0,.35); }
+.ws-shutter .cap { margin-bottom: 18px; padding: 8px 16px; border-radius: 999px; background: var(--paper); font-weight: 600; font-size: 15px; box-shadow: var(--cut); }
+.ws-vglow { opacity: 0; pointer-events: none; transition: opacity 400ms ease-out; }
+.ws-scene.is-dusk .ws-vglow { opacity: .6; }
+.ws-shutter .vg { position: absolute; width: 74px; height: 120px; transform: translate(-50%, -50%); border-radius: 50%; background: radial-gradient(closest-side, rgba(255, 224, 140, .95), rgba(255, 214, 120, .45) 60%, rgba(255, 214, 120, 0)); pointer-events: none; }
 .ws-switch-row { display: flex; align-items: center; gap: 12px; min-height: 44px; }
 .ws-switch-row .switch { position: relative; }
 .ws-need { font-size: 13px; color: var(--ink-soft); }
@@ -279,19 +402,61 @@ ${closeButton ? h`<button type="button" class="btn-back" data-sheet-close data-t
   return api;
 }
 
-/** The 1.5 s "lights dim, shutters lower" moment over `host`. */
-function playDusk(host, fx) {
+/**
+ * The Close up shop moment (1.5 s at most, skippable with a tap): the lights dim (fx.dim), a drawn
+ * shutter lowers over the scene card with a heavy spring, the vats glow, then it all lifts away.
+ * `target` is the card the shutter drops over (default: the workshop scene, else the ledger page).
+ */
+function playDusk(host, fxo, target) {
   const d = doc();
-  const o = d.createElement('div');
-  o.className = 'ws-dusk';
-  o.innerHTML = '<div class="shutter"></div><div class="cap">Lights dim, shutters lower</div>';
-  host.appendChild(o);
-  if (fx && fx.dim) fx.dim(true);
-  return new Promise((resolve) => setTimeout(() => {
-    o.remove();
-    if (fx && fx.dim) fx.dim(false);
-    resolve();
-  }, 1500));
+  const skip = d.createElement('div');
+  skip.className = 'ws-dusk';
+  skip.setAttribute('aria-hidden', 'true');
+  host.appendChild(skip);
+  const scene = target || host.querySelector('.ws-scene') || host.querySelector('.ld-page');
+  const shutter = d.createElement('div');
+  shutter.className = 'ws-shutter';
+  // In the workshop the vats glow through the slats (positions are the scene's, in percent of its 390 x 440 art).
+  const glows = scene && scene.classList.contains('ws-scene')
+    ? [0, 1, 2].map((i) => `<i class="vg" style="left:${((65 + i * 66) / 390 * 100).toFixed(1)}%;top:${(196 / 440 * 100).toFixed(1)}%"></i>`).join('') : '';
+  shutter.innerHTML = `${glows}<div class="cap">Shutters down for the night</div>`;
+  if (scene) {
+    try {
+      const r = scene.getBoundingClientRect();
+      if (r.top < 40 || r.bottom > innerHeight) scene.scrollIntoView({ block: 'start', behavior: 'auto' }); // instant: a smooth scroll would swallow the tap that skips the ritual
+    } catch (e) { /* ignore */ }
+    scene.appendChild(shutter);
+    scene.classList.add('is-dusk');
+  }
+  if (fxo && fxo.dim) fxo.dim(true);
+  if (scene && fxo.spring) fxo.spring(shutter, { from: { transform: 'translateY(-100%)' }, to: { transform: 'translateY(0%)' }, preset: 'heavy', fill: 'forwards' });
+  return new Promise((resolve) => {
+    let over = false;
+    let tLift = 0;
+    let tEnd = 0;
+    const finish = () => {
+      if (over) return;
+      over = true;
+      clearTimeout(tLift);
+      clearTimeout(tEnd);
+      skip.remove();
+      shutter.remove();
+      if (scene) scene.classList.remove('is-dusk');
+      if (fxo && fxo.dim) fxo.dim(false);
+      resolve();
+    };
+    skip.addEventListener('click', (e) => { e.stopPropagation(); e.preventDefault(); finish(); });
+    tLift = setTimeout(() => {
+      if (over) return;
+      if (fxo && fxo.dim) fxo.dim(false);
+      if (!reduced(fxo) && typeof shutter.animate === 'function') {
+        try { shutter.animate([{ transform: 'translateY(0%)' }, { transform: 'translateY(-100%)' }], { duration: 260, easing: 'ease-in', fill: 'forwards' }); } catch (e) { /* ignore */ }
+      } else if (typeof shutter.animate === 'function') {
+        try { shutter.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 120, fill: 'forwards' }); } catch (e) { /* ignore */ }
+      }
+    }, 1200);
+    tEnd = setTimeout(finish, 1500);
+  });
 }
 
 /**
@@ -299,7 +464,7 @@ function playDusk(host, fx) {
  * The shared "Close up shop" ritual: confirm sheet, closeUpShop, evening chord,
  * a 1.5 s dim. Resolves null when she chooses "Not yet".
  */
-export function closeUpFlow(ctx, host) {
+export function closeUpFlow(ctx, host, { target = null } = {}) {
   const sim = ctx.sim;
   const fx = ctx.fx || defaultFx;
   const audio = ctx.audio || defaultAudio;
@@ -331,7 +496,7 @@ ${button('Close up shop', { variant: 'primary', attrs: { 'data-action': 'cu-go' 
         const res = ctx.game.act(sim.closeUp.closeUpShop);
         audio.evening();
         (ctx.haptics || defaultHaptics).soft();
-        playDusk(host, fx).then(() => resolve(res || { fillMs: sim.storage.fillTimeMs(ctx.game.state) }));
+        playDusk(host, fx, target).then(() => resolve(res || { fillMs: sim.storage.fillTimeMs(ctx.game.state) }));
       },
       onClose() { if (!chosen) resolve(null); },
     });
@@ -357,6 +522,7 @@ let closedInfo = null;            // {fillMs} after "Close up shop" this session
 let almostCache = { at: -1e9, items: [] };
 const sigs = {};
 const vatKeys = ['', '', ''];
+const vatPrev = [null, null, null]; // {color, ratio} last drawn, so a changed fill level can spring
 let jarCount = null;
 const renderMemo = { on: false, has: false, next: null }; // sim.next computed once per render
 let segment = 'stations';
@@ -506,7 +672,7 @@ function sceneSvg() {
   const vats = [0, 1, 2].map((i) => {
     const bx = 38 + i * 66;
     return `<g class="ws-hit" data-action="vat-color" data-vat="${i}" data-tap role="button" tabindex="0" aria-label="Vat ${i + 1}: details">
-<g data-vat-art="${i}" transform="translate(${bx - 6} 138)"></g>${hit(bx - 4, 138, 58, 112)}</g>`;
+<ellipse class="ws-vglow" cx="${bx + 27}" cy="196" rx="40" ry="66" fill="#FFD878"/><g data-vat-art="${i}" transform="translate(${bx - 6} 138)"></g>${hit(bx - 4, 138, 58, 112)}</g>`;
   }).join('');
   const labels = [0, 1, 2].map((i) => {
     const cx = 65 + i * 66;
@@ -593,6 +759,7 @@ ${labels}
 <path d="M150 224 l3 -9 l3 9 l9 3 l-9 3 l-3 9 l-3 -9 l-9 -3 z" fill="#FFF3C4"/>
 <path d="M44 236 l2 -6 l2 6 l6 2 l-6 2 l-2 6 l-2 -6 l-6 -2 z" fill="#FFF3C4"/>
 </g>
+<rect class="ws-halo ws-off" data-accident-halo x="99" y="203" width="76" height="36" rx="18" fill="none" stroke="#B9831C" stroke-opacity=".6" stroke-width="2.5"/>
 <g class="ws-hit ws-off" data-pill="accident" data-action="claim-accident" data-mixer="0" data-tap role="button" tabindex="0" aria-label="A happy accident is waiting: tap to claim">
 <g filter="url(#ws-cut)"><rect x="104" y="208" width="66" height="26" rx="13" fill="#F7F4EC"/></g>
 <text data-pill-text x="137" y="225" fill="#2A2622" text-anchor="middle" style="font-size:11px;font-weight:600;font-family:'Figtree',system-ui,sans-serif">Tap to claim</text>
@@ -638,7 +805,7 @@ function shell() {
     <div class="seg" data-seg="store"><div class="seg-label">Store</div><div class="seg-value" data-ref="segStore">-</div></div>
     <div class="seg" data-seg="ship"><div class="seg-label">Ship</div><div class="seg-value" data-ref="segShip">-</div></div>
   </div>
-  <button type="button" class="btn btn-primary ws-sugg" data-action="next" data-coach="next" data-ref="sugg" data-cost="0" data-tap>Next</button>
+  <button type="button" class="btn btn-primary ws-sugg" data-action="next" data-coach="next" data-ref="sugg" data-cost="0" data-lift="1.025" data-tap>Next</button>
   <div class="ws-next" data-ref="next" hidden></div>
 </div>
 <div class="screen-body ws-body" data-ref="body">
@@ -948,7 +1115,12 @@ function patchNext(s, t) {
   const cost = num(n && n.cost);
   const waiting = !!n && cost > 0 && n.affordable === false;
   const label = (n && n.label) || 'Everything is humming';
-  if (b.textContent !== label) b.textContent = label;
+  if (b.textContent !== label) {
+    const had = b.dataset.shown === '1';
+    b.textContent = label;
+    b.dataset.shown = '1';
+    if (had) flipLabel(fx(), b);
+  }
   const state = waiting ? 'wait' : 'go';
   if (b.dataset.state !== state) b.dataset.state = state;
   b.setAttribute('aria-disabled', waiting ? 'true' : 'false');
@@ -1035,6 +1207,21 @@ function vatLabelLines(name) {
   return [clip(name, 11)];
 }
 
+/**
+ * Animate a vat's liquid from `fromRatio` to `toRatio`: the freshly drawn fill rects start offset by the
+ * difference and spring to rest. The body rect is drawn 98 units taller (the glass clips it) so a draining level
+ * never shows a gap. Skips tiny changes and an emptied vat (no fill layer to move).
+ */
+function springFill(svg, fromRatio, toRatio) {
+  const layer = svg.querySelector('[data-fill-layer]');
+  const d = 98 * (toRatio - fromRatio);
+  if (!layer || Math.abs(d) < 0.4) return;
+  layer.querySelectorAll('rect').forEach((r, i) => {
+    if (i === 0) r.setAttribute('height', String(Number(r.getAttribute('height')) + 98)); // the body; the surface band keeps its 7 units
+    fx().spring(r, { from: { transform: `translateY(${d.toFixed(2)}px)` }, to: { transform: 'translateY(0px)' }, preset: 'soft' });
+  });
+}
+
 function patchScene(s, t) {
   const sm = sim();
 
@@ -1050,9 +1237,15 @@ function patchScene(s, t) {
     const key = `${v.color}|${Math.round(ratio * 60)}`;
     if (vatKeys[i] !== key) {
       vatKeys[i] = key;
+      const before = vatPrev[i];
+      vatPrev[i] = { color: v.color, ratio };
       art.innerHTML = String(vatSvg(ratio, v.color ? hexOf(v.color) : NEUTRAL, { size: 66 }));
       const svg = art.querySelector('svg');
-      if (svg) svg.setAttribute('aria-hidden', 'true');
+      if (svg) {
+        svg.setAttribute('aria-hidden', 'true');
+        // The level rises (or drops) on a soft spring instead of snapping to the new height.
+        if (before && before.color === v.color && visible) springFill(svg, before.ratio, ratio);
+      }
     }
     const full = v.color ? nameOf(v.color) : 'Choose';
     if (lab.dataset.full !== full) {
@@ -1081,6 +1274,10 @@ function patchScene(s, t) {
   root.querySelector('[data-accident]').classList.toggle('ws-off', acc.length === 0);
   const pill = root.querySelector('[data-pill="accident"]');
   pill.classList.toggle('ws-off', acc.length === 0);
+  // The pill's halo breathes (fx.pulse); the tappable pill itself stays still, so it is easy to hit and to automate.
+  const halo = root.querySelector('[data-accident-halo]');
+  halo.classList.toggle('ws-off', acc.length === 0);
+  fx().pulse(halo, acc.length > 0);
   if (acc.length) {
     pill.dataset.mixer = String(acc[0]);
     const txt = acc.length > 1 ? `Claim ${acc.length}` : 'Tap to claim';
@@ -1101,9 +1298,10 @@ function patchScene(s, t) {
     if (fill.getAttribute('fill') !== want) fill.setAttribute('fill', want);
     g.setAttribute('aria-label', `Mixer ${i + 1}${m.recipe ? `: ${nameOf(m.recipe)}` : ': resting'}. Open the mixers list`);
   });
-  if (jarCount !== null && mixers.length > jarCount && !fx().isReducedMotion()) {
+  if (jarCount !== null && mixers.length > jarCount) {
+    // A new mixer jar springs into the scene with weight (the heavy spring: a cask landing on a shelf).
     const g = root.querySelector(`[data-jar="${mixers.length - 1}"]`);
-    if (g && g.animate) g.animate([{ transform: 'translateY(-14px)', opacity: 0 }, { transform: 'translateY(2px)', opacity: 1, offset: 0.7 }, { transform: 'translateY(0)' }], { duration: 380, easing: 'ease-out' });
+    if (g) fx().spring(g, { from: { transform: 'translateY(-26px)', opacity: 0 }, to: { transform: 'translateY(0px)', opacity: 1 }, preset: 'heavy' });
   }
   jarCount = mixers.length;
 
@@ -1736,7 +1934,7 @@ export function openRecipeSheet(c, { mixer = null, colorId = null, onDone = null
       audio().cork();
       api.close();
       if (visible) renderAll();
-      if (hostEl === root) fx().squash(root.querySelector(`[data-row="mixer:${mi}"]`));
+      if (hostEl === root) squashOnce(fx(), root.querySelector(`[data-row="mixer:${mi}"]`));
       if (cid) toast(`Mixer ${mi + 1} is making ${nameOf(cid)}`, { hex: hexOf(cid) });
       if (onDone) onDone({ mixer: mi, colorId: cid });
     } else toast('That recipe needs a pigment you do not have a source for yet.');
@@ -1771,7 +1969,7 @@ function assignFromCatalog(colorId) {
     if (res && res.ok) {
       audio().cork();
       renderAll();
-      fx().squash(root.querySelector(`[data-row="mixer:${mi}"]`));
+      squashOnce(fx(), root.querySelector(`[data-row="mixer:${mi}"]`));
       toast(`Mixer ${mi + 1} is making ${nameOf(colorId)}`, { hex: hexOf(colorId) });
     } else toast('That recipe needs a pigment you do not have a source for yet.');
     return;
@@ -1985,7 +2183,7 @@ function openShipSheet(vehicle) {
           closeSheet();
           renderAll();
           toast(`Off to ${ROUTES_BY_ID[ss.routeId]?.name}, worth about ${fmt(res.value)}`);
-          fx().squash(root.querySelector(`[data-row="fleet:${vehicle}"]`));
+          squashOnce(fx(), root.querySelector(`[data-row="fleet:${vehicle}"]`));
         } else toast('That vehicle is already on the road.');
       }
     },
@@ -2113,16 +2311,42 @@ function needMore(cost) {
   toast(`Just ${fmt(diff)} more Coins`);
 }
 
-function afterBuy(rowKey, res) {
+/** The level number in a row's sub line ("Level 3 · ..."), or null. */
+function levelOf(rowEl) {
+  const m = rowEl && /^Level (\d+)/.exec((rowEl.querySelector('.ws-s') || {}).textContent || '');
+  return m ? Number(m[1]) : null;
+}
+
+/** Roll the "Level N" number in a freshly drawn row from `from` to its new value. */
+function rollLevel(rowEl, from) {
+  const sub = rowEl && rowEl.querySelector('.ws-s');
+  const to = levelOf(rowEl);
+  if (!sub || from === null || to === null || to === from) return;
+  const m = /^(Level )(\d+)([\s\S]*)$/.exec(sub.textContent);
+  sub.textContent = '';
+  const n = doc().createElement('span');
+  n.className = 'num';
+  sub.append(m[1], n, m[3]);
+  fx().rollNumber(n, from, to, { ms: 360, format: (v) => String(Math.round(v)) });
+}
+
+function afterBuy(rowKey, res, before = null) {
   renderAll();
   const r = rowKey ? root.querySelector(`[data-row="${rowKey}"]`) : null;
-  fx().squash(r);
+  squashOnce(fx(), r);
   audio().thunk();
-  haptics().light();
+  haptics().medium();
+  rollLevel(r, before);
   if (res && res.milestone) {
     audio().clink(5);
+    if (r) fx().ringBurst(r.querySelector('.ws-lead') || r, '#E2B04A', { size: 56 });
     toast(`Level ${res.level}: output doubles!`);
   }
+}
+
+/** The row's current level, read before a buy redraws it (so the new number can roll). */
+function levelBefore(rowKey) {
+  return rowKey ? levelOf(root.querySelector(`[data-row="${rowKey}"]`)) : null;
 }
 
 function buyFrom(el) {
@@ -2132,27 +2356,39 @@ function buyFrom(el) {
   if (el.dataset.id) args.id = el.dataset.id;
   const cost = Number(el.dataset.cost);
   if (cost > num(S().coins)) { needMore(cost); return; }
+  const key = kind === 'source' ? `source:${args.id}` : kind === 'cellar' || kind === 'shop' ? kind : `${kind}:${args.index}`;
+  const before = levelBefore(key);
   const res = act(sim().factory.buyUpgrade, args);
   if (res && res.ok) {
-    const key = kind === 'source' ? `source:${args.id}` : kind === 'cellar' || kind === 'shop' ? kind : `${kind}:${args.index}`;
-    afterBuy(key, res);
+    afterBuy(key, res, before);
   } else if (res && res.reason === 'slots') toast('All source slots are full for now. A hunter may find more room.');
   else if (res && res.reason === 'coins') needMore(res.cost);
 }
 
 async function doCollect() {
   const s = S();
-  if (num(s.pendingCollect) < 1) return;
+  const pending = Math.floor(num(s.pendingCollect));
+  if (pending < 1) return;
+  const from = Math.floor(num(s.coins));
   coinHold = true;
-  // Coins fly from the scene (the shop counter's till) up to the pill.
+  // Coins fan out of the scene (the shop counter's till), hang a beat, then converge on the pill. The first
+  // coin to land starts the counter rolling up (it slows at the end); the last one squashes the pill.
+  const n = Math.max(8, Math.min(14, 8 + Math.floor(Math.log10(pending + 1) * 2)));
+  let rolled = false;
   const flight = typeof fx().coinArc === 'function'
-    ? fx().coinArc(refs.scene, refs.pill, 6)
+    ? fx().coinArc(refs.scene, refs.pill, n, {
+      onArrive: (i) => {
+        if (!rolled) { rolled = true; fx().rollNumber(refs.coins, from, Math.floor(num(S().coins)), { ms: 520, format: fmt }); }
+        if (i === n - 1 || fx().isReducedMotion()) squashOnce(fx(), refs.pill);
+      },
+    })
     : fx().flyTo(refs.scene, refs.pill, '#C99A2E', { count: 6 });
   act(sim().factory.collect);
-  audio().coins(6);
-  haptics().ripple(3);
+  if (typeof fx().coinArc !== 'function') { audio().coins(6); haptics().ripple(3); }
   renderAll();
   await flight;
+  if (!rolled) squashOnce(fx(), refs.pill);
+  coinShown = Math.floor(num(S().coins));
   coinHold = false;
   patchCoins(S());
 }
@@ -2174,7 +2410,7 @@ function doNext() {
     }
     case 'room': {
       const res = act(sim().factory.buyRoom, { id: a.id });
-      if (res && res.ok) { afterBuy('', res); fx().squash(refs.sugg); }
+      if (res && res.ok) { afterBuy('', res); squashOnce(fx(), refs.sugg); }
       else if (res && res.reason === 'coins') needMore(res.cost);
       break;
     }
@@ -2182,11 +2418,12 @@ function doNext() {
       const args = { kind: a.upgrade };
       if (a.index !== undefined) args.index = a.index;
       if (a.id) args.id = a.id;
+      const key = a.upgrade === 'source' ? `source:${a.id}` : a.upgrade === 'cellar' || a.upgrade === 'shop' ? a.upgrade : `${a.upgrade}:${a.index}`;
+      const before = levelBefore(key);
       const res = act(sim().factory.buyUpgrade, args);
       if (res && res.ok) {
-        const key = a.upgrade === 'source' ? `source:${a.id}` : a.upgrade === 'cellar' || a.upgrade === 'shop' ? a.upgrade : `${a.upgrade}:${a.index}`;
-        afterBuy(key, res);
-        fx().squash(refs.sugg);
+        afterBuy(key, res, before);
+        squashOnce(fx(), refs.sugg);
       } else if (res && res.reason === 'coins') needMore(res.cost);
       else if (res && res.reason === 'slots') toast('All source slots are full for now. A hunter may find more room.');
       break;
@@ -2195,6 +2432,7 @@ function doNext() {
       const res = act(sim().factory.buyMixer);
       if (res && res.ok) {
         afterBuy('mixer:new', res);
+        squashOnce(fx(), refs.sugg);
         toast(`Mixer ${res.index + 1} is ready. Pick what it makes.`);
       } else if (res && res.reason === 'coins') needMore(res.cost);
       break;
@@ -2220,7 +2458,7 @@ function doRush(el) {
     audio().glug(0.7);
     haptics().light();
     renderAll();
-    fx().squash(root.querySelector(`[data-row="mixer:${i}"]`));
+    squashOnce(fx(), root.querySelector(`[data-row="mixer:${i}"]`));
     toast(`Rushed ${fmt(res.jars)} jars`, { hex: hexOf(S().stations.mixers[i].recipe) });
   } else if (res && res.reason === 'full') toast('The vats are full, so there is no room for more yet.');
   else toast(rushWait(S().stations.mixers[i]));
@@ -2262,7 +2500,7 @@ function onClick(e) {
   if (!el || !root.contains(el)) return;
   const a = el.dataset.action;
   switch (a) {
-    case 'settings': ctx.navigate('settings'); break;
+    case 'settings': break; // the app's own click handler opens Settings; navigating here too would fire twice
     case 'collect': doCollect(); break;
     case 'next': doNext(); break;
     case 'open-map': openOrBuy('hunters', () => ctx.navigate('map', {})); break;
@@ -2384,6 +2622,8 @@ const screen = {
     window.addEventListener('pointercancel', up);
     for (const k of Object.keys(sigs)) delete sigs[k];
     vatKeys.fill('');
+    vatPrev.fill(null);
+    bindTouchFeel(root, fx(), { lift: '.ws-hit, .ws-pick, .ws-sugg' });
     coinShown = null;
     jarCount = null;
     segment = loadSegment();

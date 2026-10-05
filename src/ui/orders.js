@@ -24,6 +24,7 @@ import {
   injectStyles, payBase, coinsWord, wishWords, customerName, aboutMinutes, repChip, commissionLock, orderVeteran, SHARED_CSS,
 } from './matching.js';
 import { howThisWorksHtml, markGuideSeen } from './guide.js';
+import { bindTouchFeel, squashOnce } from './workshop.js';
 
 const CSS = `
 .or-chips { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
@@ -48,6 +49,9 @@ const CSS = `
 .or-actions .btn { padding: 0 10px; }
 .or-lock { display: flex; align-items: center; justify-content: center; min-height: var(--tap); }
 .or-empty { text-align: center; padding: 22px 16px; align-items: center; }
+.or-card.is-tap:active, .or-main.is-tap:active { transform: none; box-shadow: var(--cut); }
+.or-card.is-held { box-shadow: 0 6px 0 var(--shadow); }
+.or-card, .or-opt, .or-main { touch-action: manipulation; }
 .or-done { color: var(--ink); font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; }
 `;
 const S = {
@@ -64,6 +68,7 @@ const S = {
   bonus: 1,
   delivered: null, // {text, hex, coins}: the last any/container delivery, thanked inline
   guide: null,
+  fresh: '', // what just changed and should land with motion on the next paint: 'thanks' | 'pick' | 'picker'
   startTimer: 0,
   opened: false,   // she tapped an order this visit (ends the guide's action step)
 };
@@ -117,7 +122,7 @@ function matchCard(o, coach, firstMatch) {
   const { ctx } = S;
   const base = payBase(ctx, o);
   const who = customerName(ctx, o);
-  return h`<div class="card or-card is-tap" data-action="open-match" data-order="${o.id}" data-tap role="button" tabindex="0"${coach ? h` data-coach="first-order"` : firstMatch ? h` data-coach="first-match"` : ''} aria-label="Order from ${who}, would like ${wishWords(ctx, o.target)}">
+  return h`<div class="card or-card is-tap" data-lift="1.02" data-action="open-match" data-order="${o.id}" data-tap role="button" tabindex="0"${coach ? h` data-coach="first-order"` : firstMatch ? h` data-coach="first-match"` : ''} aria-label="Order from ${who}, would like ${wishWords(ctx, o.target)}">
 <div class="or-main">
 <span class="or-sw" style="background:${safeHex(o.target)}" aria-hidden="true"></span>
 <div class="grow stack stack-sm"><div class="or-name ellipsis">${who}</div><div class="small muted">Would like ${wishWords(ctx, o.target)}</div>${payUpTo(base)}</div>
@@ -140,7 +145,7 @@ function anyCard(o, coach) {
   const who = customerName(ctx, o);
   const picked = colors.find((c) => c.id === S.pick[o.id]) ?? null;
   return h`<div class="card or-card" data-order-card="${o.id}"${coach ? h` data-coach="first-order"` : ''}>
-<div class="or-main is-tap" data-action="toggle-any" data-order="${o.id}" data-tap role="button" tabindex="0" aria-expanded="${open ? 'true' : 'false'}" aria-label="Anything you love, from ${who}">
+<div class="or-main is-tap" data-lift="1.02" data-action="toggle-any" data-order="${o.id}" data-tap role="button" tabindex="0" aria-expanded="${open ? 'true' : 'false'}" aria-label="Anything you love, from ${who}">
 <span class="or-sw any" aria-hidden="true">${HEART}</span>
 <div class="grow stack stack-sm"><div class="or-name plain ellipsis">Anything you love</div><div class="small muted"><span class="serif">${who}</span> will pay extra for a color you are proud of.</div>${payUpTo(base, hi)}</div>
 <span class="or-go" style="${open ? 'transform:rotate(90deg)' : ''}">${iconSvg('back', { size: 20 })}</span>
@@ -190,7 +195,7 @@ function boardHtml(state) {
   const firstMatch = open.findIndex((o) => o.kind !== 'any' && !(o.kind === 'container' && o.container));
   return h`<div class="or-chips">${rep >= 1 ? repChip(rep) : h`<span class="small muted">Earn a reputation star with a Perfect match</span>`}</div>
 <div class="small muted" data-countdown></div>
-${th ? h`<div class="card or-thanks" data-thanks>${swatch(th.hex, 44)}<div class="grow"><div class="semi">${th.text}</div><div class="small muted">${th.coins}</div></div></div>` : ''}
+${th ? h`<div class="card or-thanks" data-thanks>${swatch(th.hex, 44)}<div class="grow"><div class="semi">${th.text}</div><div class="small muted">Paid <span data-paid>${th.coins}</span></div></div></div>` : ''}
 ${bonus > 1 ? h`<div class="card or-badge">${iconSvg('coin', { size: 22 })}<span>Fleet is busy: +${Math.round((bonus - 1) * 100)}% for hand delivery</span></div>` : ''}
 <div class="or-actions${lock ? ' one' : ''}">
 ${lock ? '' : button(commCount ? `Commissions (${commCount})` : 'Commissions', { attrs: { 'data-action': 'commissions' } })}
@@ -221,6 +226,28 @@ function paint(force = false) {
     const v = keep[n.getAttribute('data-keepscroll')];
     if (v) n.scrollTop = v;
   });
+  landFresh();
+}
+
+/** Motion for what just changed (the paint replaced the DOM, so the effect runs on the new nodes). */
+function landFresh() {
+  const { ctx, body } = S;
+  const what = S.fresh;
+  S.fresh = '';
+  if (!what || !body) return;
+  const fx = ctx.fx;
+  if (what === 'thanks') {
+    const card = body.querySelector('[data-thanks]');
+    if (!card) return;
+    fx.spring(card, { from: { transform: 'translateY(-14px) scale(0.96)', opacity: 0 }, to: { transform: 'translateY(0px) scale(1)', opacity: 1 }, preset: 'soft' });
+    const n = body.querySelector('[data-thanks] [data-paid]');
+    if (n && S.delivered && S.delivered.amount > 0) fx.rollNumber(n, 0, S.delivered.amount, { ms: 600, format: (v) => coinsWord(ctx, v) });
+  } else if (what === 'pick') {
+    squashOnce(fx, body.querySelector('.or-opt.is-sel'));
+  } else if (what === 'picker') {
+    const pk = body.querySelector('.or-pick');
+    if (pk) fx.spring(pk, { from: { transform: 'translateY(-8px)', opacity: 0 }, to: { transform: 'translateY(0px)', opacity: 1 }, preset: 'soft' });
+  }
 }
 
 function tickCountdown() {
@@ -237,7 +264,8 @@ function celebrate(fromEl, res, order, text, hex) {
   ctx.audio.coins(6);
   ctx.haptics.ripple(3);
   ctx.fx.confetti(['#E2B04A', '#C99A2E', order.target || '#B8433A'], fromEl, { count: 18 });
-  S.delivered = { text, hex: hex || order.target || '#E2B04A', coins: `Paid ${coinsWord(ctx, res.coins)}` };
+  S.delivered = { text, hex: hex || order.target || '#E2B04A', coins: coinsWord(ctx, res.coins), amount: res.coins };
+  S.fresh = 'thanks';
 }
 
 function offerAny(orderId, fromEl) {
@@ -298,6 +326,7 @@ export default {
     S.root = root;
     injectStyles('oq-shared', SHARED_CSS);
     injectStyles('orders', CSS);
+    bindTouchFeel(root, ctx.fx, { lift: '.or-card.is-tap, .or-main.is-tap, .or-opt' });
     root.innerHTML = String(h`<div class="screen-head is-left oq-head"><div class="titles"><div class="title">Orders</div><div class="subtitle">Customers wait as long as it takes</div>${howThisWorksHtml('orders')}</div></div><div class="screen-body pad-bottom-tab" data-body></div>`);
     S.body = root.querySelector('[data-body]');
     const release = () => {
@@ -319,8 +348,8 @@ export default {
           if (!stateOf().onboarding?.seen?.orders) ctx.game.act(markGuideSeen, { id: 'orders' });
           ctx.navigate('matching', { orderId: order });
           break;
-        case 'toggle-any': S.anyOpen = S.anyOpen === order ? null : order; paint(true); break;
-        case 'pick-color': S.pick[order] = t.getAttribute('data-color'); paint(true); break;
+        case 'toggle-any': S.anyOpen = S.anyOpen === order ? null : order; S.fresh = S.anyOpen ? 'picker' : ''; paint(true); break;
+        case 'pick-color': S.pick[order] = t.getAttribute('data-color'); S.fresh = 'pick'; paint(true); break;
         case 'offer-any': offerAny(order, t.closest('.card') || t); break;
         case 'deliver-container': deliverContainer(order, t.getAttribute('data-cell'), t.closest('.card') || t); break;
         case 'go-shelf': ctx.navigate('shelf'); break;
