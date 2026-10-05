@@ -22,6 +22,7 @@
  */
 
 import { h, raw, button, tag, lockTag, swatch, iconSvg, safeHex, lighten, darken } from './kit.js';
+import { unlockTag, openUnlockSheet, ensureStyles as ensureWorkshopStyles } from './workshop.js';
 
 // ---------------------------------------------------------------------------
 // Shared constants
@@ -66,6 +67,9 @@ const CSS = `
   font-family:var(--font-ui); font-weight:600; font-size:16px; text-align:center; line-height:1.25; }
 .mp-banner::before { content:''; position:absolute; left:8px; top:50%; width:6px; height:6px; margin-top:-3px; border-radius:50%; background:var(--plaster); box-shadow:inset 0 0 0 1px var(--plaster-line); }
 .mp-win.is-sleepy { margin-bottom:18px; }
+.mp-banner .tag { white-space:normal; max-width:100%; text-align:left; }
+.mp-banner .ws-unlockbtn { max-width:100%; justify-content:center; text-align:center; }
+.mp-win.is-sleepy[data-action] { cursor:pointer; }
 .mp-banner small { display:block; margin-top:2px; font-family:var(--font-ui); font-size:12px; color:var(--ink-soft); }
 .mp-pin { position:absolute; z-index:2; display:flex; flex-direction:column; align-items:center; gap:3px;
   min-width:44px; transform:translate(-50%,-22px); padding:0; text-align:center; }
@@ -433,10 +437,9 @@ export function regionLock(ctx, state, region) {
   if (regionOpen(ctx, state, region)) return null;
   if ((region.era ?? 1) > (state.era ?? 1)) return { text: 'Coming in a later update', more: Infinity, later: true };
   const count = colorsCount(ctx, state);
-  const U = ctx.sim.HUNTERS_UNLOCK_COLORS;
+  if (!huntersOn(ctx, state)) return { text: 'Opens with the map window', more: Math.max(1, (ctx.sim.HUNTERS_UNLOCK_COLORS || 15) - count), later: false };
   const u = region.unlock || {};
-  const own = u.type === 'colors' ? fin(u.n) : 0;
-  const n = Math.max(own, huntersOn(ctx, state) ? 0 : U);
+  const n = u.type === 'colors' ? fin(u.n) : 0;
   if (n > count) return { text: `Opens at ${n} colors: ${n - count} more`, more: n - count, later: false };
   if (u.type === 'event' || region.kind === 'event') return { text: 'Opens with its weekly event', more: 0, later: false };
   return { text: 'Opens soon', more: 0, later: false };
@@ -452,10 +455,7 @@ export function hireInfo(ctx, state, def) {
   const cost = def.hireCost ?? 0;
   if (chk.ok) return { kind: 'ready', can: true, cost, text: cost > 0 ? `Hire for ${ctx.format.num(cost)} coins` : 'Joins free', icon: cost > 0 ? 'coin' : null };
   if (chk.reason === 'hired') return { kind: 'hired', can: false, cost, text: '', icon: null };
-  if (!huntersOn(ctx, state)) {
-    const U = ctx.sim.HUNTERS_UNLOCK_COLORS;
-    return { kind: 'locked', can: false, cost, text: `Arrives at ${U} colors: ${Math.max(0, U - colorsCount(ctx, state))} more`, icon: 'lock' };
-  }
+  if (!huntersOn(ctx, state)) return { kind: 'locked', can: false, cost, text: 'Arrives when you open the map window', icon: 'lock' };
   if (chk.reason === 'full') return { kind: 'full', can: false, cost, text: 'Your team is full', icon: null };
   if (chk.reason === 'colors') return { kind: 'colors', can: false, cost, text: `Joins at ${def.hireColors} colors: ${chk.need} more`, icon: 'lock' };
   if (chk.reason === 'coins') return { kind: 'coins', can: false, cost, text: `Hire for ${ctx.format.num(cost)} coins: ${ctx.format.num(Math.max(1, Math.ceil(cost - fin(state.coins))))} more`, icon: 'coin' };
@@ -830,9 +830,9 @@ function mapHtml(state) {
   const ev = eventRegion(ctx, state);
   const pins = ctx.content.REGIONS.filter((r) => r.kind !== 'event').map((r) => pinHtml(state, r, outBy, false));
   if (ev && hOn) pins.push(pinHtml(state, ev, outBy, true));
-  const more = Math.max(0, ctx.sim.HUNTERS_UNLOCK_COLORS - colorsCount(ctx, state));
-  return h`<div class="mp-win ${hOn ? '' : 'is-sleepy'}" data-coach="map"><div class="mp-view ${hOn ? '' : 'is-sleepy'}">${raw(MAP_ART)}${pins}</div>
-    ${hOn ? '' : h`<div class="mp-banner">Hunters arrive at ${ctx.sim.HUNTERS_UNLOCK_COLORS} colors<small>${more} more, and the window opens.</small></div>`}</div>`;
+  const sleepy = hOn ? '' : raw(' data-action="unlock-open" data-unlock="hunters" data-tap role="button" tabindex="0" aria-label="What the map window opens"');
+  return h`<div class="mp-win ${hOn ? '' : 'is-sleepy'}"${sleepy} data-coach="map"><div class="mp-view ${hOn ? '' : 'is-sleepy'}">${raw(MAP_ART)}${pins}</div>
+    ${hOn ? '' : h`<div class="mp-banner">${unlockTag(ctx, 'hunters')}<small>Tap the window to see what it opens.</small></div>`}</div>`;
 }
 
 /** The locked places with their paper tags, nearest goal first (kept off the illustration so nothing overlaps). */
@@ -935,8 +935,7 @@ function paint(state, force = false) {
   const slot = root.querySelector('[data-map-headslot]');
   if (slot) {
     const hOn = huntersOn(ctx, state);
-    const more = Math.max(0, ctx.sim.HUNTERS_UNLOCK_COLORS - colorsCount(ctx, state));
-    const headHtml = String(hOn ? button('Album', { attrs: { 'data-action': 'open-album' } }) : lockTag(`Album: ${more} more colors`));
+    const headHtml = String(hOn ? button('Album', { attrs: { 'data-action': 'open-album' } }) : lockTag('Album opens with the map window'));
     if (slot.innerHTML !== headHtml) slot.innerHTML = headHtml;
   }
 }
@@ -972,7 +971,8 @@ function onClick(e) {
   if (!el || !root.contains(el)) return;
   const a = el.getAttribute('data-action');
   const state = ctx.game.state;
-  if (a === 'open-hunter') ctx.navigate('hunter', { hunterId: el.getAttribute('data-hunter-id') });
+  if (a === 'unlock-open') { ensureWorkshopStyles(); openUnlockSheet(ctx, el.getAttribute('data-unlock'), { host: root }); }
+  else if (a === 'open-hunter') ctx.navigate('hunter', { hunterId: el.getAttribute('data-hunter-id') });
   else if (a === 'region') openSendSheet(ctx, { regionId: el.getAttribute('data-region-id') });
   else if (a === 'answer-choice') { e.stopPropagation(); openChoiceSheet(ctx, el.getAttribute('data-hunter-id')).then(() => paint(ctx.game.state, true)); }
   else if (a === 'dismiss-backpack') {

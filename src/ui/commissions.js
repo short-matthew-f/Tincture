@@ -17,7 +17,8 @@
  */
 
 import { h, raw, iconSvg, button, backButton, tag, swatch, progressBar, safeHex, CONTAINER_NAMES } from './kit.js';
-import { injectStyles, coinsWord, commissionLock, SHARED_CSS } from './matching.js';
+import { injectStyles, coinsWord, SHARED_CSS } from './matching.js';
+import { unlockTag, openUnlockSheet, ensureStyles as ensureWorkshopStyles } from './workshop.js';
 
 const FAMILY_PLURAL = Object.freeze({
   red: 'reds', orange: 'oranges', yellow: 'yellows', green: 'greens', teal: 'teals',
@@ -313,10 +314,11 @@ ${button('Back to orders', { variant: nextDef ? 'paper' : 'primary', block: true
 
 function boardHtml(state) {
   const { sim } = S.ctx;
-  const lock = commissionLock(S.ctx, state);
-  if (lock) {
-    return h`<div class="card cm-empty"><div class="oq-h">Commissions are on the way</div><p class="muted">Big projects for the whole town, delivered a few jars at a time.</p>
-<div class="oq-lockrow" data-lock>${lock.tag}${lock.more ? h`<span class="more">${lock.more}</span>` : ''}</div></div>
+  const u = sim.unlocks.status(state, 'commissions');
+  if (!u.open) {
+    const more = u.colorsLeft > 0 ? `${u.colorsLeft} more ${u.colorsLeft === 1 ? 'color' : 'colors'} to see it` : !u.phaseOk ? 'It opens once the Loading Yard is built' : 'Tap to see what it opens';
+    return h`<div class="card cm-empty is-tap" data-action="unlock-open" data-unlock="commissions" data-tap role="button" tabindex="0" aria-label="What Commissions opens"><div class="oq-h">Commissions are on the way</div><p class="muted">Big projects for the whole town, delivered a few jars at a time.</p>
+<div class="oq-lockrow" data-lock>${unlockTag(S.ctx, 'commissions', { cls: 'oq-lock' })}<span class="more">${more}</span></div></div>
 ${previewHtml(state)}`;
   }
   if (S.cele) return celeHtml(state);
@@ -522,6 +524,7 @@ export default {
       const cur = sh && eligible(stateOf(), sh.commissionId, sh.stepIndex).find((c) => c.id === sh.colorId);
       const max = cur ? cur.max : 0;
       switch (t.getAttribute('data-action')) {
+        case 'unlock-open': ensureWorkshopStyles(); openUnlockSheet(ctx, t.getAttribute('data-unlock'), { host: root }); break;
         case 'deliver': openSheet(t.getAttribute('data-commission'), Number(t.getAttribute('data-step'))); break;
         case 'complete': complete(t.getAttribute('data-commission')); break;
         case 'sheet-color': {

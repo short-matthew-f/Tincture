@@ -1,38 +1,43 @@
 /**
  * workshop.js: the Workshop home screen (screen id `workshop`).
  *
- * Owns: the sticky HUD (title, coin pill with rolling number and rate, settings
- * gear, flow meter + its one suggested upgrade), the live workshop scene (ported
- * from docs/prototypes/Main.dc.html: map window, corkboard, three display vats,
- * merge shelf, mixing bench, Gallery door, plus a calendar, ledger book,
- * commissions scroll and loading yard), the Collect button, the "Almost there"
- * card, the stations panel (Sources, Grinders, Mixers, Vats, Cellar, Shop,
- * Fleet), the next-room card, the apprentices card and "Close up shop".
- * Implements docs/UI-CONTRACT.md and DESIGN.md "The factory", "Storage and
- * shipping > The flow meter", "Light active hooks", "Stopping points".
+ * Home (docs/V02-CONTRACTS.md, PLAN-v0.2 Theme A): the sticky head (title, the coin pill, which
+ * becomes the Collect button with a "Collect 1.2K" label when the till has coins, the flow meter
+ * and ONE primary "Next" button rendered from sim.next), the live scene (map window, corkboard,
+ * display vats, mixer jars, merge shelf, bench, Gallery door, plus calendar, ledger book, jobs
+ * scroll and loading yard), a 44 px sticky segmented control (Stations | Shipping once the yard
+ * is bought | Rooms & staff) that shows one section at a time and remembers the last one in
+ * localStorage['tincture.workshop.segment'], then "Almost there" and "Close up shop" at the bottom.
+ * Deep links show({panel, upgrade, row, index, unlock, rebuy, sheet, vat, assign}) pick the segment,
+ * scroll the row into view and flash it once. Scene objects are shortcuts: a mixer jar opens
+ * Stations at that mixer, a vat opens its detail sheet, the yard opens Shipping.
  *
- * Rendering: a stable DOM skeleton is built once in mount(). render(state) only
- * patches text/attributes in place, and rebuilds a section's innerHTML when that
- * section's signature changed (never while a pointer is down, so taps are not
- * lost). Every dynamic string goes through kit.h (escaped).
+ * Locked things carry a price tag (kit.lockTag, then a paper button once the colors are met) and
+ * open the "What this opens" sheet; buying plays a 1.5 s ceremony in the scene and emits
+ * ctx.game 'unlocked' {id, object}. Level up rows show before -> after.
  *
- * Sheets (recipe picker, vat color, shipping, close-up confirm) are drawn inside
- * this screen's own <section> with `openSheet`, so they do not depend on the
- * app-level modal. `openSheet` and `closeUpFlow` are exported for ledger.js.
+ * Rendering: a stable DOM skeleton is built once in mount(). render(state) only patches
+ * text/attributes in place, and rebuilds a section's innerHTML when that section's signature
+ * changed (never while a pointer is down, so taps are not lost). Every dynamic string goes
+ * through kit.h (escaped).
  *
- * data-action names used here: settings, collect, suggestion, open-map,
- * open-album, open-shelf, open-bench, open-gallery, open-quests, open-ledger,
- * open-commissions, open-yard, claim-accident, vat-color, toggle-panel, buy,
- * buy-grinder-kind, mixer-recipe, rush, buy-room, buy-apprentice,
- * steward-toggle, fleet-ship, fleet-route, buy-vehicle, almost, close-up,
- * close-up-reopen, locked.
- * data-coach targets: flow-meter (on the big suggestion button, which is always the
- * buyable one when anything is affordable), vats, shelf, map-window, gallery-door, mill-room,
- * close-up (plus bench, calendar, ledger-book, collect, loading-yard).
+ * Exports for other screens: openSheet(host, opts) and closeUpFlow(ctx, host) (ledger.js), plus
+ * unlockTag(ctx, id), openUnlockSheet(ctx, id, {host}), unlockCeremony(objectId) and
+ * openRecipeSheet(ctx, {mixer, colorId, onDone, host}), and ensureStyles().
+ *
+ * data-action names used here: settings, collect (the coin pill), next, segment, open-map,
+ * open-album, open-shelf, open-bench, open-gallery, open-quests, open-ledger, open-commissions,
+ * open-yard, goto-mixers, unlock-open, unlock-buy (in the sheet), keep-step (vat sheet), claim-accident,
+ * vat-color, toggle-panel, buy, buy-grinder-kind, mixer-recipe, rush, buy-room, buy-apprentice,
+ * steward-toggle, fleet-ship, fleet-route, buy-vehicle, almost, dismiss-whatsnew, close-up,
+ * close-up-reopen.
+ * data-coach targets: next (the big button), collect (the coin pill), vats, shelf, map-window,
+ * gallery-door, mill-room, close-up, doors (plus bench, calendar, ledger-book, commissions,
+ * loading-yard, almost-there, rooms).
  */
 
 import {
-  h, raw, button, iconSvg, swatch, escapeHtml, lighten, safeHex, vatSvg, tag,
+  h, raw, button, iconSvg, swatch, escapeHtml, lighten, safeHex, vatSvg, tag, lockTag,
 } from './kit.js';
 import defaultFx from './fx.js';
 import defaultAudio from './audio.js';
@@ -41,7 +46,7 @@ import { ROOMS } from '../content/rooms.js';
 import {
   GRINDER_KINDS_BY_ID, VEHICLES, VEHICLES_BY_ID, RUSH_COOLDOWN_MS, MIXER,
 } from '../content/stations.js';
-import { SOURCES_BY_ID, MAX_SOURCES_ERA1 } from '../content/sources.js';
+import { SOURCES_BY_ID } from '../content/sources.js';
 import { APPRENTICES } from '../content/apprentices.js';
 import { ROUTES_BY_ID } from '../content/routes.js';
 import { getPigment } from '../content/pigments.js';
@@ -82,7 +87,7 @@ export function ensureStyles() {
   s.textContent = `
 .ws-head { flex-direction: column; align-items: stretch; gap: 10px; padding-bottom: 10px; }
 .ws-top { display: flex; align-items: center; gap: 10px; }
-.ws-title { flex: 1 1 auto; min-width: 0; font-family: var(--font-display); font-weight: 400; font-size: 21px; line-height: 1.15; letter-spacing: .2px; }
+.ws-title { flex: 1 1 auto; min-width: 0; font-family: var(--font-display); font-weight: 400; font-size: 18px; line-height: 1.15; letter-spacing: .2px; }
 .ws-pill { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 4px 12px 4px 8px; border-radius: 999px; background: var(--paper); box-shadow: 0 2px 0 var(--shadow); }
 .ws-pill .v { font-weight: 700; font-size: 16px; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .ws-pill .r { font-size: 11px; line-height: 1.1; color: var(--ink-soft); }
@@ -90,12 +95,12 @@ export function ensureStyles() {
 .ws-dot { position: absolute; top: 8px; right: 8px; width: 9px; height: 9px; border-radius: 50%; background: var(--walnut); box-shadow: 0 0 0 2px var(--paper); }
 .ws-head::after { content: ''; position: absolute; left: 0; right: 0; top: 100%; height: 10px; background: linear-gradient(var(--plaster), rgba(227,230,224,0)); pointer-events: none; }
 .btn.ws-sugg { min-height: 48px; width: 100%; padding: 0 14px; }
-.btn.ws-sugg[data-state="wait"] { background-color: var(--paper); color: var(--ink); box-shadow: var(--cut-sm); background-image: linear-gradient(90deg, rgba(226,176,74,.5) var(--p, 0%), rgba(226,176,74,0) var(--p, 0%)); }
+.btn.ws-sugg[data-state="wait"] { background-image: linear-gradient(90deg, rgba(247,244,236,.3) var(--p, 0%), rgba(247,244,236,0) var(--p, 0%)); }
 .btn.ws-sugg[aria-disabled="true"] { opacity: 1; }
 .ws-next { margin-top: -4px; font-size: 12px; line-height: 1.25; color: var(--ink-soft); text-align: center; }
 .ws-head .seg-value { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ws-head .meter > .seg { padding: 8px 6px 8px 8px; }
-.ws-tagpin { position: absolute; transform: translate(-50%, -50%); pointer-events: none; line-height: 1.1; }
+.ws-tagpin { position: absolute; transform: translate(-50%, -50%); pointer-events: none; line-height: 1.1; z-index: 2; }
 .ws-tagpin.l { transform: translate(0, -50%); }
 .ws-tagpin.ws-off { display: none; }
 .ws-lbl { font-family: 'Figtree', system-ui, sans-serif; font-size: 10px; font-weight: 600; fill: #5E5148; pointer-events: none; }
@@ -167,6 +172,50 @@ export function ensureStyles() {
 .ws-switch-row { display: flex; align-items: center; gap: 12px; min-height: 44px; }
 .ws-switch-row .switch { position: relative; }
 .ws-need { font-size: 13px; color: var(--ink-soft); }
+.ws-pill { position: relative; flex: 0 0 auto; }
+.ws-pill[data-collect="on"] { background: var(--glow); box-shadow: 0 0 0 2px var(--glow-ring), 0 2px 0 var(--shadow); cursor: pointer; animation: ws-pill-pulse 2.4s ease-in-out infinite; }
+.ws-pill[data-collect="on"] .r { color: var(--glow-ink); font-weight: 700; font-size: 12px; }
+.ws-pill[data-collect="on"]:active { transform: translateY(2px); animation: none; }
+@keyframes ws-pill-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.035); } }
+.ws-segbar { position: sticky; top: 0; z-index: 3; margin: 0 calc(-1 * var(--gutter)); padding: 4px var(--gutter); background: var(--plaster); }
+.ws-segbar .seg-control { padding: 0; gap: 3px; }
+.ws-segbar .seg-control > button { min-height: 44px; padding: 0 6px; white-space: nowrap; }
+.ws-segbar .seg-control > button[hidden] { display: none; }
+.ws-body [data-sec]:empty { display: none; }
+.ws-pane { display: flex; flex-direction: column; gap: 12px; }
+.ws-pane[hidden] { display: none; }
+.ws-pane [data-pw], .ws-pane [data-sec], .ws-pane .ws-row { scroll-margin-top: 58px; }
+.ws-flash { animation: ws-flash 1.3s ease-out 1; border-radius: 12px; }
+@keyframes ws-flash { 0% { box-shadow: 0 0 0 0 rgba(185,131,28,0); } 22% { box-shadow: 0 0 0 4px var(--glow-ring); background-color: var(--glow); } 100% { box-shadow: 0 0 0 0 rgba(185,131,28,0); } }
+.ws-tagpin { display: flex; flex-direction: column; gap: 4px; align-items: center; width: max-content; max-width: var(--tw, 150px); }
+.ws-tagpin.l { align-items: flex-start; }
+.ws-tagpin .tag { white-space: normal; max-width: var(--tw, 150px); line-height: 1.2; padding-top: 4px; padding-bottom: 4px; text-align: left; }
+.ws-tagpin .ws-waiting { background: var(--glow); color: var(--glow-ink); }
+.ws-unlockbtn { position: relative; min-height: 44px; padding: 6px 12px; font-size: 12px; line-height: 1.2; text-align: left; justify-content: flex-start; max-width: 100%; white-space: normal; }
+.ws-tagpin .ws-unlockbtn { pointer-events: auto; max-width: var(--tw, 150px); }
+.ws-main .tag, .ws-actions .tag { white-space: normal; max-width: 100%; text-align: left; line-height: 1.25; padding-top: 4px; padding-bottom: 4px; }
+.ws-main .ws-unlockbtn { max-width: 100%; }
+.ws-unlockbtn.is-next { background: #FFF6DF; box-shadow: 0 0 0 2.5px var(--ink), 0 3px 0 var(--shadow); font-weight: 700; }
+.ws-unlockbtn.is-ready { font-weight: 700; }
+.ws-dim { opacity: .55; }
+.ws-ill { display: flex; justify-content: center; padding: 6px 0 2px; }
+.ws-ill svg { width: 100%; max-width: 250px; max-height: 190px; height: auto; overflow: visible; }
+.ws-ill .ws-pulse { animation: ws-pulse 2.6s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+@keyframes ws-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.02); } }
+.ws-unlock-name { font-family: var(--font-display); font-size: 20px; line-height: 1.2; text-align: center; }
+.ws-unlock-says { font-size: 15px; line-height: 1.35; text-align: center; }
+.ws-unlock-price { display: flex; align-items: center; justify-content: center; gap: 6px; font-weight: 700; font-size: 17px; font-variant-numeric: tabular-nums; }
+.ws-unlock-note { font-size: 13px; color: var(--ink-soft); text-align: center; }
+.ws-cer { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; overflow: visible; }
+.ws-cer-tag { position: absolute; z-index: 6; pointer-events: none; }
+.ws-note { background: var(--paper); }
+.ws-note ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; font-size: 14px; line-height: 1.35; }
+.ws-keep { display: flex; align-items: center; gap: 8px; }
+.ws-keep .grow { min-width: 0; }
+.ws-vat-head { display: flex; align-items: center; gap: 12px; }
+.ws-vat-facts { display: flex; flex-direction: column; gap: 2px; font-size: 14px; }
+.ws-use { font-size: 12px; color: var(--walnut); }
+@media (prefers-reduced-motion: reduce) { .ws-pill[data-collect="on"], .ws-ill .ws-pulse, .ws-flash { animation: none; } }
 `;
   d.head.appendChild(s);
 }
@@ -308,6 +357,10 @@ let closedInfo = null;            // {fillMs} after "Close up shop" this session
 let almostCache = { at: -1e9, items: [] };
 const sigs = {};
 const vatKeys = ['', '', ''];
+let jarCount = null;
+const renderMemo = { on: false, has: false, next: null }; // sim.next computed once per render
+let segment = 'stations';
+let ceremonySnap = null;
 const PANEL_KEY = 'tincture.workshop.panels';
 const openPanels = new Set(loadPanels());
 
@@ -349,19 +402,110 @@ const SHELF_SLOTS = [
   [318, 214, 10, 26, 5, '#6E4A7E'], [336, 214, 10, 26, 5, '#6E4A7E'],
 ];
 
+const MAX_JARS = 6; // mixer jars drawn on the bench's lower shelf
+
 /** A hung paper tag over the scene (an HTML kit.tag, positioned in the 390 x 440 scene's percent space). */
-function tagPin(key, x, y, anchor = 'c') {
-  return `<span class="ws-tagpin ws-off${anchor === 'l' ? ' l' : ''}" data-tag="${key}" style="left:${(x / 390 * 100).toFixed(2)}%;top:${(y / 440 * 100).toFixed(2)}%"></span>`;
+function tagPin(key, x, y, tw = 150, anchor = 'c') {
+  return `<span class="ws-tagpin ws-off${anchor === 'l' ? ' l' : ''}" data-tag="${key}" style="left:${(x / 390 * 100).toFixed(2)}%;top:${(y / 440 * 100).toFixed(2)}%;--tw:${tw}px"></span>`;
 }
 
 function hit(x, y, w, hgt) {
   return `<rect class="ws-focus" x="${x}" y="${y}" width="${w}" height="${hgt}" rx="8"/>`;
 }
 
+// The scene's objects, drawn once and reused by the "What this opens" sheet.
+// `f` is the id of the drop-shadow filter in the SVG that hosts the drawing.
+const artWindow = (f) => `<g filter="url(#${f})">
+<rect x="18" y="26" width="128" height="104" rx="8" fill="#7B5236"/>
+<rect x="26" y="34" width="112" height="88" rx="4" fill="#CFE0E2"/>
+<circle cx="112" cy="58" r="11" fill="#E2B04A"/>
+<path d="M26 98 C50 76 72 80 92 92 C108 84 124 82 138 90 L138 122 L26 122 Z" fill="#8FA77A"/>
+<path d="M26 108 C48 96 74 100 100 112 C116 106 128 106 138 110 L138 122 L26 122 Z" fill="#6E8B5E"/>
+<rect x="80" y="34" width="4" height="88" fill="#7B5236"/>
+<rect x="26" y="76" width="112" height="4" fill="#7B5236"/>
+</g>`;
+
+const SHUTTER_HALF = (x, w) => `<rect x="${x}" y="34" width="${w}" height="88" rx="3" fill="#8A6A4C"/><g fill="#6F5238"><rect x="${x}" y="46" width="${w}" height="2"/><rect x="${x}" y="58" width="${w}" height="2"/><rect x="${x}" y="70" width="${w}" height="2"/><rect x="${x}" y="82" width="${w}" height="2"/><rect x="${x}" y="94" width="${w}" height="2"/><rect x="${x}" y="106" width="${w}" height="2"/></g>`;
+
+const artShelf = (f, { vials = true } = {}) => `<g filter="url(#${f})">
+<rect x="250" y="146" width="122" height="104" rx="6" fill="#7B5236"/>
+<rect x="256" y="152" width="110" height="44" rx="2" fill="#5E3E28"/>
+<rect x="256" y="200" width="110" height="44" rx="2" fill="#5E3E28"/>
+${vials ? SHELF_SLOTS.map(([x, y, w, hh, rx, fill]) => `<rect x="${x}" y="${y}" width="${w}" height="${hh}" rx="${rx}" fill="${fill}"/>`).join('') : ''}
+</g>`;
+
+const artDoor = (f) => `<g filter="url(#${f})">
+<path d="M270 360 L270 300 C270 272 290 258 316 258 C342 258 362 272 362 300 L362 360 Z" fill="#6A4630"/>
+<path d="M280 360 L280 302 C280 280 296 268 316 268 C336 268 352 280 352 302 L352 360 Z" fill="#8A5E40"/>
+<path d="M298 296 C298 284 306 278 316 278 C326 278 334 284 334 296 L334 312 L298 312 Z" fill="#2A2622"/>
+<path d="M300 296 C300 286 307 281 315 280 L315 310 L300 310 Z" fill="#3E6A9E"/>
+<path d="M317 280 C325 281 332 286 332 296 L332 310 L317 310 Z" fill="#D39B2A"/>
+<circle cx="344" cy="330" r="4" fill="#E2B04A"/>
+<rect x="282" y="232" width="68" height="22" rx="3" fill="#F7F4EC"/>
+</g>
+<text x="316" y="247" fill="#2A2622" text-anchor="middle" style="font-family:'Young Serif',Georgia,serif;font-size:12px">Gallery</text>`;
+
+const CART = `<rect x="36" y="360" width="22" height="18" rx="2" fill="#C9A277"/>
+<rect x="36" y="368" width="22" height="2" fill="#A87449"/>
+<rect x="62" y="365" width="20" height="13" rx="2" fill="#B98E64"/>
+<rect x="30" y="378" width="62" height="20" rx="3" fill="#7B5236"/>
+<rect x="30" y="384" width="62" height="2" fill="#5E3E28"/>
+<path d="M92 384 L112 372" stroke="#5E3E28" style="stroke-width:3;stroke-linecap:round" fill="none"/>
+<circle cx="46" cy="402" r="9" fill="#5E3E28"/><circle cx="46" cy="402" r="3.5" fill="#B98E64"/>
+<circle cx="78" cy="402" r="9" fill="#5E3E28"/><circle cx="78" cy="402" r="3.5" fill="#B98E64"/>`;
+const artYard = (f) => `<g filter="url(#${f})" data-art="yard">${CART}</g>`;
+
+const artJobs = (f) => `<g filter="url(#${f})">
+<rect x="0" y="0" width="26" height="6" rx="3" fill="#7B5236"/>
+<rect x="2" y="5" width="22" height="36" fill="#F7F4EC"/>
+<rect x="0" y="40" width="26" height="6" rx="3" fill="#7B5236"/>
+<rect x="6" y="12" width="14" height="2" fill="#B7BDB3"/><rect x="6" y="18" width="14" height="2" fill="#B7BDB3"/><rect x="6" y="24" width="9" height="2" fill="#B7BDB3"/>
+<circle cx="18" cy="32" r="4" fill="#C99A2E"/>
+</g>`;
+
+function mixerJarsSvg() {
+  let out = '<rect x="38" y="352" width="182" height="5" rx="2" fill="#5E3E28"/>';
+  for (let i = 0; i < MAX_JARS; i++) {
+    const x = 44 + i * 28;
+    out += `<g class="ws-hit ws-off" data-jar="${i}" data-action="goto-mixers" data-mixer="${i}" data-tap role="button" tabindex="0" aria-label="Mixer ${i + 1}: open the mixers list">
+<g filter="url(#ws-cut)"><rect x="${x + 3}" y="322" width="14" height="5" rx="2" fill="#C9A277"/>
+<rect x="${x}" y="326" width="20" height="26" rx="6" fill="#F2F4F0"/>
+<rect data-jar-fill="${i}" x="${x}" y="338" width="20" height="14" rx="6" fill="#B7BDB3"/>
+<rect x="${x}" y="326" width="20" height="26" rx="6" fill="none" stroke="#2A2622" stroke-width="1.6"/></g>
+<rect class="ws-focus" x="${x - 4}" y="316" width="28" height="42" rx="6"/></g>`;
+  }
+  return out;
+}
+
+/** What each unlock opens in the scene, what it does, and how the sheet draws it. */
+const UNLOCK_INFO = {
+  shelf: {
+    object: 'shelf', short: 'Shelf', says: 'Drag matching vials together to merge them, and line up six of one color family to sell them together.',
+    vb: '240 140 142 120', art: (f) => artShelf(f),
+  },
+  hunters: {
+    object: 'map-window', short: 'Map window', says: 'Hue Hunters head out from the window and come back with new colors, sources and postcards.',
+    vb: '8 18 148 122', art: (f) => artWindow(f),
+  },
+  gallery: {
+    object: 'gallery-door', short: 'Gallery', says: 'Paint with the jars you make and hang your pieces, and visitors pay admission to see them.',
+    vb: '256 226 120 140', art: (f) => artDoor(f),
+  },
+  shipping: {
+    object: 'yard', short: 'Loading yard', says: 'Carts carry your jars to towns that pay more, and crates you pack by hand earn extra.',
+    vb: '20 352 110 66', art: (f) => artYard(f),
+  },
+  commissions: {
+    object: 'commissions', short: 'Commissions', says: 'Big projects for the town, delivered a few jars at a time, with trophies for the workshop.',
+    vb: '-6 -6 38 58', art: (f) => artJobs(f),
+  },
+};
+const ROOM_UNLOCK = { 'gallery-wing': 'gallery', 'loading-yard': 'shipping' };
+
 function sceneSvg() {
   const vats = [0, 1, 2].map((i) => {
     const bx = 38 + i * 66;
-    return `<g class="ws-hit" data-action="vat-color" data-vat="${i}" data-tap role="button" tabindex="0" aria-label="Vat ${i + 1}: choose a color">
+    return `<g class="ws-hit" data-action="vat-color" data-vat="${i}" data-tap role="button" tabindex="0" aria-label="Vat ${i + 1}: details">
 <g data-vat-art="${i}" transform="translate(${bx - 6} 138)"></g>${hit(bx - 4, 138, 58, 112)}</g>`;
   }).join('');
   const labels = [0, 1, 2].map((i) => {
@@ -380,15 +524,9 @@ function sceneSvg() {
 <rect x="0" y="420" width="390" height="2" fill="#86593A"/>
 
 <g class="ws-hit" data-action="open-map" data-coach="map-window" data-tap role="button" tabindex="0" aria-label="Map window: send hunters out">
-<g filter="url(#ws-cut)">
-<rect x="18" y="26" width="128" height="104" rx="8" fill="#7B5236"/>
-<rect x="26" y="34" width="112" height="88" rx="4" fill="#CFE0E2"/>
-<circle cx="112" cy="58" r="11" fill="#E2B04A"/>
-<path d="M26 98 C50 76 72 80 92 92 C108 84 124 82 138 90 L138 122 L26 122 Z" fill="#8FA77A"/>
-<path d="M26 108 C48 96 74 100 100 112 C116 106 128 106 138 110 L138 122 L26 122 Z" fill="#6E8B5E"/>
-<rect x="80" y="34" width="4" height="88" fill="#7B5236"/>
-<rect x="26" y="76" width="112" height="4" fill="#7B5236"/>
-</g>${hit(18, 26, 128, 104)}</g>
+${artWindow('ws-cut')}
+<g data-shutters="map" class="ws-off">${SHUTTER_HALF(26, 54)}${SHUTTER_HALF(84, 54)}<rect x="18" y="26" width="128" height="104" rx="8" fill="none" stroke="#5E3E28" stroke-width="2"/></g>
+${hit(18, 26, 128, 104)}</g>
 
 <g class="ws-hit" data-action="open-quests" data-coach="calendar" data-tap role="button" tabindex="0" aria-label="Calendar: daily quests">
 <g filter="url(#ws-cut)" transform="translate(156 38)">
@@ -403,13 +541,9 @@ function sceneSvg() {
 <rect class="ws-focus" x="148" y="34" width="48" height="72" rx="6"/></g>
 
 <g class="ws-hit" data-action="open-commissions" data-coach="commissions" data-tap role="button" tabindex="0" aria-label="Commissions: jobs from patrons">
-<g filter="url(#ws-cut)" transform="translate(205 40)">
-<rect x="0" y="0" width="26" height="6" rx="3" fill="#7B5236"/>
-<rect x="2" y="5" width="22" height="36" fill="#F7F4EC"/>
-<rect x="0" y="40" width="26" height="6" rx="3" fill="#7B5236"/>
-<rect x="6" y="12" width="14" height="2" fill="#B7BDB3"/><rect x="6" y="18" width="14" height="2" fill="#B7BDB3"/><rect x="6" y="24" width="9" height="2" fill="#B7BDB3"/>
-<circle cx="18" cy="32" r="4" fill="#C99A2E"/>
-</g><text class="ws-lbl" x="218" y="100" text-anchor="middle">Jobs</text>${hit(196, 34, 44, 72)}</g>
+<g transform="translate(205 40)">${artJobs('ws-cut')}</g>
+<g data-veil="commissions" class="ws-off"><rect x="203" y="38" width="30" height="50" rx="4" fill="#E3E6E0" fill-opacity=".55"/></g>
+<text class="ws-lbl" x="218" y="100" text-anchor="middle">Jobs</text>${hit(196, 34, 44, 72)}</g>
 
 <g class="ws-hit" data-action="open-album" data-coach="corkboard" data-tap role="button" tabindex="0" aria-label="Postcard board: your album">
 <g filter="url(#ws-cut)">
@@ -432,6 +566,11 @@ function sceneSvg() {
 <rect x="256" y="200" width="110" height="44" rx="2" fill="#5E3E28"/>
 ${shelfSlots}
 </g>
+<g data-shelf-cover class="ws-off">
+<rect x="256" y="152" width="110" height="92" rx="2" fill="#F2F4F0" fill-opacity=".58"/>
+<path d="M262 156 L286 156 L262 196 Z" fill="#FFFFFF" fill-opacity=".4"/>
+<g fill="#CFC6B8" fill-opacity=".85"><circle cx="270" cy="228" r="2"/><circle cx="296" cy="236" r="1.6"/><circle cx="324" cy="224" r="2.2"/><circle cx="352" cy="234" r="1.8"/><circle cx="340" cy="176" r="1.6"/><circle cx="288" cy="190" r="1.4"/></g>
+</g>
 <path data-shelf-hint class="ws-off ws-twinkle" d="M269 210 l2 -6 l2 6 l6 2 l-6 2 l-2 6 l-2 -6 l-6 -2 z" fill="#FFF3C4"/>
 ${hit(250, 146, 122, 104)}</g>
 
@@ -446,7 +585,8 @@ ${hit(250, 146, 122, 104)}</g>
 <rect x="56" y="270" width="88" height="5" fill="#995F2A"/>
 <path d="M170 300 C170 278 210 278 210 300 Z" fill="#B9B3A8"/>
 <rect x="198" y="258" width="7" height="34" rx="3" transform="rotate(28 201 275)" fill="#8E877C"/>
-</g>${hit(14, 250, 192, 114)}</g>
+</g>${hit(14, 250, 192, 56)}</g>
+${mixerJarsSvg()}
 ${labels}
 
 <g data-accident class="ws-off ws-glow" pointer-events="none">
@@ -469,31 +609,17 @@ ${labels}
 <rect class="ws-focus" x="208" y="270" width="40" height="38" rx="6"/></g>
 
 <g class="ws-hit" data-action="open-gallery" data-coach="gallery-door" data-tap role="button" tabindex="0" aria-label="Gallery door">
-<g filter="url(#ws-cut)">
-<path d="M270 360 L270 300 C270 272 290 258 316 258 C342 258 362 272 362 300 L362 360 Z" fill="#6A4630"/>
-<path d="M280 360 L280 302 C280 280 296 268 316 268 C336 268 352 280 352 302 L352 360 Z" fill="#8A5E40"/>
-<path d="M298 296 C298 284 306 278 316 278 C326 278 334 284 334 296 L334 312 L298 312 Z" fill="#2A2622"/>
-<path d="M300 296 C300 286 307 281 315 280 L315 310 L300 310 Z" fill="#3E6A9E"/>
-<path d="M317 280 C325 281 332 286 332 296 L332 310 L317 310 Z" fill="#D39B2A"/>
-<circle cx="344" cy="330" r="4" fill="#E2B04A"/>
-<rect x="282" y="232" width="68" height="22" rx="3" fill="#F7F4EC"/>
-</g>
-<text x="316" y="247" fill="#2A2622" text-anchor="middle" style="font-family:'Young Serif',Georgia,serif;font-size:12px">Gallery</text>
+${artDoor('ws-cut')}
+<g data-veil="gallery" class="ws-off"><path d="M270 360 L270 300 C270 272 290 258 316 258 C342 258 362 272 362 300 L362 360 Z" fill="#E3E6E0" fill-opacity=".5"/>
+<g transform="translate(305 326)" fill="none" stroke="#2A2622" stroke-width="2.4" stroke-linecap="round"><rect x="0" y="8" width="22" height="16" rx="3" fill="#F7F4EC"/><path d="M5 8 V4 A6 6 0 0 1 17 4 V8"/></g></g>
 ${hit(270, 232, 92, 128)}</g>
 
 <g class="ws-hit" data-action="open-yard" data-coach="loading-yard" data-tap role="button" tabindex="0" aria-label="Loading yard: ship your colors">
-<g filter="url(#ws-cut)">
-<rect x="36" y="360" width="22" height="18" rx="2" fill="#C9A277"/>
-<rect x="36" y="368" width="22" height="2" fill="#A87449"/>
-<rect x="62" y="365" width="20" height="13" rx="2" fill="#B98E64"/>
-<rect x="30" y="378" width="62" height="20" rx="3" fill="#7B5236"/>
-<rect x="30" y="384" width="62" height="2" fill="#5E3E28"/>
-<path d="M92 384 L112 372" stroke="#5E3E28" style="stroke-width:3;stroke-linecap:round" fill="none"/>
-<circle cx="46" cy="402" r="9" fill="#5E3E28"/><circle cx="46" cy="402" r="3.5" fill="#B98E64"/>
-<circle cx="78" cy="402" r="9" fill="#5E3E28"/><circle cx="78" cy="402" r="3.5" fill="#B98E64"/>
-</g>${hit(24, 356, 96, 62)}</g>
+${artYard('ws-cut')}
+<g data-veil="yard" class="ws-off"><rect x="26" y="356" width="92" height="52" rx="6" fill="#9A6A47" fill-opacity=".55"/><path d="M26 392 H118" stroke="#C9A277" stroke-width="3" stroke-dasharray="7 5" stroke-linecap="round"/></g>
+${hit(24, 356, 96, 62)}</g>
 
-</svg>${tagPin('map', 82, 130)}${tagPin('shelf', 311, 146)}${tagPin('gallery', 316, 332)}${tagPin('yard', 26, 426, 'l')}${tagPin('commissions', 218, 118)}`;
+</svg>${tagPin('map', 82, 84, 112)}${tagPin('shelf', 311, 200, 104)}${tagPin('gallery', 316, 318, 100)}${tagPin('yard', 12, 412, 200, 'l')}${tagPin('commissions', 214, 120, 190)}`;
 }
 
 function shell() {
@@ -501,7 +627,7 @@ function shell() {
 <div class="screen-head ws-head">
   <div class="ws-top">
     <h1 class="ws-title">Tincture Workshop</h1>
-    <div class="ws-pill" data-ref="pill" aria-live="off">
+    <div class="ws-pill" data-ref="pill" data-coach="collect" aria-live="off">
       ${iconSvg('coin', { size: 22 })}
       <div><div class="v num" data-ref="coins">0</div><div class="r" data-ref="rate">Just starting</div></div>
     </div>
@@ -512,18 +638,31 @@ function shell() {
     <div class="seg" data-seg="store"><div class="seg-label">Store</div><div class="seg-value" data-ref="segStore">-</div></div>
     <div class="seg" data-seg="ship"><div class="seg-label">Ship</div><div class="seg-value" data-ref="segShip">-</div></div>
   </div>
-  <button type="button" class="btn btn-primary ws-sugg" data-action="suggestion" data-coach="flow-meter" data-ref="sugg" data-tap>Choose a recipe</button>
+  <button type="button" class="btn btn-primary ws-sugg" data-action="next" data-coach="next" data-ref="sugg" data-cost="0" data-tap>Next</button>
   <div class="ws-next" data-ref="next" hidden></div>
 </div>
 <div class="screen-body ws-body" data-ref="body">
-  <button type="button" class="btn btn-primary block ws-collect" data-action="collect" data-coach="collect" data-ref="collect" data-tap hidden>Collect</button>
+  <div data-sec="whatsnew"></div>
   <div class="ws-scene" data-ref="scene">${raw(sceneSvg())}</div>
-  <div data-sec="almost"></div>
-  <div class="stack" data-sec="panels">
-    ${['sources', 'grinders', 'mixers', 'vats', 'cellar', 'shop', 'fleet'].map((k) => h`<div data-pw="${k}"></div>`)}
+  <div class="ws-segbar" data-ref="segbar">
+    <div class="seg-control" role="group" aria-label="Workshop sections">
+      <button type="button" data-action="segment" data-segment="stations" data-tap aria-pressed="true">Stations</button>
+      <button type="button" data-action="segment" data-segment="shipping" data-tap aria-pressed="false" hidden>Shipping</button>
+      <button type="button" data-action="segment" data-segment="rooms" data-tap aria-pressed="false">Rooms &amp; staff</button>
+    </div>
   </div>
-  <div data-sec="rooms"></div>
-  <div data-sec="apprentices"></div>
+  <div class="ws-pane" data-pane="stations">
+    ${['sources', 'grinders', 'mixers', 'vats', 'cellar', 'shop'].map((k) => h`<div data-pw="${k}"></div>`)}
+  </div>
+  <div class="ws-pane" data-pane="shipping" hidden>
+    <div data-pw="fleet"></div>
+  </div>
+  <div class="ws-pane" data-pane="rooms" hidden>
+    <div data-sec="rooms"></div>
+    <div data-sec="doors"></div>
+    <div data-sec="apprentices"></div>
+  </div>
+  <div data-sec="almost"></div>
   <div data-sec="closeup"></div>
 </div>`);
 }
@@ -569,8 +708,11 @@ ${open ? h`<div class="ws-rows">${rows()}</div>` : ''}</div>`;
 }
 
 function fleetVisible(s) {
-  return (s.phase ?? 1) >= 2 || (s.rooms || []).includes('loading-yard') || (s.stations.fleet || []).length > 0;
+  return !!(s.unlocks && s.unlocks.shipping) || (s.stations.fleet || []).length > 0;
 }
+
+/** "0.08 → 0.11 a second": a Level up row's before and after. */
+const ba = (before, after, unit) => `${fmtRate(before)} \u2192 ${fmtRate(after)} ${unit}`;
 
 function panelSpec(key, s, t) {
   const st = s.stations;
@@ -587,13 +729,14 @@ function panelSpec(key, s, t) {
           const def = SOURCES_BY_ID[id];
           const pig = getPigment(def?.pigment ?? id);
           const out = L > 0 ? eco().stationOutput('source', L, id) * pm : num(def?.baseRate, 1) * pm;
+          const outNext = eco().stationOutput('source', L + 1, id) * pm;
           // A source lent by the weekly event (Deep Sea twist) goes back at the week's end.
           const loan = st.sources[id].eventLoan ? h` <span class="tag ws-loan" data-loan="${id}">this week</span>` : '';
           return row({
             key: `source:${id}`,
             lead: swatch(pig?.hex ?? hexOf(id), 36),
             title: h`${def?.name ?? cap1(id)}${loan}`,
-            sub: L > 0 ? `Level ${L} · ${fmtRate(out)} a second` : `Found by a hunter · ${fmtRate(out)} a second when built`,
+            sub: L > 0 ? `Level ${L} · ${ba(out, outNext, 'a second')}` : `Found by a hunter · ${fmtRate(out)} a second when built`,
             hint: L > 0 ? milestoneHint(L) : '',
             actions: buyBtn(L > 0 ? 'Level up' : 'Build', eco().stationCost('source', L, id), { 'data-action': 'buy', 'data-kind': 'source', 'data-id': id }),
           });
@@ -609,12 +752,13 @@ function panelSpec(key, s, t) {
           const def = GRINDER_KINDS_BY_ID[g.kind];
           const next = def?.next ? GRINDER_KINDS_BY_ID[def.next] : null;
           const out = eco().stationOutput('grinder', g.level, g.kind) * pm;
+          const outNext = eco().stationOutput('grinder', g.level + 1, g.kind) * pm;
           const bonus = def?.purityBonus > 0 ? ` · ${Math.round(def.purityBonus * 100)}% purer batches` : '';
           return row({
             key: `grinder:${i}`,
             lead: swatch('#B9B3A8', 36),
             title: def?.name ?? 'Grinder',
-            sub: `Level ${g.level} · ${fmt(out)} pigment/s${bonus}`,
+            sub: `Level ${g.level} · ${ba(out, outNext, 'pigment a second')}${bonus}`,
             hint: milestoneHint(g.level),
             extra: next ? h`<div class="mt-1">${button(h`Upgrade to ${next.name}<span class="c" style="display:inline-flex;align-items:center;gap:4px">${coinIcon(12)}${fmt(def.upgradeCost)}</span>`, { small: true, cls: 'ws-buy-kind', attrs: { 'data-action': 'buy-grinder-kind', 'data-index': String(i), 'data-cost': String(def.upgradeCost), 'aria-disabled': num(s.coins) < def.upgradeCost ? 'true' : 'false' } })}</div>` : '',
             actions: buyBtn('Level up', eco().stationCost('grinder', g.level), { 'data-action': 'buy', 'data-kind': 'grinder', 'data-index': String(i) }),
@@ -625,23 +769,31 @@ function panelSpec(key, s, t) {
     case 'mixers': {
       const ms = st.mixers || [];
       const busy = ms.filter((m) => m.recipe).length;
+      const mq = sim().factory.mixerPurchase(s);
       return {
-        sig: ms.map((m) => `${m.recipe}:${m.level}:${m.accident ? 1 : 0}:${m.recipe ? nameOf(m.recipe) : ''}`).join(','),
+        sig: ms.map((m) => `${m.recipe}:${m.level}:${m.accident ? 1 : 0}:${m.recipe ? nameOf(m.recipe) : ''}`).join(',') + `|${mq.available ? Math.round(mq.cost) : 'x'}`,
         summary: busy === 0 ? `${ms.length} ready for a recipe` : busy === ms.length ? `${busy} busy` : `${busy} busy, ${ms.length - busy} free`,
-        rows: () => ms.map((m, i) => {
+        rows: () => h`${ms.map((m, i) => {
           const rate = eco().stationOutput('mixer', m.level) * pm;
+          const rateNext = eco().stationOutput('mixer', m.level + 1) * pm;
           const lead = m.recipe ? swatch(hexOf(m.recipe), 36) : h`<span class="swatch is-empty" style="--size:36px" aria-hidden="true"></span>`;
           const bar = m.recipe ? h`<div class="progress mt-1" role="progressbar" aria-label="Batch progress" data-mixer-bar="${i}"><span style="width:0%"></span></div>` : '';
           return row({
             key: `mixer:${i}`,
             lead: h`<button type="button" class="ws-pickbtn" data-action="mixer-recipe" data-mixer="${i}" data-tap aria-label="Choose a recipe for mixer ${i + 1}">${lead}</button>`,
             title: m.recipe ? `Mixer ${i + 1}: ${nameOf(m.recipe)}` : `Mixer ${i + 1}: choose a recipe`,
-            sub: m.recipe ? `Level ${m.level} · ${fmtRate(rate)} jars/s · tap the swatch to change` : `Level ${m.level} · tap the swatch to pick what it makes`,
+            sub: `Level ${m.level} · ${ba(rate, rateNext, 'jars a second')}`,
             hint: milestoneHint(m.level),
-            extra: h`${bar}${m.accident ? button('A happy accident! Tap to claim', { small: true, cls: 'ws-claim', attrs: { 'data-action': 'claim-accident', 'data-mixer': String(i) } }) : ''}`,
+            extra: h`<div class="ws-use">${m.recipe ? 'Tap the swatch to change what it makes' : 'Tap the swatch to pick what it makes'}</div>${bar}${m.accident ? button('A happy accident! Tap to claim', { small: true, cls: 'ws-claim', attrs: { 'data-action': 'claim-accident', 'data-mixer': String(i) } }) : ''}`,
             actions: h`${buyBtn('Level up', eco().stationCost('mixer', m.level), { 'data-action': 'buy', 'data-kind': 'mixer', 'data-index': String(i) })}${button('Rush', { small: true, cls: 'ws-rush', attrs: { 'data-action': 'rush', 'data-mixer': String(i), 'data-rush': String(i) } })}`,
           });
-        }),
+        })}${mq.available ? row({
+          key: 'mixer:new',
+          lead: h`<span class="swatch is-empty" style="--size:36px" aria-hidden="true"></span>`,
+          title: 'Add a mixer',
+          sub: 'Another jar on the bench: one more recipe running at once',
+          actions: buyBtn('Buy', mq.cost, { 'data-action': 'buy-mixer' }),
+        }) : ''}`,
       };
     }
     case 'vats': {
@@ -655,7 +807,7 @@ function panelSpec(key, s, t) {
           key: `vat:${i}`,
           lead: h`<button type="button" class="ws-pickbtn" data-action="vat-color" data-vat="${i}" data-tap aria-label="Choose the color shown in vat ${i + 1}">${v.color ? swatch(hexOf(v.color), 36) : h`<span class="swatch is-empty" style="--size:36px" aria-hidden="true"></span>`}</button>`,
           title: `Vat ${i + 1}${v.color ? `: ${nameOf(v.color)}` : ''}`,
-          sub: `Level ${v.level} · holds ${fmt(eco().stationOutput('vat', v.level))} jars`,
+          sub: `Level ${v.level} · holds ${fmt(eco().stationOutput('vat', v.level))} \u2192 ${fmt(eco().stationOutput('vat', v.level + 1))} jars`,
           hint: milestoneHint(v.level, 'capacity'),
           actions: buyBtn('Level up', eco().stationCost('vat', v.level), { 'data-action': 'buy', 'data-kind': 'vat', 'data-index': String(i) }),
         })),
@@ -664,6 +816,7 @@ function panelSpec(key, s, t) {
     case 'cellar': {
       const lvl = num(s.cellarLevel, 1);
       const cap = sim().storage.capacity(s);
+      const capNext = sim().storage.capacity({ ...s, cellarLevel: lvl + 1 });
       return {
         sig: `${lvl}:${cap.cellar}`,
         summary: `Level ${lvl}`,
@@ -671,7 +824,7 @@ function panelSpec(key, s, t) {
           key: 'cellar',
           lead: swatch('#6A4630', 36),
           title: 'Cellar',
-          sub: `Level ${lvl} · holds ${fmt(cap.cellar)} jars`,
+          sub: `Level ${lvl} · holds ${fmt(cap.cellar)} \u2192 ${fmt(capNext.cellar)} jars`,
           hint: 'Shared storage for everything not in a display vat',
           actions: buyBtn('Level up', eco().stationCost('cellar', lvl), { 'data-action': 'buy', 'data-kind': 'cellar' }),
         }),
@@ -686,7 +839,7 @@ function panelSpec(key, s, t) {
           key: 'shop',
           lead: swatch('#C9A277', 36),
           title: 'Shop counter',
-          sub: `Level ${L} · sells ${fmtRate(eco().stationOutput('shop', L))} jars/s · prices +${Math.round((eco().shopPriceBonus(s) - 1) * 100)}%`,
+          sub: `Level ${L} · sells ${ba(eco().stationOutput('shop', L), eco().stationOutput('shop', L + 1), 'jars a second')} · prices +${Math.round((eco().shopPriceBonus(s) - 1) * 100)}% \u2192 +${Math.round((eco().shopPriceBonus({ stations: { shop: { level: L + 1 } } }) - 1) * 100)}%`,
           hint: milestoneHint(L, 'selling'),
           actions: buyBtn('Level up', eco().stationCost('shop', L), { 'data-action': 'buy', 'data-kind': 'shop' }),
         }),
@@ -711,10 +864,10 @@ function panelSpec(key, s, t) {
               key: `fleet:${i}`,
               lead: swatch('#9A6A47', 36),
               title: `${def?.name ?? 'Vehicle'} · Level ${v.level}`,
-              sub: h`<span data-veh-status="${i}">${busy ? 'Out' : 'Idle'}</span> · holds ${fmt(capJ)} jars`,
+              sub: h`<span data-veh-status="${i}">${busy ? 'Out' : 'Idle'}</span> · holds ${fmt(capJ)} \u2192 ${fmt(eco().vehicleCapacity({ ...v, level: v.level + 1 }))} jars`,
               hint: milestoneHint(v.level, 'capacity'),
               extra: dispatcher ? h`<div class="mt-1">${button(`Route: ${route ? route.name : 'none yet'}`, { small: true, attrs: { 'data-action': 'fleet-route', 'data-vehicle': String(i) } })}</div>` : '',
-              actions: h`${busy ? '' : button('Ship', { variant: 'primary', small: true, attrs: { 'data-action': 'fleet-ship', 'data-vehicle': String(i) } })}${buyBtn('Level up', eco().stationCost('vehicle', v.level, v.kind), { 'data-action': 'buy', 'data-kind': 'fleet', 'data-index': String(i) })}`,
+              actions: h`${busy ? '' : button('Ship', { small: true, attrs: { 'data-action': 'fleet-ship', 'data-vehicle': String(i) } })}${buyBtn('Level up', eco().stationCost('vehicle', v.level, v.kind), { 'data-action': 'buy', 'data-kind': 'fleet', 'data-index': String(i) })}`,
             });
           });
           const catalog = VEHICLES.filter((v) => v.era === (s.era ?? 1));
@@ -750,10 +903,7 @@ function storeText(full, fillMs, capTotal) {
 }
 
 function patchHead(s, t, c) {
-  const rate = eco().incomeRate(s, t);
-  const rt = rate > 0 ? ctx.format.rate(rate) : 'Just starting';
-  if (refs.rate.textContent !== rt) refs.rate.textContent = rt;
-  patchCoins(s);
+  patchPill(s, t);
 
   const m = c.meter;
   const set = (el, v) => { if (el.textContent !== v) el.textContent = v; };
@@ -768,83 +918,76 @@ function patchHead(s, t, c) {
     const on = m.weakest === k;
     if (seg.classList.contains('weakest') !== on) seg.classList.toggle('weakest', on);
   }
+  patchNext(s, t);
+}
 
-  // Suggestion button: always something she can tap when anything is affordable.
+/** sim.next(state, now) -> {label, action, cost?, affordable}, or null before the sim has one. */
+function nextOf(s, t) {
+  if (renderMemo.on) {
+    if (renderMemo.has) return renderMemo.next;
+    renderMemo.has = true;
+  }
+  let n = null;
+  try { n = typeof sim().next === 'function' ? sim().next(s, t) || null : null; } catch (e) { console.error('next failed', e); }
+  if (renderMemo.on) renderMemo.next = n;
+  return n;
+}
+
+/** The unlock id Next is pointing at ('' when it points at an upgrade, Collect or a screen). */
+function nextUnlockId(n) {
+  const a = n && n.action;
+  if (!a || typeof a !== 'object') return '';
+  return (a.kind === 'unlock' || a.type === 'unlock') ? String(a.id || '') : '';
+}
+
+/** The ONE primary button on home: whatever sim.next says is the next good thing. */
+function patchNext(s, t) {
   const b = refs.sugg;
-  const info = suggestionInfo(m.suggestion, s);
-  set(b, info.text);
-  if (b.dataset.state !== info.state) b.dataset.state = info.state;
-  b.setAttribute('aria-disabled', info.state === 'wait' ? 'true' : 'false');
-  const primary = info.state === 'go' && !(Math.floor(num(s.pendingCollect)) >= 1);
-  if (b.classList.contains('btn-primary') !== primary) { b.classList.toggle('btn-primary', primary); b.classList.toggle('btn-paper', !primary); }
-  b.style.setProperty('--p', `${Math.round(info.progress * 100)}%`);
-  const o = info.act;
-  b.dataset.kind = o?.kind || '';
-  b.dataset.index = o?.index != null ? String(o.index) : '';
-  b.dataset.id = o?.id || '';
-  b.dataset.cost = String(o?.cost || 0);
+  const n = nextOf(s, t);
+  const coins = num(s.coins);
+  const cost = num(n && n.cost);
+  const waiting = !!n && cost > 0 && n.affordable === false;
+  const label = (n && n.label) || 'Everything is humming';
+  if (b.textContent !== label) b.textContent = label;
+  const state = waiting ? 'wait' : 'go';
+  if (b.dataset.state !== state) b.dataset.state = state;
+  b.setAttribute('aria-disabled', waiting ? 'true' : 'false');
+  b.style.setProperty('--p', `${Math.round(clamp01(cost > 0 ? coins / cost : 0) * 100)}%`);
+  b.dataset.cost = String(cost > 0 ? cost : 0);
+  const a = n && n.action;
+  b.dataset.kind = (a && (a.kind || a.type)) || '';
+  const hint = waiting ? `${fmt(Math.max(1, Math.ceil(cost - coins)))} more coins` : '';
   const nx = refs.next;
-  if (nx.textContent !== info.next) nx.textContent = info.next;
-  if (nx.hidden !== !info.next) nx.hidden = !info.next;
+  if (nx.textContent !== hint) nx.textContent = hint;
+  if (nx.hidden !== !hint) nx.hidden = !hint;
 }
 
-const NOUN = { grinder: 'the grinder', mixer: 'a mixer', vat: 'a vat', shop: 'the shop', fleet: 'the fleet', cellar: 'the cellar', room: 'a room' };
-
-function nounFor(o) {
-  if (o.kind === 'source') return o.id && SOURCES_BY_ID[o.id] ? `the ${SOURCES_BY_ID[o.id].name}` : 'a source';
-  return NOUN[o.kind] || 'the workshop';
-}
-
-/** The cheapest upgrade she can buy right now (skips sources the slots would refuse). */
-function cheapestAffordable(s) {
-  const coins = num(s.coins);
-  const srcs = s.stations.sources || {};
-  const built = Object.values(srcs).filter((x) => num(x.level) > 0).length;
-  let best = null;
-  for (const o of eco().upgradeOptions(s)) {
-    if (!(o.cost <= coins)) continue;
-    if (o.kind === 'source' && !(num(srcs[o.id]?.level) > 0) && built >= MAX_SOURCES_ERA1) continue;
-    if (!best || o.cost < best.cost) best = o;
-  }
-  return best;
-}
-
-/** "Level up the Ochre Pit for 7". */
-function levelUpText(o, s) {
-  const c = fmt(Math.ceil(o.cost));
-  const st = s.stations;
-  switch (o.kind) {
-    case 'source': {
-      const name = SOURCES_BY_ID[o.id]?.name ?? cap1(o.id);
-      return num(st.sources[o.id]?.level) > 0 ? `Level up the ${name} for ${c}` : `Build the ${name} for ${c}`;
+/** The coin pill: coins and rate; when the till has coins waiting it becomes the Collect button. */
+function patchPill(s, t) {
+  const rate = eco().incomeRate(s, t);
+  const pending = Math.floor(num(s.pendingCollect));
+  const on = pending >= 1;
+  const p = refs.pill;
+  if ((p.dataset.collect === 'on') !== on) {
+    if (on) {
+      p.dataset.collect = 'on';
+      p.dataset.action = 'collect';
+      p.setAttribute('role', 'button');
+      p.setAttribute('tabindex', '0');
+      p.setAttribute('data-tap', '');
+    } else {
+      delete p.dataset.collect;
+      delete p.dataset.action;
+      p.removeAttribute('role');
+      p.removeAttribute('tabindex');
+      p.removeAttribute('data-tap');
+      p.removeAttribute('aria-label');
     }
-    case 'grinder': return `Level up the ${(GRINDER_KINDS_BY_ID[st.grinders[o.index]?.kind]?.name ?? 'grinder').toLowerCase()} for ${c}`;
-    case 'mixer': return `Level up Mixer ${o.index + 1} for ${c}`;
-    case 'vat': return `Level up Vat ${o.index + 1} for ${c}`;
-    case 'shop': return `Level up the shop counter for ${c}`;
-    case 'fleet': return `Level up the ${(VEHICLES_BY_ID[st.fleet[o.index]?.kind]?.name ?? 'vehicle').toLowerCase()} for ${c}`;
-    case 'cellar': return `Level up the cellar for ${c}`;
-    default: return `Level up for ${c}`;
   }
-}
-
-/**
- * What the big button says and does. The flow meter's suggestion when she can
- * afford it; otherwise the cheapest upgrade she CAN afford, with the suggestion
- * as a quiet "Next:" line; otherwise a quiet progress button toward it.
- */
-function suggestionInfo(sg, s) {
-  if (!sg) return { text: 'Everything is humming', state: 'go', progress: 0, next: '', act: null };
-  if (sg.kind === 'assign' || !(sg.cost > 0)) return { text: sg.label || 'Choose a recipe', state: 'go', progress: 0, next: '', act: sg };
-  const coins = num(s.coins);
-  const cost = Math.ceil(sg.cost);
-  if (coins >= sg.cost) return { text: `Upgrade ${nounFor(sg)} for ${fmt(cost)}`, state: 'go', progress: 0, next: '', act: sg };
-  const more = fmt(Math.max(1, Math.ceil(sg.cost - coins)));
-  const alt = cheapestAffordable(s);
-  if (alt) {
-    return { text: levelUpText(alt, s), state: 'go', progress: 0, next: `Next: ${nounFor(sg)} for ${fmt(cost)} (${more} more)`, act: alt };
-  }
-  return { text: `${more} more coins to upgrade ${nounFor(sg)}`, state: 'wait', progress: clamp01(coins / sg.cost), next: '', act: sg };
+  if (on) p.setAttribute('aria-label', `Collect ${fmt(pending)} coins`);
+  const rt = on ? `Collect ${fmt(pending)}` : rate > 0 ? ctx.format.rate(rate) : 'Just starting';
+  if (refs.rate.textContent !== rt) refs.rate.textContent = rt;
+  patchCoins(s);
 }
 
 function patchCoins(s) {
@@ -858,55 +1001,21 @@ function patchCoins(s) {
   coinShown = to;
 }
 
-function patchCollect(s) {
-  const pending = Math.floor(num(s.pendingCollect));
-  const b = refs.collect;
-  const show = pending >= 1;
-  if (b.hidden === show) b.hidden = !show;
-  if (show) {
-    const label = `Collect ${fmt(pending)} coins`;
-    if (b.dataset.label !== label) {
-      b.dataset.label = label;
-      b.innerHTML = String(h`${coinIcon(20)}<span>${label}</span>`);
-    }
-  }
-}
-
-/** Hang (or take down) a paper tag over a scene object. `lock` tags carry the lock icon. */
-function setTag(key, text, lock = true) {
+/** Hang (or take down) a paper tag, or a paper button, over a scene object. */
+function setTag(key, html) {
   const g = root.querySelector(`[data-tag="${key}"]`);
   if (!g) return;
-  const on = !!text;
+  const str = String(html || '');
+  const on = !!str;
   g.classList.toggle('ws-off', !on);
-  if (!on) { delete g.dataset.text; return; }
-  const sig = `${lock ? 1 : 0}|${text}`;
-  if (g.dataset.text !== sig) {
-    g.dataset.text = sig;
-    g.innerHTML = String(tag(text, { icon: lock ? 'lock' : null }));
+  if (!on) { delete g.dataset.sig; return; }
+  if (g.dataset.sig !== str) {
+    g.dataset.sig = str;
+    g.innerHTML = str;
   }
 }
 
 const moreColors = (n) => `${n} more color${n === 1 ? '' : 's'}`;
-
-/** The goal each locked scene object names, in the "N more" voice ('' when open). */
-function lockGoals(s) {
-  const sm = sim();
-  const colors = sm.discoveredCount(s);
-  const phase = s.phase ?? 1;
-  const rooms = s.rooms || [];
-  const goals = { map: '', shelf: '', gallery: '', commissions: '', yard: '', yardLock: true };
-  if (!sm.hunters.unlocked(s)) goals.map = moreColors(Math.max(1, 10 - colors));
-  if (!sm.shelf.unlocked(s)) goals.shelf = moreColors(Math.max(1, 5 - colors));
-  const wing = rooms.includes('gallery-wing') || s.gallery?.unlocked;
-  if (!wing) goals.gallery = colors < 20 ? moreColors(20 - colors) : phase < 2 ? 'Mill Room first' : 'Add the Gallery Wing';
-  const yardOwned = rooms.includes('loading-yard');
-  const fl = s.stations.fleet || [];
-  if (!yardOwned) goals.yard = colors < 30 ? moreColors(30 - colors) : phase < 2 ? 'Mill Room first' : 'Add the Loading Yard';
-  else if (fl.length === 0) { goals.yard = 'Add a cart'; goals.yardLock = false; }
-  else { goals.yard = `${fl.filter((v) => !(num(v.arrivesAt) > 0)).length} ready`; goals.yardLock = false; }
-  if (phase < 3) goals.commissions = colors < 30 ? moreColors(30 - colors) : 'Loading Yard first';
-  return goals;
-}
 
 /** A vat's color name on one or two short lines (the plate is about 60 px wide). */
 function vatLabelLines(name) {
@@ -979,25 +1088,68 @@ function patchScene(s, t) {
     if (pt.textContent !== txt) pt.textContent = txt;
   }
 
-  // Merge shelf: containers tinted from her shelf; a sparkle when a merge waits.
-  const shelfOpen = sm.shelf.unlocked(s);
+  // Mixer jars on the bench's lower shelf: one per mixer, tinted by its recipe; the newest pops in.
+  const mixers = s.stations.mixers || [];
+  root.querySelectorAll('[data-jar]').forEach((g) => {
+    const i = Number(g.dataset.jar);
+    const m = mixers[i];
+    g.classList.toggle('ws-off', !m);
+    if (!m) return;
+    const fill = g.querySelector('[data-jar-fill]');
+    const hex = m.recipe ? hexOf(m.recipe) : 'none';
+    const want = hex === 'none' ? 'transparent' : hex;
+    if (fill.getAttribute('fill') !== want) fill.setAttribute('fill', want);
+    g.setAttribute('aria-label', `Mixer ${i + 1}${m.recipe ? `: ${nameOf(m.recipe)}` : ': resting'}. Open the mixers list`);
+  });
+  if (jarCount !== null && mixers.length > jarCount && !fx().isReducedMotion()) {
+    const g = root.querySelector(`[data-jar="${mixers.length - 1}"]`);
+    if (g && g.animate) g.animate([{ transform: 'translateY(-14px)', opacity: 0 }, { transform: 'translateY(2px)', opacity: 1, offset: 0.7 }, { transform: 'translateY(0)' }], { duration: 380, easing: 'ease-out' });
+  }
+  jarCount = mixers.length;
+
+  // Locked things stay visible: veils and shutters on the object, plus a price tag naming the goal.
+  const U = (id) => sim().unlocks.status(s, id);
+  const uShelf = U('shelf');
+  const uHunt = U('hunters');
+  const uGal = U('gallery');
+  const uShip = U('shipping');
+  const uComm = U('commissions');
+
+  // Merge shelf: closed behind dusty glass with the vials that are waiting; open: her containers.
+  const shelfOpen = !!uShelf.open;
   const cells = (s.shelf?.cells || []).filter(Boolean).slice(0, ENTRY_COLORS);
+  const waitingN = Math.max(0, Math.floor(num(s.shelf?.waiting)));
+  const chips = (s.shelf?.colors || []).filter(Boolean);
   root.querySelectorAll('[data-shelf-slot]').forEach((r, i) => {
-    if (!shelfOpen) { r.classList.remove('ws-off'); r.setAttribute('fill', r.dataset.default); return; }
+    if (!shelfOpen) {
+      const show = i < Math.min(waitingN, SHELF_SLOTS.length);
+      r.classList.toggle('ws-off', !show);
+      if (show) r.setAttribute('fill', chips.length ? hexOf(chips[i % chips.length]) : r.dataset.default);
+      return;
+    }
     const cell = cells[i];
     r.classList.toggle('ws-off', !cell);
     if (cell) r.setAttribute('fill', hexOf(cell.color));
   });
+  root.querySelector('[data-shelf-cover]').classList.toggle('ws-off', shelfOpen);
   const hint = root.querySelector('[data-shelf-hint]');
   hint.classList.toggle('ws-off', !(shelfOpen && sm.shelf.hints(s).length > 0));
 
-  // Locked things stay visible: one paper-tag shape (kit.tag) naming the goal.
-  const goals = lockGoals(s);
-  setTag('map', goals.map);
-  setTag('shelf', goals.shelf);
-  setTag('gallery', goals.gallery);
-  setTag('yard', goals.yard, goals.yardLock);
-  setTag('commissions', goals.commissions);
+  root.querySelector('[data-shutters="map"]').classList.toggle('ws-off', !!uHunt.open);
+  root.querySelector('[data-veil="gallery"]').classList.toggle('ws-off', !!uGal.open);
+  root.querySelector('[data-veil="yard"]').classList.toggle('ws-off', !!uShip.open);
+  root.querySelector('[data-veil="commissions"]').classList.toggle('ws-off', !!uComm.open);
+
+  setTag('map', unlockTag(ctx, 'hunters'));
+  setTag('shelf', unlockTag(ctx, 'shelf'));
+  setTag('gallery', unlockTag(ctx, 'gallery'));
+  setTag('commissions', unlockTag(ctx, 'commissions'));
+  if (!uShip.open) setTag('yard', unlockTag(ctx, 'shipping'));
+  else {
+    const fl = s.stations.fleet || [];
+    const ready = fl.filter((v) => !(num(v.arrivesAt) > 0)).length;
+    setTag('yard', fl.length === 0 ? tag('Add a cart', { icon: null }) : tag(`${ready} ready`, { icon: null }));
+  }
 
   // Badges.
   root.querySelector('[data-badge="quests"]').classList.toggle('ws-off', !(sm.quests.questsReady(s) > 0));
@@ -1014,7 +1166,7 @@ function almostItems(s, t) {
 const ICON_HEX = {
   hunter: '#6E4A7E', commission: '#3E6A9E', canvas: '#2F8A8A', vial: '#8FA77A', swatch: '#D39B2A',
   room: '#7B5236', coin: '#C99A2E', pin: '#B8433A', collector: '#D98A8F', quest: '#3E6A9E', postcard: '#6E4A7E',
-  sparkle: '#E2B04A', tube: '#8FA77A',
+  sparkle: '#E2B04A', tube: '#8FA77A', unlock: '#7B5236', cart: '#9A6A47',
 };
 
 function itemHex(it) {
@@ -1064,8 +1216,9 @@ function patchPanels(s, t) {
   });
 }
 
+/** The next room she can buy with the Next-room card (the Gallery Wing and Loading Yard are unlocks, listed under Still to open). */
 function nextRoom(s) {
-  return ROOMS.find((r) => !(s.rooms || []).includes(r.id)) || null;
+  return ROOMS.find((r) => !(s.rooms || []).includes(r.id) && !ROOM_UNLOCK[r.id]) || null;
 }
 
 function patchRooms(s) {
@@ -1083,6 +1236,45 @@ function patchRooms(s) {
 <div class="ws-row" style="border-top:0;padding:4px 0" data-row="room:${r.id}"${r.id === 'mill-room' ? raw(' data-coach="mill-room"') : ''}><div class="ws-main"><div class="ws-t serif" style="font-family:var(--font-display);font-size:17px">${r.name}</div><div class="ws-s">${r.blurb}</div><div class="ws-hint">${hint}</div></div>
 <div class="ws-actions">${goal ? tag(goal) : buyBtn('Open', r.cost, { 'data-action': 'buy-room', 'data-id': r.id, 'data-lock': '0' })}</div></div></div>`;
   });
+}
+
+/** "Still to open": every locked system with its price tag (or paper button) in one place. */
+function patchDoors(s) {
+  const list = (sim().unlocks.UNLOCKS || []).map((u) => sim().unlocks.status(s, u.id)).filter((u) => u && !u.open);
+  const nextId = nextUnlockId(nextOf(s, now()));
+  const sig = list.map((u) => `${u.id}:${u.revealed ? 1 : 0}:${u.affordable ? 1 : 0}:${u.colorsLeft}:${nextId === u.id ? 1 : 0}`).join(',') + `|${num(s.shelf?.waiting)}`;
+  setSection('doors', root.querySelector('[data-sec="doors"]'), sig, () => {
+    if (!list.length) return '';
+    return h`<div class="card" data-coach="doors"><div class="card-title">Still to open</div>
+${list.map((u) => row({
+    key: `unlock:${u.id}`,
+    title: UNLOCK_INFO[u.id]?.short ? `${UNLOCK_INFO[u.id].short}` : u.name,
+    sub: UNLOCK_INFO[u.id]?.says || '',
+    extra: h`<div class="mt-1">${unlockTag(ctx, u.id)}</div>`,
+  }))}</div>`;
+  });
+}
+
+function patchSegments(s) {
+  const shipOn = !!(s.unlocks && s.unlocks.shipping) || (s.stations.fleet || []).length > 0;
+  const btn = root.querySelector('[data-segment="shipping"]');
+  if (btn && btn.hidden === shipOn) btn.hidden = !shipOn;
+  if (!shipOn && segment === 'shipping') setSegment('stations', { remember: false });
+  else applySegment();
+}
+
+/** The one-time "What changed in 0.2" paper note for saves that came from 0.1. */
+function patchWhatsNew(s) {
+  const on = s.flags && s.flags.whatsNew === '0.2';
+  setSection('whatsnew', root.querySelector('[data-sec="whatsnew"]'), on ? 'on' : 'off', () => (on
+    ? h`<div class="card ws-note" data-whatsnew><div class="card-title">What changed in 0.2</div>
+<ul>
+<li>The shelf is now 6 by 6. Six of one color family in a line sell together.</li>
+<li>The shelf, the map window and the gallery are opened with coins. Their tags show the price.</li>
+<li>Purify has difficulty levels, and you pick one on the Puzzles table.</li>
+</ul>
+${button('Got it', { small: true, attrs: { 'data-action': 'dismiss-whatsnew' } })}</div>`
+    : ''));
 }
 
 function patchApprentices(s) {
@@ -1113,7 +1305,7 @@ function patchCloseUp(s) {
   setSection('closeup', root.querySelector('[data-sec="closeup"]'), sig, () => {
     if (!on) return '';
     return button(closedInfo ? '' : 'Close up shop', {
-      variant: closedInfo ? 'primary' : 'wood', block: true, cls: `tall ${closedInfo ? 'ws-closed' : ''}`,
+      variant: 'wood', block: true, cls: `tall ${closedInfo ? 'ws-closed' : ''}`,
       attrs: { 'data-action': closedInfo ? 'close-up-reopen' : 'close-up', 'data-coach': 'close-up', 'data-closeup-btn': '1' },
     });
   });
@@ -1157,21 +1349,27 @@ function autoAssignVats(s) {
 function renderAll(state) {
   if (!root || !refs.coins) return;
   const s = state || S();
+  renderMemo.on = true;
+  renderMemo.has = false;
   try {
     const t = now();
     autoAssignVats(s);
     const c = { meter: eco().flowMeter(s, t), cap: sim().storage.capacity(s) };
     patchHead(s, t, c);
-    patchCollect(s);
+    patchSegments(s);
+    patchWhatsNew(s);
     patchScene(s, t);
     patchAlmost(s, t);
     patchPanels(s, t);
     patchRooms(s);
+    patchDoors(s);
     patchApprentices(s);
     patchCloseUp(s);
     patchAfford(s);
   } catch (e) {
     console.error('workshop render failed', e);
+  } finally {
+    renderMemo.on = false;
   }
 }
 
@@ -1179,7 +1377,7 @@ function patchAfford(s) {
   const coins = num(s.coins);
   root.querySelectorAll('[data-cost]').forEach((b) => {
     const short = coins < num(Number(b.dataset.cost)) || b.dataset.lock === '1';
-    if (b.dataset.action === 'suggestion') return; // handled in patchHead
+    if (b.dataset.action === 'next') return; // handled in patchNext
     const v = short ? 'true' : 'false';
     if (b.getAttribute('aria-disabled') !== v) b.setAttribute('aria-disabled', v);
   });
@@ -1195,41 +1393,365 @@ function pickRow({ action, attrs = {}, lead, title, sub = '', on = false, right 
   return h`<button type="button" class="ws-pick${on ? ' is-on' : ''}" data-action="${action}"${A(attrs)} data-tap>${lead}<span class="grow"><span class="pt">${title}</span>${sub ? h`<br><span class="ps">${sub}</span>` : ''}</span>${right}</button>`;
 }
 
-function recipeSheetHtml(mi) {
+// --- unlocks: the shared price tag, the "What this opens" sheet and the ceremony -----------------
+
+const UNLOCK_LABEL = {
+  shelf: 'the Merge Shelf', hunters: 'the map window', gallery: 'the Gallery Wing', shipping: 'the Loading Yard', commissions: 'Commissions',
+};
+
+/** sim.unlocks.status for one id (null when the sim has no such unlock). */
+function unlockStatus(id) {
+  try { return sim().unlocks.status(S(), id) || null; } catch (e) { return null; }
+}
+
+/**
+ * unlockTag(ctx, id) -> html for a locked thing, '' once it is open.
+ * Before the reveal: a paper lock tag with the price from the start ("Shelf: 8 colors · 400 coins — 3 more colors").
+ * After: a real paper button ("Open the Merge Shelf for 400") that opens the "What this opens" sheet;
+ * it takes the primary look only when it is also the Next button's choice. The shelf's tag leads with
+ * "N vials waiting" from 6 colors on.
+ */
+export function unlockTag(c, id, { cls = '' } = {}) {
+  if (!ctx) ctx = c;
+  const u = unlockStatus(id);
+  if (!u || u.open) return raw('');
+  const info = UNLOCK_INFO[id] || {};
+  let main;
+  if (!u.revealed) {
+    const goal = u.colorsLeft > 0 ? moreColors(u.colorsLeft) : id === 'commissions' ? 'after the Loading Yard' : 'soon';
+    main = lockTag(`${info.short || u.name}: ${u.revealColors} colors · ${fmt(u.cost)} coins — ${goal}`, { cls });
+  } else {
+    const isNext = nextUnlockId(nextOf(S(), now())) === id;
+    main = button(`Open ${UNLOCK_LABEL[id] || u.name} for ${fmt(u.cost)}`, {
+      cls: `ws-unlockbtn${isNext ? ' is-next' : ''}${u.affordable ? ' is-ready' : ''} ${cls}`.trim(),
+      attrs: { 'data-action': 'unlock-open', 'data-unlock': id, 'data-cost': String(u.cost), 'aria-disabled': u.affordable ? 'false' : 'true' },
+    });
+  }
+  const waiting = id === 'shelf' ? Math.max(0, Math.floor(num(S().shelf && S().shelf.waiting))) : 0;
+  const wait = waiting > 0 && sim().discoveredCount(S()) >= 6
+    ? h`<span class="tag ws-waiting">${waiting} ${waiting === 1 ? 'vial' : 'vials'} waiting</span>` : '';
+  return h`${wait}${main}`;
+}
+
+function illustrationSvg(info) {
+  return h`<svg viewBox="${info.vb}" role="img" aria-label="${info.short}" xmlns="http://www.w3.org/2000/svg">
+<defs><filter id="ws-cut-s" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="2.5" stdDeviation="0.4" style="flood-color:#2A2622;flood-opacity:0.25"/></filter></defs>
+<g class="ws-pulse">${raw(info.art('ws-cut-s'))}</g></svg>`;
+}
+
+/**
+ * openUnlockSheet(ctx, id, {host}) -> sheet api. The "What this opens" sheet: a small looping drawing of
+ * the object (2% pulse), one sentence, the price, and "Open it for N" / "Not yet". Buying calls
+ * sim.unlocks.buy, plays unlockCeremony(object) when the workshop is on screen, then emits 'unlocked'.
+ * `host` is the screen's <section> to draw into (default: the workshop).
+ */
+export function openUnlockSheet(c, id, { host = null } = {}) {
+  if (!ctx) ctx = c;
+  const info = UNLOCK_INFO[id];
+  const u = unlockStatus(id);
+  const hostEl = host || root;
+  if (!info || !u || !hostEl) return null;
+  if (u.open) { toast(`${u.name} is already open`); return null; }
+  if (hostEl === root) closeSheet();
+  const render = () => {
+    const st = unlockStatus(id) || u;
+    const waiting = id === 'shelf' ? Math.max(0, Math.floor(num(S().shelf && S().shelf.waiting))) : 0;
+    const more = Math.max(1, Math.ceil(num(st.cost) - num(S().coins)));
+    const goal = st.colorsLeft > 0 ? `${moreColors(st.colorsLeft)} to open it` : id === 'commissions' ? 'Opens after the Loading Yard' : 'Not ready to open yet';
+    const body = h`<div class="ws-ill">${illustrationSvg(info)}</div>
+<div class="ws-unlock-name">${st.name}</div>
+<div class="ws-unlock-says">${info.says}</div>
+${waiting > 0 ? h`<div class="ws-unlock-note">${waiting} ${waiting === 1 ? 'vial is' : 'vials are'} waiting behind the glass and will be on the shelf the moment it opens.</div>` : ''}
+<div class="ws-unlock-price">${coinIcon(18)}${fmt(st.cost)} coins</div>`;
+    const foot = st.revealed
+      ? h`${st.affordable ? '' : h`<div class="ws-unlock-note">${fmt(more)} more coins and it is yours.</div>`}
+<div class="ws-actions-row">${button('Not yet', { attrs: { 'data-sheet-close': '' }, cls: 'tall' })}${button(`Open it for ${fmt(st.cost)}`, { variant: 'primary', cls: 'tall', attrs: { 'data-action': 'unlock-buy', 'data-unlock': id, 'aria-disabled': st.affordable ? 'false' : 'true' } })}</div>`
+      : h`<div class="ws-unlock-note">${lockTag(goal)}</div>
+<div class="ws-actions-row">${button('Not yet', { attrs: { 'data-sheet-close': '' }, cls: 'tall' })}</div>`;
+    return { body, foot };
+  };
+  const first = render();
+  const api = openSheet(hostEl, {
+    title: 'What this opens',
+    html: String(first.body),
+    footer: String(first.foot),
+    onAction(name) {
+      if (name === 'unlock-buy') doUnlockBuy(c, id, api, hostEl);
+    },
+    onClose() { if (sheet && sheet.api === api) sheet = null; },
+  });
+  if (hostEl === root) sheet = { api, kind: 'unlock', id };
+  return api;
+}
+
+/** Buy an unlock (through its sheet), play the ceremony in the scene, then tell the guides. */
+async function doUnlockBuy(c, id, api, hostEl) {
+  const info = UNLOCK_INFO[id];
+  const u = unlockStatus(id);
+  if (!info || !u || u.open) { if (api) api.close(); return false; }
+  if (!u.affordable) { toast(`Just ${fmt(Math.max(1, Math.ceil(u.cost - num(S().coins))))} more Coins`); return false; }
+  if (api) api.close();
+  snapshotCeremony(info.object);
+  const res = c.game.act(c.sim.unlocks.buy, { id });
+  if (!res || !res.ok) { toast('That one is not ready to open yet.'); return false; }
+  audio().thunk(1.2);
+  haptics().medium();
+  const here = visible && (!hostEl || hostEl === root);
+  if (here) await unlockCeremony(info.object);
+  else toast(`${u.name} is open`);
+  if (c.game.emit) c.game.emit('unlocked', { id, object: info.object });
+  return true;
+}
+
+/** Capture what the ceremony needs from the scene before the purchase changes it (the tag that tears away). */
+function snapshotCeremony(object) {
+  ceremonySnap = null;
+  if (!root || object !== 'gallery-door') return;
+  const t = root.querySelector('[data-tag="gallery"]');
+  if (t && !t.classList.contains('ws-off')) ceremonySnap = { tag: t.cloneNode(true) };
+}
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+function svgNode(name, attrs = {}) {
+  const n = doc().createElementNS(SVG_NS, name);
+  for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v));
+  return n;
+}
+function svgFrag(markup) {
+  const g = svgNode('g');
+  g.innerHTML = markup;
+  return g;
+}
+const anim = (el, frames, opts) => (el && el.animate ? el.animate(frames, { fill: 'both', ...opts }).finished.catch(() => {}) : Promise.resolve());
+
+/**
+ * unlockCeremony(objectId) -> Promise. A 1.5 s moment in the scene when something opens:
+ * 'shelf' dust puffs off the glass and the waiting vials drop onto it; 'map-window' knocks, then the
+ * shutters swing open; 'gallery-door' the paper tag tears away and the door glows; 'yard' a cart rolls
+ * in; 'commissions' the scroll unrolls. Resolves immediately when the workshop is not on screen.
+ */
+export function unlockCeremony(objectId) {
+  const key = UNLOCK_INFO[objectId] ? UNLOCK_INFO[objectId].object : objectId;
+  const snap = ceremonySnap;
+  ceremonySnap = null;
+  const scene = root && root.querySelector('.ws-scene');
+  if (!scene || !visible || !doc()) return Promise.resolve();
+  const reduced = fx().isReducedMotion();
+  const layer = svgNode('svg', { class: 'ws-cer', viewBox: '0 0 390 440', 'aria-hidden': 'true' });
+  layer.innerHTML = '<defs><radialGradient id="ws-cer-glow"><stop offset="0" stop-color="#FFF3C4" stop-opacity=".95"/><stop offset="1" stop-color="#FFF3C4" stop-opacity="0"/></radialGradient></defs>';
+  scene.appendChild(layer);
+  const jobs = [];
+  const glow = (cx, cy, rx, ry, ms = 1100) => {
+    const e = svgNode('ellipse', { cx, cy, rx, ry, fill: 'url(#ws-cer-glow)', opacity: 0 });
+    e.style.transformBox = 'fill-box';
+    e.style.transformOrigin = 'center';
+    layer.appendChild(e);
+    jobs.push(anim(e, [{ opacity: 0, transform: 'scale(.7)' }, { opacity: 1, transform: 'scale(1)', offset: 0.35 }, { opacity: 0, transform: 'scale(1.25)' }], { duration: ms, easing: 'ease-out' }));
+  };
+
+  if (reduced) {
+    if (key === 'shelf') glow(311, 198, 70, 60, 500);
+    else if (key === 'map-window') glow(82, 78, 80, 62, 500);
+    else if (key === 'gallery-door') glow(316, 312, 60, 70, 500);
+    else if (key === 'yard') glow(70, 384, 60, 36, 500);
+    else glow(218, 64, 24, 36, 500);
+  } else if (key === 'shelf') {
+    audio().knock();
+    const cover = svgNode('rect', { x: 256, y: 152, width: 110, height: 92, rx: 2, fill: '#F2F4F0', 'fill-opacity': 0.58 });
+    layer.appendChild(cover);
+    jobs.push(anim(cover, [{ opacity: 1, transform: 'translateY(0)' }, { opacity: 0, transform: 'translateY(-10px)' }], { duration: 520, easing: 'ease-in' }));
+    for (let i = 0; i < 9; i++) {
+      const puff = svgNode('circle', { cx: 262 + i * 12.5, cy: 190 + (i % 3) * 18, r: 3 + (i % 3), fill: '#D9D2C4', opacity: 0 });
+      puff.style.transformBox = 'fill-box';
+      puff.style.transformOrigin = 'center';
+      layer.appendChild(puff);
+      jobs.push(anim(puff, [
+        { opacity: 0, transform: 'translate(0,0) scale(.6)' },
+        { opacity: 0.9, transform: 'translate(0,-8px) scale(1)', offset: 0.3 },
+        { opacity: 0, transform: `translate(${(i % 2 ? 1 : -1) * (8 + i * 2)}px,-30px) scale(1.9)` },
+      ], { duration: 720, delay: i * 35, easing: 'ease-out' }));
+    }
+    let n = 0;
+    root.querySelectorAll('[data-shelf-slot]:not(.ws-off)').forEach((r) => {
+      const d = 360 + n * 55;
+      n += 1;
+      jobs.push(anim(r, [
+        { transform: 'translateY(-48px)', opacity: 0 },
+        { transform: 'translateY(3px)', opacity: 1, offset: 0.72 },
+        { transform: 'translateY(0)', opacity: 1 },
+      ], { duration: 380, delay: d, easing: 'ease-in', fill: 'backwards' }));
+    });
+    setTimeout(() => audio().clink(3), 420);
+  } else if (key === 'map-window') {
+    const left = svgFrag(SHUTTER_HALF(26, 54));
+    const right = svgFrag(SHUTTER_HALF(84, 54));
+    left.style.transformBox = 'fill-box';
+    left.style.transformOrigin = '0% 50%';
+    right.style.transformBox = 'fill-box';
+    right.style.transformOrigin = '100% 50%';
+    layer.append(left, right);
+    const knock = (dir) => [
+      { transform: 'scaleX(1) translateX(0)', offset: 0 },
+      { transform: `scaleX(1) translateX(${dir * 2}px)`, offset: 0.08 },
+      { transform: 'scaleX(1) translateX(0)', offset: 0.16 },
+      { transform: `scaleX(1) translateX(${dir * 2}px)`, offset: 0.24 },
+      { transform: 'scaleX(1) translateX(0)', offset: 0.32 },
+      { transform: 'scaleX(1) translateX(0)', offset: 0.4 },
+      { transform: 'scaleX(0.05) translateX(0)', offset: 1 },
+    ];
+    jobs.push(anim(left, knock(1), { duration: 1150, easing: 'ease-in-out' }));
+    jobs.push(anim(right, knock(-1), { duration: 1150, easing: 'ease-in-out' }));
+    audio().knock();
+    setTimeout(() => audio().knock(), 200);
+    setTimeout(() => audio().bell(), 480);
+    glow(82, 78, 70, 56, 900);
+  } else if (key === 'gallery-door') {
+    glow(316, 312, 60, 74, 1200);
+    audio().bell();
+    if (snap && snap.tag) {
+      const t = snap.tag;
+      t.classList.add('ws-cer-tag');
+      t.classList.remove('ws-off');
+      scene.appendChild(t);
+      jobs.push(anim(t, [
+        { transform: 'translate(-50%, -50%) rotate(0deg)', opacity: 1 },
+        { transform: 'translate(-46%, -40%) rotate(-6deg)', opacity: 1, offset: 0.25 },
+        { transform: 'translate(-30%, 120%) rotate(24deg)', opacity: 0 },
+      ], { duration: 700, easing: 'ease-in' }).then(() => t.remove()));
+    }
+  } else if (key === 'yard') {
+    const cart = svgNode('g');
+    cart.innerHTML = CART.replace(/<circle cx="(46|78)" cy="402" r="9" fill="#5E3E28"\/><circle cx="\1" cy="402" r="3.5" fill="#B98E64"\/>/g,
+      (m) => `<g data-wheel style="transform-box:fill-box;transform-origin:center">${m}</g>`);
+    layer.appendChild(cart);
+    const real = root.querySelector('[data-art="yard"]');
+    jobs.push(anim(real, [{ opacity: 0 }, { opacity: 0 }], { duration: 1000, fill: 'none' }));
+    jobs.push(anim(cart, [{ transform: 'translateX(-150px)' }, { transform: 'translateX(4px)', offset: 0.85 }, { transform: 'translateX(0)' }], { duration: 1000, delay: 60, easing: 'cubic-bezier(.22,.8,.3,1)', fill: 'forwards' }));
+    cart.querySelectorAll('[data-wheel]').forEach((w) => jobs.push(anim(w, [{ transform: 'rotate(-540deg)' }, { transform: 'rotate(0deg)' }], { duration: 1000, delay: 60, easing: 'cubic-bezier(.22,.8,.3,1)' })));
+    for (let i = 0; i < 4; i++) {
+      const p = svgNode('circle', { cx: 30 + i * 6, cy: 408, r: 3, fill: '#D9D2C4', opacity: 0 });
+      layer.appendChild(p);
+      jobs.push(anim(p, [{ opacity: 0, transform: 'translate(-40px,0) scale(.6)' }, { opacity: 0.8, offset: 0.4 }, { opacity: 0, transform: 'translate(-10px,-14px) scale(1.6)' }], { duration: 700, delay: 500 + i * 60, easing: 'ease-out' }));
+    }
+    setTimeout(() => audio().thunk(0.7), 900);
+    glow(70, 384, 56, 34, 1000);
+  } else {
+    const scroll = svgNode('g', { transform: 'translate(205 40)' });
+    scroll.innerHTML = artJobs('ws-cut');
+    scroll.style.transformBox = 'fill-box';
+    scroll.style.transformOrigin = '50% 0%';
+    layer.appendChild(scroll);
+    jobs.push(anim(scroll, [{ transform: 'translate(205px,40px) scaleY(.15)' }, { transform: 'translate(205px,40px) scaleY(1.08)', offset: 0.7 }, { transform: 'translate(205px,40px) scaleY(1)' }], { duration: 700, easing: 'ease-out' }));
+    glow(218, 64, 26, 38, 1000);
+    audio().clink(2);
+  }
+
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      layer.remove();
+      resolve();
+    };
+    Promise.all(jobs).then(finish);
+    setTimeout(finish, reduced ? 650 : 1500);
+    if (!jobs.length) finish();
+  });
+}
+
+// --- mixer picker (the recipe sheet) -------------------------------------------------------------
+
+/**
+ * One relevant use for a color, most specific first: a painting on the easel that uses it, a started
+ * painting it suits, a shipping route that pays extra for its family, else what a jar sells for.
+ */
+function useLine(colorId) {
   const s = S();
   const t = now();
+  const fam = eco().colorFamily(colorId);
+  const pieces = ((s.gallery && s.gallery.pieces) || []).filter((p) => p && !p.signedAt);
+  for (const p of pieces) {
+    const cv = ctx.content.getCanvas ? ctx.content.getCanvas(p.canvas) : null;
+    if (cv && Object.values(p.regions || {}).includes(colorId)) return `Used in your ${cv.name}`;
+  }
+  for (const p of pieces) {
+    const cv = ctx.content.getCanvas ? ctx.content.getCanvas(p.canvas) : null;
+    if (cv && (cv.suggestedPalette || []).includes(fam)) return `Suggested for your ${cv.name}`;
+  }
+  if (s.unlocks && s.unlocks.shipping) {
+    try {
+      for (const r of sim().shipping.availableRoutes(s, t)) {
+        const d = sim().shipping.currentDemand(s, r.id, t);
+        if (d && d.family && d.family === fam) return `${r.name} pays +${Math.round(d.bonus * 100)}% for ${famPlural(fam)}`;
+      }
+    } catch (e) { /* no routes yet */ }
+  }
+  const worth = Math.round(eco().colorPrice(s, colorId));
+  return `Worth ${fmt(worth)} ${worth === 1 ? 'Coin' : 'Coins'} a jar`;
+}
+
+function recipeSheetHtml(mi, colorId) {
+  const s = S();
   const m = s.stations.mixers[mi];
   const list = sim().discoveredColors(s)
     .filter((c) => sim().factory.canMix(s, c.id))
     .map((c) => ({ ...c, price: eco().colorPrice(s, c.id) }))
-    .sort((a, b) => b.price - a.price || a.name.localeCompare(b.name));
-  void t;
+    .sort((a, b) => (b.id === colorId) - (a.id === colorId) || b.price - a.price || a.name.localeCompare(b.name));
   return h`<div class="hint">Pick what Mixer ${mi + 1} makes. Only colors you have discovered, and can mix, appear here.</div>
 ${pickRow({ action: 'set-recipe', attrs: { 'data-mixer': String(mi), 'data-color': '' }, lead: h`<span class="swatch is-empty" style="--size:36px"></span>`, title: 'Rest this mixer', sub: 'It makes nothing until you pick again', on: !m.recipe })}
-${list.length ? list.map((c) => pickRow({ action: 'set-recipe', attrs: { 'data-mixer': String(mi), 'data-color': c.id }, lead: swatch(c.hex, 36), title: c.name, sub: `Worth ${fmt(c.price)} Coins a jar`, on: m.recipe === c.id, right: m.recipe === c.id ? h`<span class="chip">Making now</span>` : '' })) : h`<div class="muted">Discover a color you can mix and it will show up here.</div>`}`;
+${list.length ? list.map((c) => pickRow({ action: 'set-recipe', attrs: { 'data-mixer': String(mi), 'data-color': c.id }, lead: swatch(c.hex, 36), title: c.name, sub: useLine(c.id), on: m.recipe === c.id, right: m.recipe === c.id ? h`<span class="chip">Making now</span>` : '' })) : h`<div class="muted">Discover a color you can mix and it will show up here.</div>`}`;
 }
 
-function openRecipeSheet(mi) {
+function mixerPickerHtml(colorId) {
+  const s = S();
+  const mixers = s.stations.mixers || [];
+  const can = sim().factory.canMix(s, colorId);
+  return h`<div class="hint">${can ? `Pick a mixer to make ${nameOf(colorId)}.` : `${nameOf(colorId)} needs a pigment you do not have a source for yet. A hunter may find one.`}</div>
+<div class="ws-use">${useLine(colorId)}</div>
+${can ? mixers.map((m, mi) => pickRow({
+    action: 'assign-to', attrs: { 'data-mixer': String(mi) },
+    lead: m.recipe ? swatch(hexOf(m.recipe), 36) : h`<span class="swatch is-empty" style="--size:36px"></span>`,
+    title: `Mixer ${mi + 1}`, sub: m.recipe === colorId ? 'Making it now' : m.recipe ? `Making ${nameOf(m.recipe)} now` : 'Resting, ready for a recipe',
+    on: m.recipe === colorId, right: !m.recipe ? h`<span class="chip">Free</span>` : '',
+  })) : ''}`;
+}
+
+/**
+ * openRecipeSheet(ctx, {mixer, colorId, onDone, host}) -> sheet api.
+ * With a `mixer` index: what that mixer makes (colorId is listed first). With only a `colorId`: which
+ * mixer should make it. Each color shows one relevant use. After a pick the sheet closes and
+ * onDone({mixer, colorId}) runs. `host` is the screen's <section> to draw over (default: the workshop),
+ * which is how the easel opens it without leaving the painting.
+ */
+export function openRecipeSheet(c, { mixer = null, colorId = null, onDone = null, host = null } = {}) {
+  if (!ctx) ctx = c;
+  const hostEl = host || root;
+  if (!hostEl) return null;
   closeSheet();
-  const api = openSheet(root, {
-    title: `Mixer ${mi + 1}: what to make`,
-    html: String(recipeSheetHtml(mi)),
+  const byColor = !Number.isInteger(mixer) && colorId;
+  const picked = (mi, cid) => {
+    const res = act(sim().factory.assignRecipe, { mixer: mi, colorId: cid });
+    if (res && res.ok) {
+      audio().cork();
+      api.close();
+      if (visible) renderAll();
+      if (hostEl === root) fx().squash(root.querySelector(`[data-row="mixer:${mi}"]`));
+      if (cid) toast(`Mixer ${mi + 1} is making ${nameOf(cid)}`, { hex: hexOf(cid) });
+      if (onDone) onDone({ mixer: mi, colorId: cid });
+    } else toast('That recipe needs a pigment you do not have a source for yet.');
+  };
+  const api = openSheet(hostEl, {
+    title: byColor ? `Which mixer makes ${nameOf(colorId)}?` : `Mixer ${mixer + 1}: what to make`,
+    html: String(byColor ? mixerPickerHtml(colorId) : recipeSheetHtml(mixer, colorId)),
     onAction(name, el) {
-      if (name !== 'set-recipe') return;
-      const colorId = el.dataset.color || null;
-      const res = act(sim().factory.assignRecipe, { mixer: mi, colorId });
-      if (res && res.ok) {
-        audio().cork();
-        closeSheet();
-        renderAll();
-        const r = root.querySelector(`[data-row="mixer:${mi}"]`);
-        fx().squash(r);
-        if (colorId) toast(`Mixer ${mi + 1} is making ${nameOf(colorId)}`, { hex: hexOf(colorId) });
-      } else toast('That recipe needs a pigment you do not have a source for yet.');
+      if (name === 'set-recipe') picked(mixer, el.dataset.color || null);
+      else if (name === 'assign-to') picked(Number(el.dataset.mixer) || 0, colorId);
     },
     onClose() { if (sheet && sheet.api === api) sheet = null; },
   });
   sheet = { api, kind: 'recipe' };
+  return api;
 }
 
 /**
@@ -1240,7 +1762,11 @@ function assignFromCatalog(colorId) {
   const s = S();
   const mixers = (s.stations && s.stations.mixers) || [];
   if (!colorId || !mixers.length) return;
-  const apply = (mi) => {
+  const already = mixers.findIndex((m) => m && m.recipe === colorId);
+  if (already >= 0) { toast(`Mixer ${already + 1} is already making ${nameOf(colorId)}`, { hex: hexOf(colorId) }); return; }
+  const idle = mixers.findIndex((m) => m && !m.recipe);
+  if (idle >= 0 || mixers.length === 1) {
+    const mi = idle >= 0 ? idle : 0;
     const res = act(sim().factory.assignRecipe, { mixer: mi, colorId });
     if (res && res.ok) {
       audio().cork();
@@ -1248,40 +1774,59 @@ function assignFromCatalog(colorId) {
       fx().squash(root.querySelector(`[data-row="mixer:${mi}"]`));
       toast(`Mixer ${mi + 1} is making ${nameOf(colorId)}`, { hex: hexOf(colorId) });
     } else toast('That recipe needs a pigment you do not have a source for yet.');
-  };
-  const already = mixers.findIndex((m) => m && m.recipe === colorId);
-  if (already >= 0) { toast(`Mixer ${already + 1} is already making ${nameOf(colorId)}`, { hex: hexOf(colorId) }); return; }
-  const idle = mixers.findIndex((m) => m && !m.recipe);
-  if (idle >= 0 || mixers.length === 1) { apply(idle >= 0 ? idle : 0); return; }
-  closeSheet();
-  const api = openSheet(root, {
-    title: `Which mixer makes ${nameOf(colorId)}?`,
-    html: String(h`${mixers.map((m, mi) => pickRow({ action: 'assign-to', attrs: { 'data-mixer': String(mi) }, lead: swatch(hexOf(m.recipe), 36), title: `Mixer ${mi + 1}`, sub: m.recipe ? `Making ${nameOf(m.recipe)} now` : 'Resting' }))}`),
-    onAction(name, el) {
-      if (name !== 'assign-to') return;
-      closeSheet();
-      apply(Number(el.dataset.mixer) || 0);
-    },
-    onClose() { if (sheet && sheet.api === api) sheet = null; },
-  });
-  sheet = { api, kind: 'assign' };
+    return;
+  }
+  openRecipeSheet(ctx, { colorId });
+}
+
+// --- vat detail sheet -------------------------------------------------------------------------------
+
+const KEEP_STEP = 5;
+
+/** Jars kept back from the shop for painting (state.keep; the sim defaults 20 for pinned and painting colors). */
+function keepOf(colorId) {
+  return num(sim().storage.keepOf(S(), colorId));
+}
+
+function vatSheetHtml(vi) {
+  const s = S();
+  const v = s.stations.vats[vi];
+  const capV = eco().stationOutput('vat', v.level);
+  const jars = v.color ? num(s.stock?.[v.color]?.jars) : 0;
+  const pm = eco().productionMultiplier(s, now());
+  const rate = v.color ? (s.stations.mixers || []).filter((m) => m && m.recipe === v.color).reduce((a, m) => a + eco().stationOutput('mixer', m.level) * pm, 0) : 0;
+  const fill = !v.color ? 'Choose a color to fill this vat'
+    : jars >= capV ? 'The glass is full'
+      : rate > 0 ? `Fills in about ${waitText(ctx.format, (capV - jars) / rate * 1000)}` : 'No mixer is making it right now';
+  const keep = v.color ? keepOf(v.color) : 0;
+  const list = Object.entries(s.stock || {}).filter(([, e]) => num(e?.jars) > 0.05)
+    .map(([id, e]) => ({ id, jars: num(e.jars), name: nameOf(id), hex: hexOf(id) }))
+    .sort((a, b) => b.jars - a.jars);
+  return h`<div class="ws-vat-head">${v.color ? swatch(hexOf(v.color), 52) : h`<span class="swatch is-empty" style="--size:52px" aria-hidden="true"></span>`}
+<div class="ws-vat-facts"><div class="semi">${v.color ? nameOf(v.color) : 'Empty glass'}</div><div>${fmt(jars)} of ${fmt(capV)} jars</div><div class="muted">${fill}</div></div></div>
+${v.color ? h`<div class="ws-pick" style="cursor:default"><span class="grow"><span class="pt">Keep ${fmt(keep)} ${keep === 1 ? 'jar' : 'jars'} for painting</span><br><span class="ps">The shop sells only above this</span></span>
+<span class="ws-stepper"><button type="button" class="ws-step" data-action="keep-step" data-color="${v.color}" data-delta="-${KEEP_STEP}" data-tap aria-label="Keep fewer jars" aria-disabled="${keep <= 0 ? 'true' : 'false'}">&minus;</button><span class="n num" data-keep-n>${fmt(keep)}</span><button type="button" class="ws-step" data-action="keep-step" data-color="${v.color}" data-delta="${KEEP_STEP}" data-tap aria-label="Keep more jars">+</button></span></div>` : ''}
+<div class="ws-sub-title">Show a different color</div>
+${pickRow({ action: 'set-vat', attrs: { 'data-vat': String(vi), 'data-color': '' }, lead: h`<span class="swatch is-empty" style="--size:36px"></span>`, title: 'Empty glass', on: !v.color })}
+${list.length ? list.map((c) => pickRow({ action: 'set-vat', attrs: { 'data-vat': String(vi), 'data-color': c.id }, lead: swatch(c.hex, 36), title: c.name, sub: `${fmt(c.jars)} jars in stock`, on: v.color === c.id })) : h`<div class="muted">Make some color and it will be waiting here.</div>`}`;
 }
 
 function openVatSheet(vi) {
   closeSheet();
-  const s = S();
-  const v = s.stations.vats[vi];
+  const v = S().stations.vats[vi];
   if (!v) return;
-  const list = Object.entries(s.stock || {}).filter(([, e]) => num(e?.jars) > 0.05)
-    .map(([id, e]) => ({ id, jars: num(e.jars), name: nameOf(id), hex: hexOf(id) }))
-    .sort((a, b) => b.jars - a.jars);
-  const html = h`<div class="hint">Choose which color Vat ${vi + 1} shows. The glass fills with how much of it you have.</div>
-${pickRow({ action: 'set-vat', attrs: { 'data-vat': String(vi), 'data-color': '' }, lead: h`<span class="swatch is-empty" style="--size:36px"></span>`, title: 'Empty glass', on: !v.color })}
-${list.length ? list.map((c) => pickRow({ action: 'set-vat', attrs: { 'data-vat': String(vi), 'data-color': c.id }, lead: swatch(c.hex, 36), title: c.name, sub: `${fmt(c.jars)} jars in stock`, on: v.color === c.id })) : h`<div class="muted">Make some color and it will be waiting here.</div>`}`;
   const api = openSheet(root, {
     title: `Vat ${vi + 1}`,
-    html: String(html),
+    html: String(vatSheetHtml(vi)),
     onAction(name, el) {
+      if (name === 'keep-step') {
+        const colorId = el.dataset.color;
+        const next = Math.max(0, Math.min(Math.floor(sim().storage.capacity(S()).total), keepOf(colorId) + Number(el.dataset.delta)));
+        act(sim().storage.setKeep, { colorId, jars: next });
+        audio().tick();
+        api.set(vatSheetHtml(vi));
+        return;
+      }
       if (name !== 'set-vat') return;
       const colorId = el.dataset.color || null;
       act(sim().factory.setVatColor, { vat: vi, colorId });
@@ -1473,62 +2018,94 @@ ${routes.map((r) => pickRow({ action: 'set-route', attrs: { 'data-route': r.id }
   sheet = { api, kind: 'route' };
 }
 
-function openYardSheet() {
-  closeSheet();
-  const s = S();
-  const t = now();
-  const fl = s.stations.fleet || [];
-  if (!(s.rooms || []).includes('loading-yard')) {
-    const colors = sim().discoveredCount(s);
-    const r = ROOMS.find((x) => x.id === 'loading-yard');
-    toast(colors < r.colorsRequired ? `${moreColors(r.colorsRequired - colors)} and the Loading Yard can open` : 'The Loading Yard is waiting in the rooms list below.');
-    return;
-  }
-  const routes = sim().shipping.availableRoutes(s, t);
-  const html = h`${routes.map((r) => demandText(r.id, t)).filter(Boolean).map((x) => h`<div class="ws-banner">${x}</div>`)}
-${fl.length ? fl.map((v, i) => {
-    const busy = num(v.arrivesAt) > 0;
-    const def = VEHICLES_BY_ID[v.kind];
-    return pickRow({
-      action: busy ? 'yard-busy' : 'yard-ship', attrs: { 'data-vehicle': String(i) }, lead: swatch('#9A6A47', 36),
-      title: `${def?.name ?? 'Vehicle'} · Level ${v.level}`,
-      sub: busy ? `Out, back in ${waitText(ctx.format, v.arrivesAt - t)}` : `Idle · holds ${fmt(eco().vehicleCapacity(v))} jars`,
-      right: busy ? '' : h`<span class="chip">Ship</span>`,
-    });
-  }) : h`<div class="muted">No vehicles yet. Buy a cart in the Fleet panel below.</div>`}`;
-  const api = openSheet(root, {
-    title: 'Loading yard',
-    html: String(html),
-    onAction(name, el) {
-      if (name === 'yard-ship') { openShipSheet(Number(el.dataset.vehicle)); }
-    },
-    onClose() { if (sheet && sheet.api === api) sheet = null; },
-  });
-  sheet = { api, kind: 'yard' };
-}
-
 // ---------------------------------------------------------------------------
 // Actions
 // ---------------------------------------------------------------------------
 
-function lockedToast(msg) { toast(msg); }
+const SEGMENT_KEY = 'tincture.workshop.segment';
+const SEGMENTS = ['stations', 'shipping', 'rooms'];
+const STATION_PANELS = ['sources', 'grinders', 'mixers', 'vats', 'cellar', 'shop'];
+const PANEL_SEGMENT = { fleet: 'shipping', rooms: 'rooms', apprentices: 'rooms', doors: 'rooms', unlocks: 'rooms' };
+
+function loadSegment() {
+  try {
+    const v = localStorage.getItem(SEGMENT_KEY);
+    if (SEGMENTS.includes(v)) return v;
+  } catch (e) { /* storage can be blocked */ }
+  return 'stations';
+}
+
+/** Show the active segment's pane and press its button (cheap; runs every render). */
+function applySegment() {
+  root.querySelectorAll('[data-segment]').forEach((b) => {
+    const on = b.dataset.segment === segment;
+    if (b.getAttribute('aria-pressed') !== String(on)) b.setAttribute('aria-pressed', String(on));
+  });
+  root.querySelectorAll('[data-pane]').forEach((p) => {
+    const on = p.dataset.pane === segment;
+    if (p.hidden === on) p.hidden = !on;
+  });
+}
+
+function setSegment(name, { remember = true } = {}) {
+  if (!SEGMENTS.includes(name)) return;
+  segment = name;
+  if (remember) { try { localStorage.setItem(SEGMENT_KEY, name); } catch (e) { /* ignore */ } }
+  applySegment();
+}
+
+/** Scroll a row or panel under the sticky bars and flash it once. */
+function scrollFlash(el) {
+  if (!el) return;
+  requestAnimationFrame(() => {
+    if (el.scrollIntoView) el.scrollIntoView({ block: 'start', behavior: fx().isReducedMotion() ? 'auto' : 'smooth' });
+    el.classList.remove('ws-flash');
+    void el.offsetWidth;
+    el.classList.add('ws-flash');
+    setTimeout(() => el.classList.remove('ws-flash'), 1400);
+  });
+}
+
+/** Deep-link params for the workshop: {panel|upgrade, row, index, unlock, rebuy, sheet, vat, assign}. */
+function applyParams(params) {
+  if (!params) return;
+  if (params.panel || params.upgrade) focusPanel(params.panel || params.upgrade, { row: params.row, index: params.index });
+  if (params.unlock) openUnlockSheet(ctx, params.unlock);
+  if (params.rebuy) {
+    const b = root.querySelector('.screen-body');
+    if (b) b.scrollTop = 0;
+    scrollFlash(refs.sugg);
+  }
+  if (params.sheet === 'yard') focusPanel('fleet');
+  if (params.sheet === 'unlock' && params.id) openUnlockSheet(ctx, params.id);
+  if (params.sheet === 'vat' && Number.isInteger(params.vat)) openVatSheet(params.vat);
+  if (params.assign) assignFromCatalog(params.assign);
+}
 
 function goto(screen, params) {
-  if (screen === 'workshop') { focusPanel((params && (params.panel || params.upgrade)) || ''); return; }
+  if (screen === 'workshop') { applyParams(params); return; }
   ctx.navigate(screen, params || {});
 }
 
 const UPGRADE_PANEL = { source: 'sources', grinder: 'grinders', mixer: 'mixers', vat: 'vats', shop: 'shop', fleet: 'fleet', cellar: 'cellar' };
 
-function focusPanel(name) {
+/**
+ * Deep link into a section: picks the segment, opens the panel, scrolls the row (or panel) into view
+ * and flashes it once. `name` is a panel ('mixers', 'fleet', 'rooms') or an upgrade kind ('mixer').
+ */
+function focusPanel(name, { row = '', index = null } = {}) {
   if (name === 'bench') { ctx.navigate('bench', {}); return; }
   const key = UPGRADE_PANEL[name] || name;
-  if (!['sources', 'grinders', 'mixers', 'vats', 'cellar', 'shop', 'fleet'].includes(key)) return;
-  openPanels.add(key);
-  savePanels();
+  const seg = PANEL_SEGMENT[key] || (STATION_PANELS.includes(key) ? 'stations' : '');
+  if (!seg) return;
+  if (seg === 'shipping' && !fleetVisible(S())) { openUnlockSheet(ctx, 'shipping'); return; }
+  if (key === 'fleet' || STATION_PANELS.includes(key)) { openPanels.add(key); savePanels(); }
+  setSegment(seg);
   renderAll();
-  const el = root.querySelector(`[data-pw="${key}"]`);
-  if (el && el.scrollIntoView) el.scrollIntoView({ block: 'start', behavior: fx().isReducedMotion() ? 'auto' : 'smooth' });
+  const rowKey = row || (index != null && UPGRADE_PANEL[name] ? `${name}:${index}` : '');
+  const target = (rowKey && root.querySelector(`[data-row="${rowKey}"]`))
+    || root.querySelector(`[data-pw="${key}"]`) || root.querySelector(`[data-sec="${key === 'unlocks' ? 'doors' : key}"]`);
+  scrollFlash(target);
 }
 
 function needMore(cost) {
@@ -1564,11 +2141,13 @@ function buyFrom(el) {
 }
 
 async function doCollect() {
-  const btn = refs.collect;
   const s = S();
   if (num(s.pendingCollect) < 1) return;
   coinHold = true;
-  const flight = fx().flyTo(btn, refs.pill, '#C99A2E', { count: 6 });
+  // Coins fly from the scene (the shop counter's till) up to the pill.
+  const flight = typeof fx().coinArc === 'function'
+    ? fx().coinArc(refs.scene, refs.pill, 6)
+    : fx().flyTo(refs.scene, refs.pill, '#C99A2E', { count: 6 });
   act(sim().factory.collect);
   audio().coins(6);
   haptics().ripple(3);
@@ -1578,27 +2157,55 @@ async function doCollect() {
   patchCoins(S());
 }
 
-function doSuggestion(el) {
-  const kind = el.dataset.kind;
+/** The Next button: do what sim.next says (buy the upgrade, open the sheet, pick a recipe, go there, collect). */
+function doNext() {
   const s = S();
-  if (kind === 'assign') { openRecipeSheet(Number(el.dataset.index || 0)); return; }
-  if (!kind || kind === 'undefined') return;
-  const cost = Number(el.dataset.cost);
-  if (cost > num(s.coins)) { needMore(cost); return; }
-  if (kind === 'room') {
-    const res = act(sim().factory.buyRoom, { id: el.dataset.id });
-    if (res && res.ok) afterBuy('', res);
-    return;
+  const n = nextOf(s, now());
+  const a = n && n.action;
+  if (!a) return;
+  switch (a.kind) {
+    case 'assign': openRecipeSheet(ctx, { mixer: num(a.mixer) }); break;
+    case 'unlock': openUnlockSheet(ctx, a.id); break;
+    case 'rebuy': {
+      const res = act(sim().unlocks.batchRebuy);
+      if (res && res.ok) { afterBuy('', {}); toast('Everything is open again'); }
+      else if (res && res.reason === 'coins') needMore(res.cost);
+      break;
+    }
+    case 'room': {
+      const res = act(sim().factory.buyRoom, { id: a.id });
+      if (res && res.ok) { afterBuy('', res); fx().squash(refs.sugg); }
+      else if (res && res.reason === 'coins') needMore(res.cost);
+      break;
+    }
+    case 'upgrade': {
+      const args = { kind: a.upgrade };
+      if (a.index !== undefined) args.index = a.index;
+      if (a.id) args.id = a.id;
+      const res = act(sim().factory.buyUpgrade, args);
+      if (res && res.ok) {
+        const key = a.upgrade === 'source' ? `source:${a.id}` : a.upgrade === 'cellar' || a.upgrade === 'shop' ? a.upgrade : `${a.upgrade}:${a.index}`;
+        afterBuy(key, res);
+        fx().squash(refs.sugg);
+      } else if (res && res.reason === 'coins') needMore(res.cost);
+      else if (res && res.reason === 'slots') toast('All source slots are full for now. A hunter may find more room.');
+      break;
+    }
+    case 'mixer': {
+      const res = act(sim().factory.buyMixer);
+      if (res && res.ok) {
+        afterBuy('mixer:new', res);
+        toast(`Mixer ${res.index + 1} is ready. Pick what it makes.`);
+      } else if (res && res.reason === 'coins') needMore(res.cost);
+      break;
+    }
+    case 'navigate': goto(a.screen, a.params); break;
+    case 'collect':
+      if (num(s.pendingCollect) >= 1) doCollect();
+      else toast('The till is empty for now. Your shop is selling.');
+      break;
+    default: break;
   }
-  const args = { kind };
-  if (el.dataset.index !== '') args.index = Number(el.dataset.index);
-  if (el.dataset.id) args.id = el.dataset.id;
-  const res = act(sim().factory.buyUpgrade, args);
-  if (res && res.ok) {
-    const key = kind === 'source' ? `source:${args.id}` : kind === 'cellar' || kind === 'shop' ? kind : `${kind}:${args.index}`;
-    afterBuy(key, res);
-    fx().squash(refs.sugg);
-  } else if (res && res.reason === 'coins') needMore(res.cost);
 }
 
 function doRush(el) {
@@ -1643,6 +2250,13 @@ async function doCloseUp() {
   renderAll();
 }
 
+/** A scene object: open its screen when it is open, otherwise the "What this opens" sheet. */
+function openOrBuy(id, go) {
+  const u = unlockStatus(id);
+  if (u && !u.open) openUnlockSheet(ctx, id);
+  else go();
+}
+
 function onClick(e) {
   const el = e.target.closest('[data-action]');
   if (!el || !root.contains(el)) return;
@@ -1650,33 +2264,20 @@ function onClick(e) {
   switch (a) {
     case 'settings': ctx.navigate('settings'); break;
     case 'collect': doCollect(); break;
-    case 'suggestion': doSuggestion(el); break;
-    case 'open-map':
-      if (!sim().hunters.unlocked(S())) lockedToast(`Hunters set out once you have ${moreColors(10 - sim().discoveredCount(S()))}`);
-      else ctx.navigate('map', {});
-      break;
+    case 'next': doNext(); break;
+    case 'open-map': openOrBuy('hunters', () => ctx.navigate('map', {})); break;
     case 'open-album': ctx.navigate('album', {}); break;
-    case 'open-shelf':
-      if (!sim().shelf.unlocked(S())) lockedToast(`${moreColors(5 - sim().discoveredCount(S()))} and the Merge Shelf opens`);
-      else ctx.navigate('shelf', {});
-      break;
+    case 'open-shelf': openOrBuy('shelf', () => ctx.navigate('shelf', {})); break;
     case 'open-bench': ctx.navigate('bench', {}); break;
-    case 'open-gallery': {
-      const s = S();
-      const wing = (s.rooms || []).includes('gallery-wing') || s.gallery?.unlocked;
-      if (!wing) {
-        const need = 20 - sim().discoveredCount(s);
-        lockedToast(need > 0 ? `${moreColors(need)} and the Gallery Wing can open` : 'The Gallery Wing is waiting in the rooms list below');
-      } else ctx.navigate('gallery', {});
-      break;
-    }
+    case 'open-gallery': openOrBuy('gallery', () => ctx.navigate('gallery', {})); break;
     case 'open-quests': ctx.navigate('quests', {}); break;
     case 'open-ledger': ctx.navigate('ledger', {}); break;
-    case 'open-commissions':
-      if ((S().phase ?? 1) < 3) lockedToast(`Commissions open at 30 colors with the Loading Yard${sim().discoveredCount(S()) < 30 ? `: ${moreColors(30 - sim().discoveredCount(S()))} to go` : ''}`);
-      else ctx.navigate('commissions', {});
-      break;
-    case 'open-yard': openYardSheet(); break;
+    case 'open-commissions': openOrBuy('commissions', () => ctx.navigate('commissions', {})); break;
+    case 'open-yard': openOrBuy('shipping', () => focusPanel('fleet')); break;
+    case 'goto-mixers': focusPanel('mixers', { row: `mixer:${Number(el.dataset.mixer) || 0}` }); break;
+    case 'unlock-open': openUnlockSheet(ctx, el.dataset.unlock); break;
+    case 'segment': setSegment(el.dataset.segment); break;
+    case 'dismiss-whatsnew': act((st) => { if (st.flags) delete st.flags.whatsNew; }); sigs.whatsnew = ''; renderAll(); break;
     case 'claim-accident': doClaim(el); break;
     case 'vat-color': openVatSheet(Number(el.dataset.vat)); break;
     case 'toggle-panel': {
@@ -1695,7 +2296,14 @@ function onClick(e) {
       if (res && res.ok) { afterBuy(`grinder:${i}`, { milestone: true, level: S().stations.grinders[i].level }); toast(`Upgraded to ${GRINDER_KINDS_BY_ID[res.kind]?.name}`); }
       break;
     }
-    case 'mixer-recipe': openRecipeSheet(Number(el.dataset.mixer)); break;
+    case 'mixer-recipe': openRecipeSheet(ctx, { mixer: Number(el.dataset.mixer) }); break;
+    case 'buy-mixer': {
+      const q = sim().factory.mixerPurchase(S());
+      if (!q.affordable) { needMore(q.cost); break; }
+      const res = act(sim().factory.buyMixer);
+      if (res && res.ok) { afterBuy(`mixer:${res.index}`, res); toast(`Mixer ${res.index + 1} is ready. Pick what it makes.`); }
+      break;
+    }
     case 'rush': doRush(el); break;
     case 'buy-room': {
       const s = S();
@@ -1761,7 +2369,7 @@ const screen = {
     root.querySelectorAll('[data-ref]').forEach((n) => { refs[n.dataset.ref] = n; });
     root.addEventListener('click', onClick);
     root.addEventListener('keydown', (e) => {
-      if ((e.key === 'Enter' || e.key === ' ') && e.target.classList && e.target.classList.contains('ws-hit')) {
+      if ((e.key === 'Enter' || e.key === ' ') && e.target.classList && (e.target.classList.contains('ws-hit') || (e.target.getAttribute('role') === 'button' && e.target.tagName !== 'BUTTON'))) {
         e.preventDefault();
         e.target.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       }
@@ -1777,6 +2385,8 @@ const screen = {
     for (const k of Object.keys(sigs)) delete sigs[k];
     vatKeys.fill('');
     coinShown = null;
+    jarCount = null;
+    segment = loadSegment();
     renderAll(ctx.game.state);
   },
 
@@ -1789,9 +2399,7 @@ const screen = {
     renderAll();
     clearInterval(ticker);
     ticker = setInterval(() => { if (visible && !pointerDown) renderAll(); }, 1000);
-    if (params.panel || params.upgrade) focusPanel(params.panel || params.upgrade);
-    if (params.sheet === 'yard') openYardSheet();
-    if (params.assign) assignFromCatalog(params.assign);
+    applyParams(params);
   },
 
   hide() {

@@ -22,6 +22,7 @@
 
 import { h, raw, button, swatch, iconSvg, safeHex, lockTag } from './kit.js';
 import { stateRng } from '../rng.js';
+import { unlockTag, openUnlockSheet, ensureStyles as ensureWorkshopStyles } from './workshop.js';
 import { deltaEHex } from '../color.js';
 
 // ---------------------------------------------------------------------------
@@ -299,6 +300,8 @@ export const PZ_CSS = `
 @keyframes pz-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 @keyframes pz-stamp-in { 0% { opacity: 0; transform: scale(1.5) rotate(-6deg); } 60% { opacity: 1; transform: scale(.96); } 100% { opacity: .94; transform: none; } }
 .pz-nudge { background: var(--paper); border-radius: var(--radius-sm); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; box-shadow: var(--cut-sm); }
+.pz-hub .pz-tiertag { display: flex; }
+.pz-hub .pz-tiertag .tag { white-space: normal; }
 .pz-hub .tierline { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; color: var(--ink-soft); }
 .pz-hub .seg-control > button { min-height: 44px; }
 .pz-hub .btn.small, .pz-nudge .btn.small { min-height: 44px; }
@@ -339,7 +342,8 @@ function build(state) {
   const board = active.grading;
   const tw = boardTwist(C, state);
   const fast = num(state.stats && state.stats.fastSolves);
-  const nudge = fast >= 3 && (tier === 'relaxed' || tier === 'steady');
+  const revealed = (t) => !C.sim.unlocks || C.sim.unlocks.tierRevealed(state, t);
+  const nudge = fast >= 3 && (tier === 'relaxed' || tier === 'steady') && revealed('tricky');
 
   let boardInfo = '';
   if (board) {
@@ -353,7 +357,13 @@ function build(state) {
     banner = h`<div class="banner">${iconSvg('star', { size: 18 })}<div><b>${eventName(C, tw.id)}</b> boards use the event colors. ${frameName(C, tw.id, shape)}.</div></div>`;
   }
 
-  const seg = h`<div class="seg-control" role="group" aria-label="Difficulty">${TIER_IDS.map((t) => h`<button type="button" data-action="tier" data-tier="${t}" data-tap aria-pressed="${t === tier ? 'true' : 'false'}">${TIER_LABEL[t]}</button>`)}</div>`;
+  // Only the revealed tiers show, one more with each milestone; a paper tag names the next one.
+  const shown = TIER_IDS.filter((t) => t === tier || revealed(t));
+  const lockedNext = TIER_IDS.find((t) => !revealed(t));
+  const needColors = lockedNext ? C.sim.unlocks.TIER_REVEAL[lockedNext] : 0;
+  const moreToGo = lockedNext ? Math.max(1, needColors - C.sim.discoveredCount(state)) : 0;
+  const seg = h`<div class="seg-control" role="group" aria-label="Difficulty">${shown.map((t) => h`<button type="button" data-action="tier" data-tier="${t}" data-tap aria-pressed="${t === tier ? 'true' : 'false'}">${TIER_LABEL[t]}</button>`)}</div>
+${lockedNext ? h`<div class="pz-tiertag" data-tier-tag>${lockTag(`${TIER_LABEL[lockedNext]} at ${needColors} colors \u2014 ${moreToGo} more`, { cls: 'pz-tag' })}</div>` : ''}`;
 
   const gradingCard = h`<div class="card" id="pz-grading" data-coach="grading">
 <div class="row between"><div class="h3">Grading boards</div><span class="chip">${GRID[tier]}</span></div>
@@ -396,7 +406,7 @@ ${button('Go to the workshop', { block: true, cls: 'quiet', attrs: { 'data-actio
     ? button('Continue packing', { variant: 'primary', block: true, attrs: { 'data-action': 'continue-packing' } })
     : yard.open
       ? button('Go to the Loading Yard', { block: true, cls: 'quiet', attrs: { 'data-action': 'to-yard' } })
-      : yardTag(yard);
+      : h`<div class="pz-tiertag">${unlockTag(C, 'shipping', { cls: 'pz-tag' })}</div>`;
   const packingCard = h`<div class="card" id="pz-packing">
 <div class="h3">Packing</div>
 <div class="hint">Packing happens when you ship a crate: sort the jars into route crates before a cart leaves. A clean crate ships at +25%.</div>
@@ -415,8 +425,9 @@ function sigOf(state) {
     tier, fmt(rewardOf(state, tier)), a.grading ? [a.grading.tier, C.puzzles.grading.wrongCount(a.grading)] : 0,
     a.purify ? a.purify.batchId : 0, a.packing ? 1 : 0, tw ? tw.id : 0,
     (state.muddyBatches || []).map((b) => [b.id, Math.round(num(b.jars))]),
-    (() => { const y = yardStatus(C, state); return [y.open, y.need]; })(),
+    (() => { const y = yardStatus(C, state); const u = C.sim.unlocks.status(state, 'shipping'); return [y.open, y.need, u.revealed, u.affordable]; })(),
     num(state.stats && state.stats.fastSolves) >= 3,
+    C.sim.discoveredCount(state),
   ]);
 }
 
@@ -441,8 +452,10 @@ function onClick(e) {
   const t = e.target.closest('[data-action]');
   if (!t || !ROOT.contains(t)) return;
   const act = t.dataset.action;
+  if (act === 'unlock-open') { ensureWorkshopStyles(); openUnlockSheet(C, t.dataset.unlock, { host: ROOT }); return; }
   if (act === 'tier') {
     const tier = t.dataset.tier;
+    if (C.sim.unlocks && !C.sim.unlocks.tierRevealed(C.game.state, tier)) return;
     C.game.act((s, a) => {
       if (a.tier === 'tricky' || a.tier === 'master') { s.stats = s.stats || {}; s.stats.fastSolves = 0; }
       return C.sim.settings.setPuzzleTier(s, { puzzle: 'grading', tier: a.tier });

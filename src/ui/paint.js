@@ -2,8 +2,9 @@
  * paint.js: the fullscreen painting screen (overlay `paint`).
  *
  * Owns: the canvas SVG (regions as tappable panes filled from `piece.regions`,
- * unpainted panes in card paper, ink leading on top), the palette of colors she
- * has in stock, the "uses N jars a pane" line, the pour-fill + glug on every
+ * unpainted panes in card paper, ink leading on top), the palette of EVERY discovered
+ * color (colors with no stock are paper chips tagged "Set a mixer to make this" that open
+ * workshop's mixer picker as a sheet over the easel), the "uses N jars a pane" line, the pour-fill + glug on every
  * pane, a local undo stack, the suggested-palette hint row, the Sign sheet
  * (title, value reveal with a rolling number, Hang it / Keep in archive) and
  * image export (PNG download and Web Share with a file). Implements DESIGN.md
@@ -16,11 +17,12 @@
  *
  * Params: show({pieceId}); with no piece on the easel it closes, opens the
  * Gallery and toasts "Pick a canvas to start painting". data-actions: sign, sign-confirm, sign-cancel,
- * hang, archive, undo, export, share, pick, family, close-sheet.
+ * hang, archive, undo, export, share, pick, make, family, close-sheet.
  */
 
 import { h, raw, backButton, button, tag, safeHex, escapeHtml } from './kit.js';
 import { textColorOn } from '../color.js';
+import { openRecipeSheet, ensureStyles as ensureWorkshopStyles } from './workshop.js';
 import fxDefault from './fx.js';
 import audioDefault from './audio.js';
 import hapticsDefault from './haptics.js';
@@ -151,13 +153,21 @@ const CSS = `
 #screen-paint .pt-fade::before{left:0;background:linear-gradient(to right,var(--paper),rgba(0,0,0,0))}
 #screen-paint .pt-fade::after{right:0;background:linear-gradient(to left,var(--paper),rgba(0,0,0,0))}
 #screen-paint .pt-fade.can-left::before,#screen-paint .pt-fade.can-right::after{opacity:1}
-#screen-paint .pt-chips{display:grid;grid-auto-flow:column;grid-template-rows:repeat(2,48px);grid-auto-columns:56px;gap:10px;overflow-x:auto;overflow-y:hidden;padding:8px 10px 10px;margin:0 -10px;scrollbar-width:none;scroll-snap-type:x proximity}
+#screen-paint .pt-chips{display:grid;grid-auto-flow:column dense;grid-template-rows:repeat(2,48px);grid-auto-columns:56px;gap:10px;overflow-x:auto;overflow-y:hidden;padding:8px 10px 10px;margin:0 -10px;scrollbar-width:none;scroll-snap-type:x proximity}
 #screen-paint .pt-chips.is-empty{display:block;overflow:visible;padding:4px 0}
 #screen-paint .pt-chips.one-row{grid-template-rows:48px}
 #screen-paint .pt-chips::-webkit-scrollbar{display:none}
 #screen-paint .pt-chip{scroll-snap-align:start;position:relative;width:56px;height:48px;border-radius:12px;box-shadow:0 3px 0 rgba(42,38,34,.25);transition:transform 120ms}
 #screen-paint .pt-chip.is-sel{box-shadow:0 0 0 3px #F7F4EC,0 0 0 6px #2A2622;transform:translateY(-1px)}
 #screen-paint .pt-chip.is-low{opacity:.55}
+#screen-paint .pt-chip.pt-paper{grid-column:span 3;width:auto;display:flex;align-items:center;gap:6px;padding:0 10px;background:var(--paper);color:var(--ink);text-align:left;box-shadow:inset 0 0 0 1.5px rgba(42,38,34,.14),0 3px 0 rgba(42,38,34,.25)}
+#screen-paint .pt-chip.pt-paper:active{transform:translateY(2px);box-shadow:inset 0 0 0 1.5px rgba(42,38,34,.14),0 1px 0 rgba(42,38,34,.25)}
+#screen-paint .pt-chip.pt-paper.is-making{box-shadow:inset 0 0 0 1.5px rgba(185,131,28,.55),0 3px 0 rgba(42,38,34,.25)}
+#screen-paint .pt-paper i{flex:0 0 auto;width:20px;height:20px;border-radius:50%;box-shadow:inset 0 0 0 1px rgba(42,38,34,.25)}
+#screen-paint .pt-paper .tx{display:flex;flex-direction:column;align-items:flex-start;min-width:0;gap:2px}
+#screen-paint .pt-paper b{max-width:132px;font-size:12px;line-height:1.1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#screen-paint .pt-paper .tag{font-size:10px;min-height:18px;padding:1px 6px 1px 13px;max-width:none}
+#screen-paint .pt-paper .tag::before{left:4px}
 #screen-paint .pt-chip .n{position:absolute;right:5px;bottom:3px;font-size:11px;font-weight:700;font-variant-numeric:tabular-nums}
 #screen-paint .pt-suggest{display:flex;gap:6px;align-items:center;overflow-x:auto;scrollbar-width:none;padding:0 2px}
 #screen-paint .pt-suggest::-webkit-scrollbar{display:none}
@@ -246,11 +256,14 @@ function costLine(cv) {
   return `Uses ${jars(c[0])} a pane, more for big ones`;
 }
 
-function stockColors() {
+/** Every discovered color, stocked ones first; the rest carry what is needed to make them. */
+function paletteColors() {
   const st = state();
-  return sim().discoveredColors(st)
-    .map((c) => ({ ...c, jars: sim().storage.stockOf(st, c.id) }))
-    .filter((c) => c.jars > 0.0001);
+  const mixers = (st.stations && st.stations.mixers) || [];
+  return sim().discoveredColors(st).map((c) => {
+    const jars = sim().storage.stockOf(st, c.id);
+    return { ...c, jars, stocked: jars >= 1, mixer: mixers.findIndex((m) => m && m.recipe === c.id), canMix: sim().factory.canMix(st, c.id) };
+  }).sort((a, b) => (b.stocked - a.stocked) || ((b.mixer >= 0) - (a.mixer >= 0)));
 }
 
 function famOf(id) {
@@ -312,30 +325,43 @@ function setFill(rid, hex) {
 }
 const CSS_ESC = (s) => String(s).replace(/["\\]/g, '\\$&');
 
+function paperChip(c) {
+  const name = sim().displayName(state(), c.id);
+  const making = c.mixer >= 0;
+  const text = making ? 'Making it' : c.canMix ? 'Set a mixer to make this' : 'Needs a new pigment';
+  return h`<button type="button" class="pt-chip pt-paper ${making ? 'is-making' : ''}" data-tap data-action="make" data-color="${c.id}" aria-label="${name}: ${making ? `Mixer ${c.mixer + 1} is making it` : c.canMix ? 'set a mixer to make this' : 'needs a new pigment first'}"><i style="background:${safeHex(c.hex)}"></i><span class="tx"><b>${name}</b>${tag(text, { icon: making ? 'check' : null })}</span></button>`;
+}
+
 function updateChips() {
   const wrap = q('[data-ref=chips]');
   if (!wrap) return;
-  let list = stockColors();
-  if (ui.family) list = list.filter((c) => famOf(c.id) === ui.family);
   const st = state();
-  if (!ui.sel || !stockColors().some((c) => c.id === ui.sel)) {
-    ui.sel = (list[0] || stockColors()[0] || {}).id || null;
+  const all = paletteColors();
+  const stockedAll = all.filter((c) => c.stocked);
+  let list = all;
+  if (ui.family) list = list.filter((c) => famOf(c.id) === ui.family);
+  if (!ui.sel || !stockedAll.some((c) => c.id === ui.sel)) {
+    ui.sel = ((list.find((c) => c.stocked) || stockedAll[0]) || {}).id || null;
   }
-  const sig = list.map((c) => c.id + (c.id === ui.sel ? '*' : '') + (c.jars < 3 ? 'L' : '')).join('|') + '#' + (ui.family || '');
+  const sig = list.map((c) => c.id + (c.id === ui.sel ? '*' : '') + (c.stocked ? (c.jars < 3 ? 'L' : 's') : c.mixer >= 0 ? `m${c.mixer}` : c.canMix ? 'e' : 'x')).join('|') + '#' + (ui.family || '');
   if (sig !== ui.chipSig) {
     ui.chipSig = sig;
-    wrap.classList.toggle('one-row', list.length <= 6);
+    const units = list.reduce((a, c) => a + (c.stocked ? 1 : 3), 0);
+    wrap.classList.toggle('one-row', units <= 6);
     wrap.classList.toggle('is-empty', list.length === 0);
     wrap.innerHTML = list.length
-      ? String(h`${list.map((c) => h`<button type="button" class="pt-chip ${c.id === ui.sel ? 'is-sel' : ''} ${c.jars < 3 ? 'is-low' : ''}" data-tap data-action="pick" data-color="${c.id}" aria-label="${sim().displayName(st, c.id)}, ${Math.floor(c.jars)} jars" aria-pressed="${c.id === ui.sel}" style="background:${safeHex(c.hex)};color:${textColorOn(safeHex(c.hex))}"><span class="n" data-jars="${c.id}">${Math.floor(c.jars)}</span></button>`)}`)
-      : String(h`<div class="small muted">${ui.family ? 'None of those colors are in stock yet. Clear the filter to see all.' : 'Your vats are empty for now. Let the mixers run, then come back to paint.'}</div>`);
+      ? String(h`${list.map((c) => (c.stocked
+        ? h`<button type="button" class="pt-chip ${c.id === ui.sel ? 'is-sel' : ''} ${c.jars < 3 ? 'is-low' : ''}" data-tap data-action="pick" data-color="${c.id}" aria-label="${sim().displayName(st, c.id)}, ${Math.floor(c.jars)} jars" aria-pressed="${c.id === ui.sel}" style="background:${safeHex(c.hex)};color:${textColorOn(safeHex(c.hex))}"><span class="n" data-jars="${c.id}">${Math.floor(c.jars)}</span></button>`
+        : paperChip(c)))}`)
+      : String(h`<div class="small muted">${ui.family ? 'None of those colors are discovered yet. Clear the filter to see all.' : 'Discover a color and it will be waiting here.'}</div>`);
   } else {
     for (const c of list) {
+      if (!c.stocked) continue;
       const n = wrap.querySelector(`[data-jars="${CSS_ESC(c.id)}"]`);
       if (n) n.textContent = String(Math.floor(c.jars));
     }
   }
-  const selEntry = stockColors().find((c) => c.id === ui.sel);
+  const selEntry = stockedAll.find((c) => c.id === ui.sel);
   q('[data-ref=selname]').textContent = ui.sel ? sim().displayName(st, ui.sel) : 'Paint comes from your vats';
   q('[data-ref=jars]').textContent = selEntry ? `${Math.floor(selEntry.jars)} jars left` : '';
   root.querySelectorAll('.pt-fam').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.family === ui.family)));
@@ -589,6 +615,14 @@ function onClick(e) {
   const a = t.dataset.action;
   if (a === 'close-sheet') { if (e.target === t && ui.sheet === 'sign') closeSheet(); return; }
   if (a === 'pick') { ui.sel = t.dataset.color; ui.lastCost = 0; ui.chipSig = ''; update(); return; }
+  if (a === 'make') {
+    const colorId = t.dataset.color;
+    const mi = (state().stations.mixers || []).findIndex((m) => m && m.recipe === colorId);
+    if (mi >= 0) { ctx.toast(`Mixer ${mi + 1} is making ${sim().displayName(state(), colorId)}. It will be here soon.`); return; }
+    ensureWorkshopStyles();
+    openRecipeSheet(ctx, { colorId, host: root, onDone: () => { ui.chipSig = ''; update(); } });
+    return;
+  }
   if (a === 'family') { ui.family = ui.family === t.dataset.family ? null : t.dataset.family; ui.chipSig = ''; updateChips(); updateFades(); return; }
   if (a === 'undo') onUndo();
   else if (a === 'sign') openSheet('sign');

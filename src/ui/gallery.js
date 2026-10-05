@@ -1,7 +1,7 @@
 /**
  * gallery.js: the Gallery Wing (overlay `gallery`).
  *
- * Owns: the locked door ("Opens at 20 colors with the Gallery Wing"), the
+ * Owns: the locked door (the price tag and the "What this opens" sheet from workshop.js), the
  * walls (framed mini-renders of hung pieces with their admission per second),
  * the weekly taste banner, visitor comment bubbles, the collector offer card,
  * the archive of unhung pieces (hang / take down), unfinished pieces
@@ -9,18 +9,18 @@
  * "The Gallery" (Painting, Piece value, The gallery walls, Where canvases come
  * from, Unlock and prestige). Painting itself lives in paint.js.
  *
- * data-actions: piece, empty-wall, unhang, hang, start, continue, accept-offer,
+ * data-actions: unlock-open, piece, empty-wall, unhang, hang, start, continue, accept-offer,
  * decline-offer, close-sheet, export, share, goto-workshop.
  * Navigates: navigate('paint', {pieceId}), navigate('workshop').
  */
 
 import { h, raw, backButton, button, tag, safeHex, progressBar } from './kit.js';
 import { canvasSvgMarkup, exportPieceImage, FAMILY_HEX, paintIntent } from './paint.js';
+import { unlockTag, openUnlockSheet, ensureStyles as ensureWorkshopStyles } from './workshop.js';
 import fxDefault from './fx.js';
 import audioDefault from './audio.js';
 import hapticsDefault from './haptics.js';
 
-const UNLOCK_COLORS = 20;
 const PLURAL = Object.freeze({
   red: 'reds', orange: 'oranges', yellow: 'yellows', green: 'greens', teal: 'teals',
   blue: 'blues', violet: 'violets', pink: 'pinks', neutral: 'neutrals',
@@ -29,6 +29,9 @@ const PLURAL = Object.freeze({
 const CSS = `
 #screen-gallery .screen-body > *{flex-shrink:0}
 #screen-gallery .h2{font-family:var(--font-ui);font-weight:600}
+#screen-gallery .gl-door-tag{display:flex;justify-content:center}
+#screen-gallery .gl-door-tag .tag{white-space:normal;text-align:left;max-width:100%}
+#screen-gallery .gl-door-tag .ws-unlockbtn{justify-content:center;text-align:center}
 #screen-gallery .btn.small{min-height:44px}
 #screen-gallery .gl-name{font-family:var(--font-display);font-size:20px;line-height:1.2}
 #screen-gallery .gl-sec{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-top:6px}
@@ -109,12 +112,10 @@ function paintedCount(p) {
 
 function doorView(st) {
   const n = sim().discoveredCount(st);
-  const room = ctx.content.getRoom ? ctx.content.getRoom('gallery-wing') : null;
-  const need = (room && room.colorsRequired) || UNLOCK_COLORS;
-  const left = Math.max(0, need - n);
-  const hasRoom = (st.rooms || []).includes('gallery-wing');
+  const u = sim().unlocks.status(st, 'gallery');
+  const need = u.revealColors;
   return h`
-<div class="card gl-door" data-coach="gallery">
+<div class="card gl-door is-tap" data-coach="gallery" data-action="unlock-open" data-unlock="gallery" data-tap role="button" tabindex="0" aria-label="What the Gallery Wing opens">
   <svg viewBox="0 0 160 200" role="img" aria-label="A closed gallery door">
     <path d="M18 196 V84 A62 62 0 0 1 142 84 V196 Z" fill="#7B5236" stroke="#2A2622" stroke-width="3"/>
     <path d="M34 196 V88 A46 46 0 0 1 126 88 V196 Z" fill="#A87449" stroke="#2A2622" stroke-width="2.5"/>
@@ -125,11 +126,9 @@ function doorView(st) {
   </svg>
   <div class="h2">The Gallery Wing</div>
   <div class="hint">Quiet white walls, waiting for your first paintings. Hang your art, and visitors pay to see it.</div>
-  ${left > 0
-    ? h`${tag(`Opens at ${need} colors with the Gallery Wing: ${left} more`)}${progressBar(Math.min(1, n / need), { label: 'Colors toward the Gallery Wing' })}`
-    : hasRoom
-      ? h`${tag('The Gallery Wing opens in just a moment')}<div class="small semi">The painters are hanging the last lamps. Check back in a moment.</div>`
-      : h`${tag('Opens when you build the Gallery Wing')}<div class="small semi">You have the colors. Build the Gallery Wing in the workshop.</div>${button('Go to the workshop', { variant: 'primary', attrs: { 'data-action': 'goto-workshop' } })}`}
+  <div class="gl-door-tag">${unlockTag(ctx, 'gallery')}</div>
+  ${u.colorsLeft > 0 ? progressBar(Math.min(1, n / need), { label: 'Colors toward the Gallery Wing' }) : ''}
+  <div class="small muted">Tap the door to see what it opens.</div>
 </div>`;
 }
 
@@ -289,7 +288,7 @@ ${free <= 0 ? h`<div class="hint">Every wall is in use. Take one down to rotate 
 function signature(st, now) {
   const g = st.gallery || {};
   return JSON.stringify([
-    g.unlocked, sim().discoveredCount(st), g.canvases, g.walls, g.hung, g.taste,
+    g.unlocked, sim().discoveredCount(st), (() => { const u = sim().unlocks.status(st, 'gallery'); return [u.revealed, u.affordable, u.open]; })(), g.canvases, g.walls, g.hung, g.taste,
     (g.pieces || []).map((p) => [p.id, p.signedAt, p.hung, p.title, Object.keys(p.regions || {}).length, Math.round(p.value || 0)]),
     g.collectorOffer ? [g.collectorOffer.pieceId, Math.round(g.collectorOffer.pay)] : null,
     Math.round(sim().gallery.admissionRate(st, now) * 1000),
@@ -299,10 +298,8 @@ function signature(st, now) {
 
 function headSubtitle(st, now) {
   if (!gal().unlocked) {
-    const room = ctx.content.getRoom ? ctx.content.getRoom('gallery-wing') : null;
-    const need = (room && room.colorsRequired) || UNLOCK_COLORS;
-    const left = Math.max(0, need - sim().discoveredCount(st));
-    return left > 0 ? `Opens at ${need} colors: ${left} more` : 'Build the Gallery Wing to open it';
+    const u = sim().unlocks.status(st, 'gallery');
+    return `${ctx.format.num(u.cost)} coins to open`;
   }
   const r = sim().gallery.admissionRate(st, now);
   return r > 0 ? `${ctx.format.rate(r)} from visitors` : 'Hang a piece to welcome visitors';
@@ -380,6 +377,7 @@ function onClick(e) {
   const id = t.dataset.piece;
   if (a === 'close-sheet') { if (e.target === t) closeSheet(); return; }
   if (a === 'goto-workshop') { ctx.navigate('workshop'); return; }
+  if (a === 'unlock-open') { ensureWorkshopStyles(); openUnlockSheet(ctx, t.dataset.unlock, { host: root }); return; }
   if (a === 'goto-catalog') { ctx.navigate('catalog'); return; }
   if (a === 'goto-canvases') { scrollToCanvases(); return; }
   if (a === 'piece') { openPiece(id); return; }
