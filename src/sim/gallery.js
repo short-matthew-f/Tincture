@@ -13,6 +13,9 @@
 // (`paintRate`) so panes don't change price mid-piece, and every region's jars
 // are stored at paint time so the value preview and the signed value agree.
 //
+// gallery.sold: [{id, canvas, title, soldAt, coins, thumb:{regionId: colorId}}], oldest first (memory
+// cards for pieces sold to a collector; the piece itself is gone).
+//
 // Piece {id, canvas, title, regions:{regionId: colorId}, purity:{regionId: p},
 //        jars:{regionId: n}, paintRate, startedAt, signedAt, value, hung}
 
@@ -44,6 +47,10 @@ export const TASTE_BONUS = 0.25;
 export const COLLECTOR_MS = 2 * 86400e3;
 export const COLLECTOR_MULT = 3;
 export const START_WALLS = 4;
+/** A collector who buys the original pays this many times its signed value. */
+export const SELL_MULT = 2;
+/** Most "sold" memories kept in the save (the Gallery shows 12). */
+export const SOLD_KEEP = 60;
 
 const num = (x, d = 0) => (Number.isFinite(x) ? x : d);
 
@@ -55,6 +62,7 @@ function gal(state) {
   if (!Array.isArray(g.pieces)) g.pieces = [];
   if (!Array.isArray(g.hung)) g.hung = [];
   if (!Array.isArray(g.canvases)) g.canvases = [];
+  if (!Array.isArray(g.sold)) g.sold = [];
   return g;
 }
 
@@ -240,13 +248,62 @@ export function clearRegion(state, args = {}) {
   return { ok: true };
 }
 
-/** Delete an unsigned piece (paint is not refunded). */
+/**
+ * Scrap an unsigned piece: it leaves the easel, the jars already spent stay
+ * spent (no refund), and its canvas is free to paint again. Signed pieces
+ * stay (see sellPiece).
+ */
 export function discardPiece(state, args = {}) {
   const g = gal(state);
   const i = g.pieces.findIndex((p) => p.id === args.pieceId && !p.signedAt);
   if (i < 0) return { ok: false };
-  g.pieces.splice(i, 1);
-  return { ok: true };
+  const [p] = g.pieces.splice(i, 1);
+  return { ok: true, canvas: p.canvas, panes: Object.keys(p.regions || {}).length };
+}
+
+/**
+ * canvasAvailable(state, canvasId) -> can she start a piece on this canvas?
+ * Designs are never used up: she owns the canvas, so a sold or scrapped
+ * piece's canvas (and one still on the easel or on a wall) can be painted
+ * again at any time.
+ */
+export function canvasAvailable(state, canvasId) {
+  return gal(state).canvases.includes(canvasId) && !!canvasDef(canvasId);
+}
+
+/**
+ * sellOffer(state, pieceId, now) -> {pieceId, coins, value} | null: what a collector
+ * pays for a signed piece's original: its signed value × SELL_MULT × income multiplier.
+ */
+export function sellOffer(state, pieceId, now = 0) {
+  const p = findPiece(state, pieceId);
+  if (!p || !p.signedAt) return null;
+  const value = num(p.value) > 0 ? num(p.value) : pieceValue(state, p, now).value;
+  return { pieceId: p.id, value, coins: value * SELL_MULT * incomeMultiplier(state, now) };
+}
+
+/**
+ * sellPiece(state, {pieceId}, now) -> {ok, coins}. A collector buys the original
+ * of a SIGNED piece: pays once, the piece comes off its wall (if hung) and out
+ * of `pieces`, and a memory record goes to `gallery.sold`. Her canvas stays hers.
+ */
+export function sellPiece(state, args = {}, now = 0) {
+  const g = gal(state);
+  const offer = sellOffer(state, args.pieceId, now);
+  if (!offer) return { ok: false, reason: 'piece' };
+  const p = findPiece(state, args.pieceId);
+  const coins = num(offer.coins);
+  g.hung = g.hung.filter((id) => id !== p.id);
+  g.pieces = g.pieces.filter((x) => x.id !== p.id);
+  if (g.collectorOffer && g.collectorOffer.pieceId === p.id) g.collectorOffer = null;
+  g.sold.push({ id: p.id, canvas: p.canvas, title: p.title || canvasDef(p.canvas)?.name || 'Untitled', soldAt: now, coins, thumb: { ...p.regions } });
+  if (g.sold.length > SOLD_KEEP) g.sold.splice(0, g.sold.length - SOLD_KEEP);
+  state.coins = num(state.coins) + coins;
+  state.runEarned = num(state.runEarned) + coins;
+  if (state.lifetime) state.lifetime.earned = num(state.lifetime.earned) + coins;
+  questEvent(state, 'pieceSold', 1, { pieceId: p.id, coins });
+  emit(state, 'pieceSold', { pieceId: p.id, coins });
+  return { ok: true, coins };
 }
 
 export function hang(state, args = {}) {

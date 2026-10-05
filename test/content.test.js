@@ -72,7 +72,7 @@ test('rooms: ordered by cost ascending, spec numbers, slot caps', () => {
   const costs = ROOMS.map((r) => r.cost);
   assert.deepEqual(costs, [...costs].sort((a, b) => a - b));
   assert.equal(ROOMS[0].id, 'bench');
-  const expect = { 'mill-room': [500, 10], 'mixing-hall': [3000, 18], cellar: [12000, 24], 'loading-yard': [40000, 35], atelier: [150000, 45], 'gallery-wing': [8000, 25], 'long-hall': [60000, 40], rotunda: [400000, 70] };
+  const expect = { 'mill-room': [1500, 15], 'mixing-hall': [3000, 18], cellar: [12000, 24], 'loading-yard': [40000, 50], atelier: [150000, 45], 'gallery-wing': [8000, 25], 'long-hall': [60000, 40], rotunda: [400000, 70] };
   for (const [id, [cost, colors]] of Object.entries(expect)) {
     assert.equal(getRoom(id).cost, cost, id);
     assert.equal(getRoom(id).colorsRequired, colors, id);

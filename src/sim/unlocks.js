@@ -22,7 +22,7 @@ export const UNLOCKS = Object.freeze([
   { id: 'shelf', name: 'Merge Shelf', revealColors: 8, cost: 400, object: 'shelf' },
   { id: 'hunters', name: 'Hue Hunters', revealColors: 15, cost: 2500, object: 'map-window' },
   { id: 'gallery', name: 'Gallery Wing', revealColors: 25, cost: 8000, room: 'gallery-wing' }, // the room IS the purchase
-  { id: 'shipping', name: 'Loading Yard', revealColors: 35, cost: 40000, room: 'loading-yard' }, // the room IS the purchase
+  { id: 'shipping', name: 'Loading Yard', revealColors: 50, cost: 40000, room: 'loading-yard' }, // the room IS the purchase
   { id: 'commissions', name: 'Commissions', revealColors: 30, cost: 20000, requiresPhase: 3 },
 ].map((u) => Object.freeze(u)));
 

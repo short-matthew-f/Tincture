@@ -619,13 +619,18 @@ Previous eras become **Legacy Stock**: a passive trickle of income from old colo
 
 ### Target pacing
 
-| Milestone | Target (a player doing 3 to 5 check-ins a day) |
-| --- | --- |
-| Phase 2 | End of day 1 |
-| First Renovate | Day 6 to 8 |
-| Era 2 | Week 4 to 6 |
-| Era 3 | Week 10 to 14 |
-| Spectrum mode | Month 4+ |
+| Milestone | Target (a player doing 3 to 5 check-ins a day) | Era 1 simulation, Casual (median of 30 seeds, days since install) |
+| --- | --- | --- |
+| Third mixer | First session, right after the tutorial | Minute 1.5 of session one, every seed |
+| Merge Shelf (8 colors + 400 Coins) | Session two | Session two, every seed |
+| Phase 2 | End of day 1 | Day 0.5 (her last check-in of day 1) |
+| Phase 3 | Day 3 to 4 | Day 3.1 |
+| First Renovate | Day 6 to 8 | Day 7.2 |
+| Era 2 | Week 4 to 6 | not simulated |
+| Era 3 | Week 10 to 14 | not simulated |
+| Spectrum mode | Month 4+ | not simulated |
+
+Measured by `node tools/balance/run.js --seeds 30` and `--minutes 10` (the real engine; tuning log and the other profiles in `tools/balance/TUNING.md`).
 
 ## Quests and weekly events
 

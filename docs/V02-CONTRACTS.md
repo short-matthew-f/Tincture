@@ -39,7 +39,7 @@ export const UNLOCKS = [
   { id: 'shelf',       name: 'Merge Shelf',   revealColors: 8,  cost: 400,   object: 'shelf' },
   { id: 'hunters',     name: 'Hue Hunters',   revealColors: 15, cost: 2500,  object: 'map-window' },
   { id: 'gallery',     name: 'Gallery Wing',  revealColors: 25, cost: 8000,  room: 'gallery-wing' },   // the room IS the purchase
-  { id: 'shipping',    name: 'Loading Yard',  revealColors: 35, cost: 40000, room: 'loading-yard' },  // the room IS the purchase
+  { id: 'shipping',    name: 'Loading Yard',  revealColors: 50, cost: 40000, room: 'loading-yard' },  // the room IS the purchase (50 since TUNING.md change 8)
   { id: 'commissions', name: 'Commissions',   revealColors: 30, cost: 20000, requiresPhase: 3 },
 ];
 export function status(state, id) -> { id, name, cost, revealColors, colorsLeft, revealed, affordable, open }
@@ -104,6 +104,12 @@ success or on leaving a subgame; it never navigates on its own.
 thing: the flow-meter suggestion when affordable, else the cheapest
 affordable upgrade, else the Almost-there item nearest completion, else
 "Collect". The home screen renders exactly one primary button from it.
+Full order and the cheapest-upgrade rule (Phase 1 only, and only while the
+flow-meter pick costs more than twice her Coins) are in `src/sim/next.js`'s
+header. `action.kind: 'mixer'` ("Buy Mixer 3 for 60", ranked with rooms) is
+bought with `factory.buyMixer(state, now) -> {ok, index, cost} | {ok:false,
+reason:'slots'|'coins', cost}`; `factory.mixerPurchase(state) -> {cost,
+available, affordable, count}` prices the next one (60, ×6 each, up to 6 mixers).
 
 ## Line rule (src/sim/shelf.js)
 

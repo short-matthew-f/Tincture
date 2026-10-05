@@ -6,21 +6,42 @@
 //      or an idle mixer while a discovered color nobody makes is mixable
 //   2. the half-price re-buy after Renovate, when affordable
 //   3. an unlock whose colors are met, when affordable ("Open the Merge Shelf for 400")
-//   4. a room whose colors are met, when affordable
+//   4. a room whose colors are met, or another mixer (factory.buyMixer: 60
+//      Coins, ×6 each), when affordable; the cheaper of the two first
 //   5. the flow meter's suggestion, when affordable
-//   6. the cheapest affordable upgrade
+//   6. the cheapest affordable upgrade, ONLY in Phase 1 and while the flow
+//      meter's pick is more than twice her Coins away (see below)
 //   7. the Almost-there item nearest completion
 //   8. Collect (the shop's till, or simply "Collect" when there is nothing)
 // Never mutates state.
+//
+// The 'cheapest' fallback rule (tools/balance/TUNING.md change 9). Rule 6
+// applies only in Phase 1 (her first sessions, and the start of each run after
+// Renovate) and only while the flow meter's pick costs more than twice her
+// Coins (CHEAPEST_FALLBACK). So early on a tap of Next nearly always buys
+// something, but once she is halfway to the bottleneck Next stops spending
+// her Coins on cheap Level ups and shows Almost there / Collect until the
+// pick (or the 60-Coin mixer, rule 4) is affordable. From
+// Phase 2 on, Next always saves for the bottleneck. Without the halfway check
+// the 6.9-Coin starter sources ate every Coin and the third mixer was never
+// bought in the first session on half the seeds; without the phase limit a
+// player who always took the cheapest Level up spread her Coins over stations
+// that were not the limit.
 
 import { formatNumber } from '../format.js';
 import { ROOMS } from '../content/rooms.js';
 import { flowMeter, upgradeOptions, discoveredCount } from './economy.js';
 import { statusAll, rebuyQuote, UNLOCKS_BY_ID } from './unlocks.js';
 import { almostThere } from './ledger.js';
-import { canMix } from './factory.js';
+import { canMix, mixerPurchase } from './factory.js';
 
 const num = (x, d = 0) => (Number.isFinite(x) ? x : d);
+
+/**
+ * Rule 6 (the cheapest affordable upgrade) applies up to `maxPhase`, and only
+ * while the flow meter's pick costs more than `savingRatio` × her Coins.
+ */
+export const CHEAPEST_FALLBACK = Object.freeze({ maxPhase: 1, savingRatio: 2 });
 
 const ARTICLE = { shelf: 'the ', hunters: 'the ', gallery: 'the ', shipping: 'the ', commissions: '' };
 
@@ -46,10 +67,11 @@ function upgradeAction(o) {
 
 /**
  * next(state, now) -> {kind, label, action:{kind, ...}, cost?, affordable, why}.
- * why: 'recipe'|'rebuy'|'unlock'|'room'|'bottleneck' (the flow meter's pick)
- * |'cheapest'|'almost'|'collect' — which rule above chose it.
+ * why: 'recipe'|'rebuy'|'unlock'|'room'|'mixer'|'bottleneck' (the flow meter's
+ * pick)|'cheapest'|'almost'|'collect' — which rule above chose it.
  * action.kind: 'assign' {mixer} | 'rebuy' {ids} | 'unlock' {id} | 'room' {id}
- * | 'upgrade' {upgrade, index?, id?} | 'navigate' {screen, params} | 'collect'.
+ * | 'mixer' {} (factory.buyMixer) | 'upgrade' {upgrade, index?, id?}
+ * | 'navigate' {screen, params} | 'collect'.
  * (`upgrade` is the buyUpgrade kind: source|grinder|mixer|vat|shop|fleet|cellar.)
  */
 export function next(state, now = num(state?.lastTick)) {
@@ -83,11 +105,16 @@ export function next(state, now = num(state?.lastTick)) {
     return pick('unlock', unlockLabel(u.id, u.cost, notation), { id: u.id }, u.cost, true, 'unlock');
   }
 
-  // 4. A room whose colors are met (rooms that ARE unlocks are covered above).
+  // 4. A room whose colors are met (rooms that ARE unlocks are covered above),
+  //    or another mixer: whichever is cheaper.
   const colors = discoveredCount(state);
   const owned = new Set(state?.rooms ?? []);
   const room = ROOMS.find((r) => !owned.has(r.id) && !r.unlock && r.cost > 0
     && colors >= r.colorsRequired && num(state?.phase, 1) >= r.phase && coins >= r.cost);
+  const mq = mixerPurchase(state);
+  if (mq.affordable && (!room || mq.cost < room.cost)) {
+    return pick('mixer', `Buy Mixer ${mq.count + 1} for ${formatNumber(mq.cost, notation)}`, {}, mq.cost, true, 'mixer');
+  }
   if (room) return pick('room', `Open the ${room.name} for ${formatNumber(room.cost, notation)}`, { id: room.id }, room.cost, true, 'room');
 
   // 5. The flow meter's suggestion.
@@ -95,10 +122,14 @@ export function next(state, now = num(state?.lastTick)) {
     return pick('upgrade', s.label, upgradeAction(s), s.cost, true, 'bottleneck');
   }
 
-  // 6. The cheapest affordable upgrade.
-  let best = null;
-  for (const o of upgradeOptions(state)) if (o.cost <= coins && (!best || o.cost < best.cost)) best = o;
-  if (best) return pick('upgrade', best.label, upgradeAction(best), best.cost, true, 'cheapest');
+  // 6. The cheapest affordable upgrade: Phase 1 only, and only while she is
+  //    less than halfway to the flow meter's pick (see the header).
+  const target = s && Number.isFinite(s.cost) ? s.cost : Infinity;
+  if (num(state?.phase, 1) <= CHEAPEST_FALLBACK.maxPhase && target > CHEAPEST_FALLBACK.savingRatio * coins) {
+    let best = null;
+    for (const o of upgradeOptions(state)) if (o.cost <= coins && (!best || o.cost < best.cost)) best = o;
+    if (best) return pick('upgrade', best.label, upgradeAction(best), best.cost, true, 'cheapest');
+  }
 
   // 7. The nearest Almost-there item.
   const near = almostThere(state, now)[0];

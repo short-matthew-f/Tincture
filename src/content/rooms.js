@@ -15,7 +15,7 @@ const adds = (o) => Object.freeze({ ...NONE, ...o });
 export const ROOMS = Object.freeze([
   { id: 'bench', name: 'The Bench', cost: 0, colorsRequired: 0, phase: 1, adds: adds({}),
     blurb: 'Where it all begins: one mortar, a few jars and a sunny window.' },
-  { id: 'mill-room', name: 'Mill Room', cost: 500, colorsRequired: 10, phase: 1, adds: adds({ grinderSlots: 1, mixerSlots: 1 }),
+  { id: 'mill-room', name: 'Mill Room', cost: 1500, colorsRequired: 15, phase: 1, adds: adds({ grinderSlots: 1, mixerSlots: 1 }),
     blurb: 'Stone floors and room for a second grinder and mixer.' },
   { id: 'mixing-hall', name: 'Mixing Hall', cost: 3000, colorsRequired: 18, phase: 2, adds: adds({ mixerSlots: 2, vatSlots: 3 }),
     blurb: 'High windows, long tables and three more tall glass vats.' },
@@ -23,7 +23,7 @@ export const ROOMS = Object.freeze([
     blurb: 'Quiet white walls, waiting for your first paintings.' },
   { id: 'cellar', name: 'Cellar', cost: 12000, colorsRequired: 24, phase: 2, adds: adds({ vatSlots: 3, cellarMult: 4 }),
     blurb: 'Cool, dark and deep: four times the storage for everything else.' },
-  { id: 'loading-yard', name: 'Loading Yard', cost: 40000, colorsRequired: 35, phase: 2, unlock: 'shipping', adds: adds({ fleetSlots: 3, mixerSlots: 1 }),
+  { id: 'loading-yard', name: 'Loading Yard', cost: 40000, colorsRequired: 50, phase: 2, unlock: 'shipping', adds: adds({ fleetSlots: 3, mixerSlots: 1 }),
     blurb: 'Carts, crates and the smell of rope. Time to ship.' },
   { id: 'long-hall', name: 'Long Hall', cost: 60000, colorsRequired: 40, phase: 3, adds: adds({ walls: 8 }),
     blurb: 'A long skylit hall with eight more walls to hang.' },

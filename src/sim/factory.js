@@ -502,7 +502,7 @@ export function mixersBought(state) {
 export function mixerPurchase(state) {
   const n = mixersBought(state);
   const count = (state?.stations?.mixers ?? []).length;
-  const available = count < MAX_SLOTS.mixers;
+  const available = count < MAX_SLOTS.mixers && n < (MIXER_PURCHASE.maxBought ?? Infinity);
   const cost = MIXER_PURCHASE.baseCost * Math.pow(MIXER_PURCHASE.costGrowth, n);
   return { cost, available, affordable: available && num(state?.coins) >= cost, count };
 }
@@ -512,8 +512,7 @@ export function mixerPurchase(state) {
  * Adds one mixer (level 1, no recipe) without a room: the cheap third mixer
  * right after the tutorial (docs/PLAN-v0.2.md Theme A.1). Emits 'mixer' {index}.
  */
-export function buyMixer(state, a, b) {
-  const now = typeof a === 'number' ? a : num(b); // eslint-disable-line no-unused-vars
+export function buyMixer(state, now = 0) { // eslint-disable-line no-unused-vars
   const q = mixerPurchase(state);
   if (!q.available) return { ok: false, reason: 'slots', cost: q.cost };
   if (num(state.coins) < q.cost) return { ok: false, reason: 'coins', cost: q.cost };

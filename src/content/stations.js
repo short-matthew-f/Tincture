@@ -44,6 +44,12 @@ export function getStationKind(kind) {
 // (output rate above = batchJars / batchSeconds per level before milestones).
 export const MIXER = Object.freeze({ batchJars: 5, batchSeconds: 125, pigmentPerJar: 1 });
 
+// Buying another mixer outright (factory.buyMixer, docs/PLAN-v0.2.md Theme A.1):
+// a cheap station purchase that adds a mixer slot without a room, the first
+// session's "new possibility". The n-th bought mixer costs baseCost · costGrowth^n
+// (60, 360, 2,160, ...), until the mixers reach rooms.js MAX_SLOTS.mixers.
+export const MIXER_PURCHASE = Object.freeze({ baseCost: 60, costGrowth: 6, maxBought: 2 }); // rooms add the rest
+
 // Display vat / cellar capacity (jars). Cellar capacity is a single shared number
 // that the Cellar room multiplies (rooms.js adds.cellarMult).
 export const VAT = Object.freeze({ baseCapacity: 400 });

@@ -9,8 +9,11 @@
  * "The Gallery" (Painting, Piece value, The gallery walls, Where canvases come
  * from, Unlock and prestige). Painting itself lives in paint.js.
  *
- * data-actions: unlock-open, piece, empty-wall, unhang, hang, start, continue, accept-offer,
- * decline-offer, close-sheet, export, share, goto-workshop.
+ * data-actions: unlock-open, piece, empty-wall, unhang (also a 44 px "Take down" on each hung tile), hang, start,
+ * continue, accept-offer, decline-offer, sell-open (sheet of a signed piece), sell-confirm, sell-cancel,
+ * close-sheet, export, share, goto-workshop, goto-catalog, goto-canvases.
+ * Selling (Theme E): a sheet with the thumbnail and "A collector offers N"; Sell plays fx.stamp "Sold" and
+ * fx.coinArc to the coin pill; a "Sold to a collector" card (gallery.sold, newest first, 12 shown) stays in the archive.
  * Navigates: navigate('paint', {pieceId}), navigate('workshop').
  */
 
@@ -59,7 +62,16 @@ const CSS = `
 #screen-gallery .gl-sheet{width:100%;max-width:520px;max-height:92%}
 #screen-gallery .gl-big{width:190px;margin:0 auto}
 #screen-gallery .gl-big svg{width:100%;height:auto}
+#screen-gallery .gl-big .gl-frame{display:block}
 #screen-gallery .gl-row{display:flex;gap:10px;align-items:center}
+#screen-gallery .gl-cell{display:flex;flex-direction:column;gap:6px;min-width:0}
+#screen-gallery .gl-cell > .gl-tile{flex:1 1 auto}
+#screen-gallery .gl-sold{display:flex;flex-direction:column;gap:4px;min-width:0;opacity:.92}
+#screen-gallery .gl-sold .gl-frame{background:#E3E0D6;position:relative}
+#screen-gallery .gl-sold .gl-frame svg{opacity:.7}
+#screen-gallery .gl-sold .gl-r{white-space:normal}
+#screen-gallery .gl-price{font-family:var(--font-display);font-size:22px;line-height:1.2;text-align:center}
+#screen-gallery .gl-sellbig{position:relative}
 `;
 
 function injectCss() {
@@ -166,10 +178,13 @@ function wallsView(st, now) {
   for (let i = 0; i < walls; i++) {
     const p = hung[i];
     if (p) {
-      tiles.push(h`<button type="button" class="gl-tile" data-tap data-action="piece" data-piece="${p.id}" aria-label="${p.title || 'Painting'}, ${ctx.format.rate(pieceRate(p, now))}">
-  <span class="gl-frame">${mini(p)}</span>
-  <span class="gl-t">${p.title || canvasOf(p)?.name || 'Untitled'}</span>
-  <span class="gl-r">${ctx.format.rate(pieceRate(p, now))}</span></button>`);
+      tiles.push(h`<div class="gl-cell">
+  <button type="button" class="gl-tile" data-tap data-action="piece" data-piece="${p.id}" aria-label="${p.title || 'Painting'}, ${ctx.format.rate(pieceRate(p, now))}">
+    <span class="gl-frame">${mini(p)}</span>
+    <span class="gl-t">${p.title || canvasOf(p)?.name || 'Untitled'}</span>
+    <span class="gl-r">${ctx.format.rate(pieceRate(p, now))}</span></button>
+  ${button('Take down', { small: true, block: true, attrs: { 'data-action': 'unhang', 'data-piece': p.id, 'aria-label': `Take down ${p.title || 'this painting'}` } })}
+</div>`);
     } else {
       tiles.push(h`<button type="button" class="gl-empty" data-tap data-action="empty-wall" aria-label="Empty wall"><span class="semi">A wall for your art</span><span>${hasArchive() ? 'Hang a piece' : 'Paint one'}</span></button>`);
     }
@@ -255,10 +270,29 @@ function canvasesView(st) {
 ${list.length < 12 ? h`<div class="hint">New canvases arrive with catalog milestones, postcard sets, events and commissions.</div>` : ''}`;
 }
 
+const SOLD_SHOWN = 12;
+
+function soldList() {
+  return (gal().sold || []).slice().sort((a, b) => (b.soldAt || 0) - (a.soldAt || 0)).slice(0, SOLD_SHOWN);
+}
+
+function soldCard(r) {
+  const cv = ctx.content.getCanvas(r.canvas);
+  const fills = {};
+  for (const [rid, cid] of Object.entries(r.thumb || {})) fills[rid] = hexOf(cid);
+  const when = new Date(r.soldAt || 0).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  return h`<div class="gl-sold" data-sold="${r.id}" aria-label="${r.title || 'Painting'}, sold to a collector ${when}">
+  <span class="gl-frame">${cv ? raw(canvasSvgMarkup(cv, fills, { label: r.title || cv.name })) : ''}</span>
+  <span class="gl-t">${r.title || cv?.name || 'Untitled'}</span>
+  <span class="gl-r">Sold to a collector</span>
+  <span class="gl-r">${when}</span></div>`;
+}
+
 function archiveView(st) {
   const g = gal();
   const list = (g.pieces || []).filter((p) => p.signedAt && !p.hung).sort((a, b) => b.signedAt - a.signedAt);
-  if (!list.length) {
+  const sold = soldList();
+  if (!list.length && !sold.length) {
     const hasCanvas = (g.canvases || []).length > 0;
     return h`
 <div class="gl-sec"><div class="h2">Archive</div></div>
@@ -270,15 +304,16 @@ function archiveView(st) {
   }
   const free = Math.max(0, (g.walls || 0) - (g.hung || []).length);
   return h`
-<div class="gl-sec"><div class="h2">Archive</div><div class="small muted">${list.length} resting</div></div>
-<div class="gl-walls">${list.map((p) => h`<div class="gl-tile">
+<div class="gl-sec"><div class="h2">Archive</div><div class="small muted">${list.length ? `${list.length} resting` : 'Nothing resting'}${sold.length ? ` · ${(g.sold || []).length} sold` : ''}</div></div>
+${list.length ? h`<div class="gl-walls">${list.map((p) => h`<div class="gl-cell">
   <button type="button" class="gl-tile" data-tap data-action="piece" data-piece="${p.id}" aria-label="${p.title || 'Painting'}">
     <span class="gl-frame">${mini(p)}</span>
     <span class="gl-t">${p.title || 'Untitled'}</span>
     <span class="gl-r">worth ${ctx.format.num(p.value || 0)}</span></button>
   ${button('Hang', { small: true, block: true, attrs: { 'data-action': 'hang', 'data-piece': p.id } })}
-</div>`)}</div>
-${free <= 0 ? h`<div class="hint">Every wall is in use. Take one down to rotate a new piece in. Nothing is ever lost.</div>` : ''}`;
+</div>`)}</div>` : ''}
+${list.length && free <= 0 ? h`<div class="hint">Every wall is in use. Take one down to rotate a new piece in. Nothing is ever lost.</div>` : ''}
+${sold.length ? h`<div class="gl-sec"><div class="semi small">Sold to a collector</div></div><div class="gl-walls" data-ref="sold">${sold.map(soldCard)}</div>` : ''}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -290,6 +325,7 @@ function signature(st, now) {
   return JSON.stringify([
     g.unlocked, sim().discoveredCount(st), (() => { const u = sim().unlocks.status(st, 'gallery'); return [u.revealed, u.affordable, u.open]; })(), g.canvases, g.walls, g.hung, g.taste,
     (g.pieces || []).map((p) => [p.id, p.signedAt, p.hung, p.title, Object.keys(p.regions || {}).length, Math.round(p.value || 0)]),
+    (g.sold || []).map((r) => r.id),
     g.collectorOffer ? [g.collectorOffer.pieceId, Math.round(g.collectorOffer.pay)] : null,
     Math.round(sim().gallery.admissionRate(st, now) * 1000),
     (st.rooms || []).includes('gallery-wing'),
@@ -359,8 +395,64 @@ function openPiece(id) {
         : button('Hang it', { variant: 'primary', block: true, cls: 'grow', attrs: { 'data-action': 'hang', 'data-piece': p.id } }))
       : button('Continue', { variant: 'primary', block: true, cls: 'grow', attrs: { 'data-action': 'continue', 'data-piece': p.id } })}
   </div>
+  ${signed ? h`<div class="row">${button('Sell to a collector', { block: true, cls: 'grow', attrs: { 'data-action': 'sell-open', 'data-piece': p.id } })}</div>` : ''}
   ${signed && !p.hung && free <= 0 ? h`<div class="hint center">Every wall is in use. Take one down to rotate this in. Nothing is ever lost.</div>` : ''}
 </div>`);
+}
+
+function openSell(id) {
+  const p = pieceById(id);
+  const cv = canvasOf(p);
+  if (!p || !cv || !p.signedAt) return;
+  const offer = sim().gallery.sellOffer(state(), id, ctx.game.now());
+  if (!offer) return;
+  const layer = q('[data-ref=layer]');
+  ui.sheet = 'sell:' + id;
+  ui.selling = false;
+  layer.hidden = false;
+  layer.innerHTML = String(h`<div class="sheet gl-sheet" role="dialog" aria-label="Sell ${p.title || cv.name} to a collector">
+  <div class="gl-big gl-sellbig" data-ref="sellthumb"><span class="gl-frame">${mini(p)}</span></div>
+  <div class="center"><div class="gl-name">${p.title || cv.name}</div>
+    <div class="gl-price num" data-ref="price">A collector offers ${ctx.format.num(offer.coins)}</div>
+    <div class="hint">Coins for the original. It leaves your gallery for good, and a small card here remembers it. You can paint this canvas again.</div></div>
+  <div class="row">
+    ${button('Keep it', { variant: 'primary', block: true, cls: 'grow', attrs: { 'data-action': 'sell-cancel', 'data-piece': id } })}
+    ${button('Sell', { block: true, cls: 'grow', attrs: { 'data-action': 'sell-confirm', 'data-piece': id } })}
+  </div>
+</div>`);
+}
+
+function coinPillTarget() {
+  const pill = document.querySelector('.ws-pill, [data-ref=pill]');
+  const r = pill && pill.getBoundingClientRect ? pill.getBoundingClientRect() : null;
+  if (r && r.width > 0 && r.height > 0 && getComputedStyle(pill).visibility !== 'hidden') return pill;
+  return q('.screen-head .titles') || root; // the workshop's pill is covered by this overlay
+}
+
+async function sellPiece(id) {
+  if (ui.selling) return;
+  const p = pieceById(id);
+  if (!p || !p.signedAt) { closeSheet(); return; }
+  ui.selling = true;
+  const thumb = q('[data-ref=sellthumb]');
+  const title = p.title || canvasOf(p)?.name || 'your painting';
+  const res = act(sim().gallery.sellPiece, { pieceId: id });
+  if (!res || !res.ok) {
+    ui.selling = false;
+    ctx.toast('That piece is not for sale right now.');
+    closeSheet();
+    refresh(true);
+    return;
+  }
+  for (const b of root.querySelectorAll('.gl-sheet .btn')) b.disabled = true;
+  try {
+    await fx.stamp(thumb, 'Sold', { hold: 600 });
+    await fx.coinArc(thumb, coinPillTarget(), 10);
+  } catch (e) { /* the sale is done; effects are a bonus */ }
+  ui.selling = false;
+  ctx.toast(`Sold "${title}" for ${ctx.format.num(res.coins)} Coins.`);
+  closeSheet();
+  refresh(true);
 }
 
 function scrollToCanvases() {
@@ -375,7 +467,7 @@ function onClick(e) {
   if (!t || !root.contains(t)) return;
   const a = t.dataset.action;
   const id = t.dataset.piece;
-  if (a === 'close-sheet') { if (e.target === t) closeSheet(); return; }
+  if (a === 'close-sheet') { if (e.target === t && !ui.selling) closeSheet(); return; }
   if (a === 'goto-workshop') { ctx.navigate('workshop'); return; }
   if (a === 'unlock-open') { ensureWorkshopStyles(); openUnlockSheet(ctx, t.dataset.unlock, { host: root }); return; }
   if (a === 'goto-catalog') { ctx.navigate('catalog'); return; }
@@ -394,6 +486,9 @@ function onClick(e) {
     else ctx.toast('That canvas is not ready yet.');
     return;
   }
+  if (a === 'sell-open') { openSell(id); return; }
+  if (a === 'sell-cancel') { if (!ui.selling) openPiece(id); return; }
+  if (a === 'sell-confirm') { sellPiece(id); return; }
   if (a === 'continue') { closeSheet(); ctx.navigate('paint', { pieceId: id }); return; }
   if (a === 'hang') {
     const res = act(sim().gallery.hang, { pieceId: id });

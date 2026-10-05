@@ -8,8 +8,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { runJobs } from '../tools/balance/parallel.js';
+import { firstSessions } from '../tools/balance/sim-player.js';
 import {
-  jobsFor, group, median, coinsPerActiveMinute, minWindowAfterDay1, PROFILE_ORDER, TIER_ORDER,
+  jobsFor, group, median, coinsPerActiveMinute, minWindowAfterDay1, admissionByDay14, PROFILE_ORDER, TIER_ORDER,
 } from '../tools/balance/report.js';
 import { createInitialState } from '../src/state.js';
 import { score, SCORE_TIERS } from '../src/puzzles/matching.js';
@@ -97,13 +98,38 @@ test('after day 1 the offline window never falls below 4 hours for any profile',
 
 test('Gallery admission settles between 10% and 20% of Casual income by day 14', async () => {
   const g = await runs;
-  const share = median(g.casual.map((r) => r.days[13].admissionShare));
+  // "By day 14" is measured as each run's median share over days 13–15 (calendar
+  // days 12, 13 and 14), then the median over seeds: a single day can land on a
+  // Renovate dip (the Gallery closes on Renovate until the batch re-buy), which
+  // swings one day's share by ±5 points per seed (TUNING.md change 11).
   // Paint is priced from production (sim/gallery.js PAINT_SECONDS of mixer
   // output per canvas), so a piece's value keeps pace with income.
-  // TODO(balance-step2): upper bound was 0.20 (0.1.3 median 12.9%); with the v0.2
-  // coin gates (Gallery closes on Renovate until re-bought, slower Phase 3) the
-  // median is 23.6%. Loosened to 0.25 until step 2 retunes.
-  assert.ok(share >= 0.1 && share <= 0.25, `admission share ${(100 * share).toFixed(1)}%`);
+  const share = median(g.casual.map(admissionByDay14));
+  assert.ok(share >= 0.1 && share <= 0.2, `admission share ${(100 * share).toFixed(1)}%`);
+});
+
+test('the Casual profile reaches Phase 2 at the end of day 1 and Phase 3 around day 3', async () => {
+  const g = await runs;
+  // DESIGN.md "Target pacing" (Phase 2 at the end of day 1; her 20:00 check-in is
+  // day 0.5) and docs/PLAN-v0.2.md Theme A.5; TUNING.md change 8.
+  const p2 = median(g.casual.map((r) => r.milestones.phase2));
+  const p3 = median(g.casual.map((r) => r.milestones.phase3));
+  assert.ok(p2 !== null && p2 >= 0.4 && p2 <= 1.2, `median Phase 2 day ${p2}`);
+  assert.ok(p3 !== null && p3 >= 2.5 && p3 <= 4.5, `median Phase 3 day ${p3}`);
+});
+
+test('first session: about 8 purchases including the third mixer; the Merge Shelf waits for session two', () => {
+  // docs/UX-GUIDELINES-REVIEW.md §C "First ten minutes under the new gates",
+  // played minute by minute through sim.next (node tools/balance/run.js --minutes 10).
+  const runs1 = Array.from({ length: 30 }, (_, i) => firstSessions({ profile: 'casual', seed: i + 1, minutes: 10, sessions: 2 }));
+  const first = runs1.map((r) => r.sessions[0]);
+  const m = median(first.map((s) => s.purchases.length));
+  assert.ok(m >= 7 && m <= 11, `median ${m} purchases in the first ten minutes`);
+  for (const [i, s] of first.entries()) {
+    assert.ok(s.purchases.some((p) => p.kind === 'newMixer'), `seed ${i + 1}: the third mixer in session one`);
+    assert.equal(s.shelfAffordable || s.shelfBought, false, `seed ${i + 1}: the shelf is not reachable in session one`);
+  }
+  assert.equal(median(runs1.map((r) => r.shelfSession)), 2, 'the shelf is session two\'s landmark');
 });
 
 test('paintings, canvases and Essence survive every Renovate in the simulation', async () => {

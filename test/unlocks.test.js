@@ -30,7 +30,7 @@ const events = (s, type) => s._events.filter((e) => e.type === type);
 
 test('UNLOCKS: the contract table', () => {
   assert.deepEqual(UNLOCKS.map((u) => [u.id, u.revealColors, u.cost]), [
-    ['shelf', 8, 400], ['hunters', 15, 2500], ['gallery', 25, 8000], ['shipping', 35, 40000], ['commissions', 30, 20000],
+    ['shelf', 8, 400], ['hunters', 15, 2500], ['gallery', 25, 8000], ['shipping', 50, 40000], ['commissions', 30, 20000],
   ]);
   assert.equal(UNLOCKS.find((u) => u.id === 'gallery').room, 'gallery-wing');
   assert.equal(UNLOCKS.find((u) => u.id === 'shipping').room, 'loading-yard');
@@ -117,7 +117,7 @@ test('buy(gallery): buys the Gallery Wing once (the room IS the purchase); needs
 });
 
 test('buy(shipping): the Loading Yard opens routes and a fleet', () => {
-  const s = withColors(35);
+  const s = withColors(50);
   s.phase = 2;
   s.coins = 40000;
   assert.equal(buy(s, { id: 'shipping' }, NOW).ok, true);
@@ -224,7 +224,7 @@ test('shop keep reserve: pinned colors and started paintings keep 20 jars; expli
 });
 
 test('the Dispatcher never ships kept jars', () => {
-  const s = withColors(35);
+  const s = withColors(50);
   s.phase = 2;
   s.coins = 40000;
   assert.equal(buy(s, { id: 'shipping' }, NOW).ok, true);
@@ -238,7 +238,7 @@ test('the Dispatcher never ships kept jars', () => {
 });
 
 test('Renovate closes the unlocks, lists them, and one half-price purchase reopens them all', () => {
-  const s = withColors(40);
+  const s = withColors(50);
   s.phase = 2;
   s.coins = 1e6;
   for (const id of ['shelf', 'hunters', 'gallery', 'shipping']) assert.equal(buy(s, { id }, NOW).ok, true, id);
@@ -347,6 +347,21 @@ test('next(): a recipe first, then an affordable unlock above upgrades, else the
   assert.equal(n.affordable, true);
   buy(s, n.action, NOW);
   s.coins = 1e4;
+  // The third mixer (factory.buyMixer, 60 Coins) ranks with rooms, above upgrades.
+  n = sim.next(s, NOW);
+  assert.equal(n.kind, 'mixer');
+  assert.deepEqual(n.action, { kind: 'mixer' });
+  assert.equal(n.label, 'Buy Mixer 3 for 60');
+  assert.equal(n.cost, 60);
+  assert.equal(sim.buyMixer(s, NOW).ok, true);
+  n = sim.next(s, NOW);
+  assert.equal(n.action.kind, 'assign', 'the new mixer wants a recipe');
+  assert.equal(n.action.mixer, 2);
+  sim.assignRecipe(s, { mixer: 2, colorId: 'ochre' });
+  n = sim.next(s, NOW);
+  assert.equal(n.kind, 'mixer', 'the fourth mixer (360) is affordable too');
+  assert.equal(n.cost, 360);
+  s.coins = 300;
   n = sim.next(s, NOW);
   assert.equal(n.kind, 'upgrade');
   assert.ok(['bottleneck', 'cheapest'].includes(n.why));

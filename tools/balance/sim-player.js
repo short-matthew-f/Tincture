@@ -5,7 +5,9 @@
 // spreadsheet model. Used by tools/balance/run.js (tables) and
 // test/balance.test.js (the "Automated balance tests" list).
 //
-// simulate({profile, seed, days, puzzles, tier}) -> RunResult (see bottom).
+// simulate({profile, seed, days, puzzles, tier, trace?}) -> RunResult (see bottom).
+// firstSessions({profile, seed, minutes, sessions}) -> the first check-ins played
+// minute by minute through sim.next (run.js --minutes 10).
 //
 // Everything is deterministic: the engine's randomness lives in state.seed and
 // the player's own choices (boards, tints) use a mulberry32 seeded from `seed`.
@@ -119,8 +121,11 @@ function buyOption(state, o, now) {
 
 /**
  * Greedy buyer (spec "Buying strategy"): keep the offline window at 8 hours,
- * then buy the bottleneck's cheapest upgrade (flow meter suggestion), saving
- * for the next room once its color gate is met. Returns the number of buys.
+ * save for the next room or unlock once its color gate is met, hire hunters,
+ * then follow the workshop's Next button (sim.next) faithfully: the cheapest
+ * of a room or another mixer, the flow meter's suggestion, and in Phase 1 the
+ * cheapest Level up while the bottleneck is far (next.js decides; TUNING.md
+ * change 9). Returns the number of buys.
  */
 export function buyGreedy(state, now, ctx) {
   let bought = 0;
@@ -162,9 +167,15 @@ export function buyGreedy(state, now, ctx) {
     if (a.kind === 'rebuy' && unlocks.batchRebuy(state, {}, now).ok) { bought++; continue; }
     if (a.kind === 'unlock' && unlocks.buy(state, { id: a.id }, now).ok) { bought++; assignRecipes(state, now); continue; }
     if (a.kind === 'room' && factory.buyRoom(state, { id: a.id }, now).ok) { bought++; assignRecipes(state, now); setRoutes(state, now); continue; }
-    // The greedy buyer saves for the bottleneck instead of taking next()'s
-    // "cheapest affordable upgrade" fallback (spec "Buying strategy").
-    if (a.kind !== 'upgrade' || nx.why !== 'bottleneck') break;
+    if (a.kind === 'mixer' && factory.buyMixer(state, now).ok) {
+      bought++;
+      if (ctx) ctx.buys.newMixer = (ctx.buys.newMixer ?? 0) + 1;
+      assignRecipes(state, now);
+      continue;
+    }
+    // next() itself decides when the cheapest affordable upgrade is offered
+    // (Phase 1 only) and when to save for the bottleneck; she follows it.
+    if (a.kind !== 'upgrade') break;
     const s = { kind: a.upgrade, index: a.index, id: a.id, cost: nx.cost };
     if (s.kind === 'grinder') {
       // A better grinder kind when it is affordable (Mortar → Millstone → Roller Mill).
@@ -334,10 +345,10 @@ function greatDrops(order) {
   return base;
 }
 
-function fillOrders(state, now, ctx) {
+function fillOrders(state, now, ctx, limit = ORDERS_PER_CHECKIN) {
   let filled = 0;
   for (const o of [...(state.orders?.open ?? [])]) {
-    if (filled >= ORDERS_PER_CHECKIN) break;
+    if (filled >= limit) break;
     if (o.kind !== 'match' || !o.recipe) continue;
     const before = state.coins;
     const r = orders.submitOrder(state, { orderId: o.id, drops: greatDrops(o) }, now);
@@ -529,7 +540,9 @@ function essenceStats(state) {
  *   puzzleCoins, orderCoins, shelfCoins, earned, colors, discoveries, found (by method),
  *   meterCalls, buys (by kind), pieces, essence, hires, state, ms }
  * `tier` overrides the profile's puzzle tier (the doc's Difficulty tiers table);
- * `ledger: true` opens the Morning Ledger (sim.catchUp) at every check-in.
+ * `ledger: true` opens the Morning Ledger (sim.catchUp) at every check-in;
+ * `trace(info)` is called after every check-in with {at, colors, coins, phase,
+ * rooms, unlocks, mixers, income, buys} (debugging; not available across workers).
  */
 export function simulate(opts = {}) {
   const t0 = Date.now();
@@ -676,6 +689,13 @@ export function simulate(opts = {}) {
     marks(now);
 
     drain();
+    if (opts.trace) {
+      opts.trace({
+        at: sinceStart(now), colors: discovery.discoveredCount(state), coins: state.coins, phase: state.phase,
+        rooms: [...(state.rooms ?? [])], unlocks: { ...state.unlocks }, mixers: state.stations.mixers.length,
+        income: economy.incomeRate(state, now), buys: { ...ctx.buys },
+      });
+    }
     const ds = dayStats[d];
     credit(now);
     ds.incomeRate = economy.incomeRate(state, now) + (state.gallery?.unlocked ? gallery.admissionRate(state, now) : 0);
@@ -713,6 +733,128 @@ export function simulate(opts = {}) {
     renovateKept, discoveries: ctx.discoveries, found: ctx.found, meterCalls: ctx.meterCalls, buys: ctx.buys, pieces: ctx.pieces, essence: ctx.essence, hires: ctx.hires,
     state, ms: Date.now() - t0,
   };
+}
+
+// ---------------------------------------------------------------------------
+// The first sessions, minute by minute (run.js --minutes N)
+// ---------------------------------------------------------------------------
+
+/**
+ * The first sessions' script (docs/UX-GUIDELINES-REVIEW.md §C "First ten minutes
+ * under the new gates"): [minute, what]. Session one opens with the tour's
+ * tutorial order (orange, named; pays the tutorial reward) and its first Relaxed
+ * board (tutorial reward and the board's production boost); later sessions
+ * alternate boards and orders. Close up shop at the end.
+ */
+export const FIRST_SESSION_SCRIPT = Object.freeze([[0, 'tutorialOrder'], [1.5, 'tutorialBoard'], [6, 'order']]);
+/** A later check-in: the Casual profile's two boards and two orders. */
+export const LATER_SESSION_SCRIPT = Object.freeze([[0, 'order'], [1, 'board'], [3, 'order'], [5, 'board']]);
+
+/** One tap of the workshop's Next button, if it buys something. Returns what was bought, or null. */
+function tapNext(state, now) {
+  let nx = sim.next(state, now);
+  if (nx.action.kind === 'assign') { assignRecipes(state, now); nx = sim.next(state, now); }
+  const a = nx.action;
+  if (!nx.affordable) return null;
+  let ok = false;
+  if (a.kind === 'rebuy') ok = unlocks.batchRebuy(state, {}, now).ok;
+  else if (a.kind === 'unlock') ok = unlocks.buy(state, { id: a.id }, now).ok;
+  else if (a.kind === 'room') ok = factory.buyRoom(state, { id: a.id }, now).ok;
+  else if (a.kind === 'mixer') ok = factory.buyMixer(state, now).ok;
+  else if (a.kind === 'upgrade') ok = factory.buyUpgrade(state, { kind: a.upgrade, index: a.index, id: a.id }, now).ok;
+  if (!ok) return null;
+  if (a.kind !== 'upgrade') assignRecipes(state, now);
+  return { kind: a.kind === 'upgrade' ? a.upgrade : a.kind === 'mixer' ? 'newMixer' : a.kind, label: nx.label, cost: nx.cost, why: nx.why };
+}
+
+/**
+ * firstSessions({profile, seed, minutes, sessions}) -> {sessions:[{start, minutes,
+ * purchases:[{at, kind, label, cost, why}], coinsStart, coinsEnd, colorsStart,
+ * colorsEnd, mixers, shelfRevealed, shelfAffordable, shelfBought}], shelfSession}.
+ * The profile's first `sessions` check-ins, `minutes` long each, played minute by
+ * minute: the world ticks every 30 s, she collects the till and taps Next for as
+ * long as it buys something (the single primary button, sim.next, followed
+ * faithfully), and plays the script's orders and Relaxed boards. Between
+ * sessions the world ticks to her next check-in. shelfSession = the 1-based
+ * session in which the Merge Shelf was first both revealed (8 colors) and
+ * affordable (400 Coins), or null.
+ */
+export function firstSessions(opts = {}) {
+  const prof = PROFILES[opts.profile ?? 'casual'];
+  const seed = (opts.seed ?? 1) >>> 0;
+  const minutes = opts.minutes ?? 10;
+  const nSessions = opts.sessions ?? 2;
+  const rng = mulberry32((seed * 2654435761 + 12345) >>> 0);
+  const start = T0 + prof.hours[0] * HOUR;
+  const state = createInitialState(start, seed);
+  factory.buyApprentice(state, { id: 'errandRunner' });
+  const ctx = { puzzleCoins: 0, puzzles: 0, orderCoins: 0, discoveries: { grade: 0, order: 0, accident: 0 } };
+  const shelfDef = unlocks.UNLOCKS_BY_ID.shelf;
+  const out = [];
+  let shelfSession = null;
+  for (let n = 0; n < nSessions; n++) {
+    const day = Math.floor(n / prof.hours.length);
+    const t0 = T0 + day * DAY + prof.hours[n % prof.hours.length] * HOUR;
+    sim.tick(state, t0);
+    state._events = [];
+    const sess = {
+      start: (t0 - start) / HOUR, minutes, purchases: [], coinsStart: state.coins + num(state.pendingCollect),
+      colorsStart: discovery.discoveredCount(state), shelfRevealed: false, shelfAffordable: false, shelfBought: false,
+    };
+    const script = n === 0 ? FIRST_SESSION_SCRIPT : LATER_SESSION_SCRIPT;
+    let step = 0;
+    const look = () => {
+      const colors = discovery.discoveredCount(state);
+      if (colors >= shelfDef.revealColors) sess.shelfRevealed = true;
+      if (colors >= shelfDef.revealColors && state.coins >= shelfDef.cost && !state.unlocks?.shelf) sess.shelfAffordable = true;
+    };
+    for (let m = 0; m <= minutes * 2; m++) {
+      const now = t0 + m * 30e3;
+      sim.tick(state, now);
+      factory.collect(state, now);
+      claimAccidents(state, now, ctx);
+      while (step < script.length && script[step][0] * 2 <= m) {
+        playScripted(state, script[step][1], now, rng, ctx);
+        step++;
+      }
+      look();
+      for (let guard = 0; guard < 100; guard++) {
+        const b = tapNext(state, now);
+        if (!b) break;
+        if (b.kind === 'unlock' && state.unlocks?.shelf) sess.shelfBought = true;
+        sess.purchases.push({ at: m / 2, ...b });
+      }
+      state._events = [];
+    }
+    sess.coinsEnd = state.coins;
+    sess.colorsEnd = discovery.discoveredCount(state);
+    sess.mixers = state.stations.mixers.length;
+    sess.income = economy.incomeRate(state, t0 + minutes * 60e3);
+    if (shelfSession === null && (sess.shelfAffordable || sess.shelfBought)) shelfSession = n + 1;
+    out.push(sess);
+  }
+  return { profile: prof.id, seed, minutes, sessions: out, shelfSession, state };
+}
+
+function playScripted(state, what, now, rng, ctx) {
+  if (what === 'tutorialOrder') {
+    const base = orders.generateOrder(state, rng, now);
+    state.orders.open.unshift({
+      ...base, id: 'o-first-orange', kind: 'match', target: economy.colorDef('orange')?.hex ?? '#c56731',
+      recipe: [{ pigment: 'madder', weight: 1 }, { pigment: 'ochre', weight: 1 }], container: null, tutorial: true,
+    });
+    const o = state.orders.open[0];
+    orders.submitOrder(state, { orderId: o.id, drops: greatDrops(o) }, now);
+    assignRecipes(state, now);
+    return;
+  }
+  if (what === 'order') { fillOrders(state, now, { ...ctx, orderCoins: 0 }, 1); return; }
+  if (what === 'tutorialBoard' || what === 'board') {
+    const found = playPuzzle(state, 'relaxed', rng, now, ctx);
+    if (what === 'tutorialBoard') factory.earn(state, economy.tutorialReward(state));
+    factory.addBoost(state, { kind: 'production', mult: 0.25, minutes: 10 }, now); // ui/grading.js settle()
+    if (found) assignRecipes(state, now);
+  }
 }
 
 /** A run result without the live `state` (for workers, tables and tests). */

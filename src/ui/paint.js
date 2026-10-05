@@ -17,7 +17,7 @@
  *
  * Params: show({pieceId}); with no piece on the easel it closes, opens the
  * Gallery and toasts "Pick a canvas to start painting". data-actions: sign, sign-confirm, sign-cancel,
- * hang, archive, undo, export, share, pick, make, family, close-sheet.
+ * hang, archive, undo, scrap (unsigned only; two taps), export, share, pick, make, family, close-sheet.
  */
 
 import { h, raw, backButton, button, tag, safeHex, escapeHtml } from './kit.js';
@@ -147,7 +147,10 @@ const CSS = `
 #screen-paint .pane:focus-visible{outline:none;stroke:#2A2622;stroke-width:3}
 #screen-paint .pt-tools{flex:0 0 auto;display:flex;gap:8px;align-items:center;padding:0 16px 8px}
 #screen-paint .pt-tools .grow{flex:1 1 auto}
-#screen-paint .pt-palette{flex:0 0 auto;margin:0 14px calc(14px + var(--safe-bottom));border-radius:16px;padding:12px 14px;gap:8px}
+#screen-paint .pt-palette{flex:0 0 auto;margin:0 14px 8px;border-radius:16px;padding:12px 14px;gap:8px}
+#screen-paint .pt-foot{flex:0 0 auto;padding:0 14px calc(12px + var(--safe-bottom));display:flex}
+#screen-paint .pt-foot[hidden]{display:none}
+#screen-paint .pt-foot .btn{width:100%;min-height:44px;white-space:normal;line-height:1.25;text-align:center}
 #screen-paint .pt-fade{position:relative}
 #screen-paint .pt-fade::before,#screen-paint .pt-fade::after{content:'';position:absolute;top:0;bottom:0;width:26px;pointer-events:none;opacity:0;transition:opacity 160ms;z-index:2}
 #screen-paint .pt-fade::before{left:0;background:linear-gradient(to right,var(--paper),rgba(0,0,0,0))}
@@ -217,6 +220,8 @@ const ui = {
   lastCost: 0,
   chipSig: '',
   busy: false,
+  scrapArmed: false,    // Scrap button: first tap arms it, second confirms
+  scrapTimer: 0,
 };
 
 const sim = () => ctx.sim;
@@ -301,8 +306,10 @@ function buildAll() {
   <div class="pt-fade" data-fade><div class="pt-chips" data-ref="chips"></div></div>
   <div class="hint" data-ref="hint">Pick a color, then tap a pane. Any color can go anywhere.</div>
 </div>
+<div class="pt-foot" data-ref="scrapslot" ${signed ? 'hidden' : ''}></div>
 <div class="pt-scrim" data-ref="layer" data-action="close-sheet" hidden></div>`);
   ui.chipSig = '';
+  disarmScrap();
   requestAnimationFrame(updateFades);
   if (navigator.canShare && typeof File === 'function') {
     try {
@@ -400,6 +407,7 @@ function update() {
         : String(button('Sign', { variant: 'primary', attrs: { 'data-action': 'sign' } }));
   }
   q('[data-ref=undo]').disabled = signed || ui.undo.length === 0;
+  renderScrap(p, cv);
   updateFades();
   if (!signed) {
     // keep fills in step with state (skipping panes mid-pour)
@@ -413,6 +421,52 @@ function update() {
     const cl = costLine(cv);
     q('[data-ref=hint]').textContent = (cl ? cl + '. ' : '') + 'Pick a color, then tap a pane. Any color can go anywhere.';
   }
+}
+
+// ---- scrap (unsigned pieces only) --------------------------------------------
+
+const SCRAP_MS = 4000;
+
+function disarmScrap() {
+  if (ui.scrapTimer) { clearTimeout(ui.scrapTimer); ui.scrapTimer = 0; }
+  ui.scrapArmed = false;
+}
+
+function scrapLabel(n, armed) {
+  if (!armed) return 'Scrap this canvas';
+  if (n <= 0) return 'Scrap it: nothing is painted yet, so nothing is lost';
+  return `Scrap it: ${n} painted ${n === 1 ? 'pane' : 'panes'} will be cleared; the jars stay spent`;
+}
+
+function renderScrap(p, cv) {
+  const slot = q('[data-ref=scrapslot]');
+  if (!slot) return;
+  const signed = !!p.signedAt;
+  slot.hidden = signed;
+  if (signed) { slot.innerHTML = ''; return; }
+  const n = paintedCount(p, cv);
+  const key = `${ui.scrapArmed ? 1 : 0}:${n}`;
+  if (slot.dataset.key === key) return;
+  slot.dataset.key = key;
+  slot.innerHTML = String(button(scrapLabel(n, ui.scrapArmed), { attrs: { 'data-action': 'scrap', 'aria-live': 'polite' } }));
+}
+
+function onScrap() {
+  const p = piece();
+  if (!p || p.signedAt || ui.busy) return;
+  if (!ui.scrapArmed) {
+    ui.scrapArmed = true;
+    ui.scrapTimer = setTimeout(() => { ui.scrapTimer = 0; ui.scrapArmed = false; if (root && piece()) update(); }, SCRAP_MS);
+    update();
+    return;
+  }
+  disarmScrap();
+  const res = ctx.game.act(sim().gallery.discardPiece, { pieceId: p.id });
+  if (!res || !res.ok) { gently('That piece is already put away.'); update(); return; }
+  ui.undo = [];
+  ui.pieceId = null;
+  afterReveal();
+  ctx.toast('Canvas put away. It is ready to paint again.'); // after the navigation: a toast never carries across screens
 }
 
 // ---- painting -------------------------------------------------------------
@@ -630,6 +684,7 @@ function onClick(e) {
   else if (a === 'sign-confirm') onSignConfirm();
   else if (a === 'hang') onHang();
   else if (a === 'archive') { paintIntent.focus = 'canvases'; afterReveal(); }
+  else if (a === 'scrap') onScrap();
   else if (a === 'export') onExport(false);
   else if (a === 'share') onExport(true);
 }
@@ -667,6 +722,7 @@ const screen = {
     }
     ui.pending.clear();
     ui.lastCost = 0;
+    disarmScrap();
     closeSheet();
     if (!piece()) {
       // Nothing on the easel: step back and point her to the Gallery's canvases.
@@ -682,6 +738,7 @@ const screen = {
 
   hide() {
     closeSheet();
+    disarmScrap();
     ui.pending.clear();
   },
 

@@ -64,6 +64,14 @@ export function coinsPerActiveMinute(r) {
   return r.activeMinutes > 0 ? r.puzzleCoins / r.activeMinutes : 0;
 }
 
+/**
+ * Admission share "by day 14": the median of days 13–15 (calendar days 12–14),
+ * so one day landing on a Renovate dip does not swing it (TUNING.md change 11).
+ */
+export function admissionByDay14(r) {
+  return median([12, 13, 14].map((d) => r.days[Math.min(d, r.days.length - 1)].admissionShare));
+}
+
 /** Lowest offline window (hours) she left with after day 1. */
 export function minWindowAfterDay1(r) {
   return Math.min(...r.days.slice(1).map((d) => d.windowMinH));
@@ -122,12 +130,12 @@ export function zonesTable(g) {
     const rs = g[p];
     if (!rs) continue;
     rows.push([NAMES[p], fmtDay(median(rs.map((r) => r.milestones.galleryOpen))),
-      `${pct(day(rs, 13, (d) => d.admissionShare))} / ${pct(day(rs, 20, (d) => d.admissionShare))}`,
+      `${pct(median(rs.map(admissionByDay14)))} (${pct(day(rs, 13, (d) => d.admissionShare))}) / ${pct(day(rs, 20, (d) => d.admissionShare))}`,
       pct(day(rs, 13, (d) => d.shelfShare)),
       [6, 13, 20].map((d) => (day(rs, d, (x) => x.essenceAvg) ?? 0).toFixed(1)).join(' / '),
       String(median(rs.map((r) => r.pieces))), `${Math.max(...rs.map((r) => r.worstGapMin))} min`]);
   }
-  return table(['Profile', 'Gallery opens (day)', 'Admission share, day 14 / day 21', 'Shelf share, day 14',
+  return table(['Profile', 'Gallery opens (day)', 'Admission share, days 13–15 (day 14 alone) / day 21', 'Shelf share, day 14',
     'Avg Essence stars, day 7 / 14 / 21', 'Pieces painted by day 21', 'Worst progress gap'], rows);
 }
 

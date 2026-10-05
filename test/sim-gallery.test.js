@@ -4,6 +4,7 @@ import { createInitialState } from '../src/state.js';
 import {
   unlock, startPiece, paintRegion, signPiece, hang, unhang, tickAdmission, weeklyTaste,
   visitorComment, acceptCollector, pieceValue, regionCost, clearRegion, paintRate, discardPiece,
+  sellPiece, sellOffer, canvasAvailable, SELL_MULT,
   ADMISSION_RATE, COLLECTOR_MS, PAINT_SECONDS, MIN_PAINT_RATE, VALUE_MULT,
 } from '../src/sim/gallery.js';
 import { addStock, stockOf } from '../src/sim/storage.js';
@@ -228,4 +229,105 @@ test('gallery: weekly taste is a hue family and changes by week', () => {
   const weeks = new Set();
   for (let w = 0; w < 9; w++) weeks.add(weeklyTaste(NOW + w * 7 * 86400e3));
   assert.ok(weeks.size > 1);
+});
+
+/** A fully painted, signed piece; returns {s, canvasId, pieceId, value, regions}. */
+function signedPiece(s = galleryState(), title = 'Harbor at Dawn') {
+  const canvasId = s.gallery.canvases[0];
+  const { pieceId } = startPiece(s, { canvasId }, NOW);
+  const regions = regionsOf(getCanvas(canvasId));
+  for (const rg of regions) {
+    addStock(s, 'madder', regionCost(s, canvasId, rg.id, pieceId));
+    assert.equal(paintRegion(s, { pieceId, regionId: rg.id, colorId: 'madder' }, NOW).ok, true);
+  }
+  const sig = signPiece(s, { pieceId, title }, NOW);
+  assert.equal(sig.ok, true);
+  return { s, canvasId, pieceId, value: sig.value, regions };
+}
+
+test('gallery: selling a signed piece pays value x2 once and removes it', () => {
+  const { s, pieceId, value, canvasId } = signedPiece();
+  const now = NOW + 5000;
+  const offer = sellOffer(s, pieceId, now);
+  assert.equal(SELL_MULT, 2);
+  assert.ok(Math.abs(offer.coins - value * 2 * incomeMultiplier(s, now)) < 1e-9);
+  const c0 = s.coins;
+  const r = sellPiece(s, { pieceId }, now);
+  assert.equal(r.ok, true);
+  assert.ok(Math.abs(r.coins - offer.coins) < 1e-9);
+  assert.ok(Math.abs(s.coins - c0 - r.coins) < 1e-9);
+  assert.equal(s.gallery.pieces.length, 0, 'the piece leaves the archive');
+  // Once only.
+  const again = sellPiece(s, { pieceId }, now);
+  assert.equal(again.ok, false);
+  assert.ok(Math.abs(s.coins - c0 - r.coins) < 1e-9, 'no second payment');
+  // The canvas can be painted again.
+  assert.equal(canvasAvailable(s, canvasId), true);
+  assert.equal(startPiece(s, { canvasId }, now).ok, true);
+});
+
+test('gallery: selling a hung piece takes it down and updates the wall count and admission', () => {
+  const { s, pieceId } = signedPiece();
+  assert.equal(hang(s, { pieceId }).ok, true);
+  assert.equal(s.gallery.hung.length, 1);
+  s.lastTick = NOW;
+  assert.ok(tickAdmission(s, NOW + 1000).coins > 0);
+  const offer = { pieceId, pay: 1, until: NOW + 1e9 };
+  s.gallery.collectorOffer = offer;
+  assert.equal(sellPiece(s, { pieceId }, NOW + 2000).ok, true);
+  assert.deepEqual(s.gallery.hung, []);
+  assert.equal(s.gallery.collectorOffer, null, 'a visiting collector offer for the sold piece is withdrawn');
+  const c = s.coins;
+  const t = tickAdmission(s, NOW + 3600e3);
+  assert.equal(t.coins, 0, 'nothing hung, no admission');
+  assert.equal(s.coins, c);
+});
+
+test('gallery: a sold piece leaves a record, newest last, with its thumbnail', () => {
+  const { s, pieceId, canvasId, regions } = signedPiece();
+  const piece = s.gallery.pieces[0];
+  const painted = { ...piece.regions };
+  const r = sellPiece(s, { pieceId }, NOW + 9000);
+  assert.equal(s.gallery.sold.length, 1);
+  const rec = s.gallery.sold[0];
+  assert.equal(rec.id, pieceId);
+  assert.equal(rec.canvas, canvasId);
+  assert.equal(rec.title, 'Harbor at Dawn');
+  assert.equal(rec.soldAt, NOW + 9000);
+  assert.equal(rec.coins, r.coins);
+  assert.deepEqual(rec.thumb, painted);
+  assert.equal(Object.keys(rec.thumb).length, regions.length);
+  // A second sale appends.
+  const b = signedPiece(s, 'Second');
+  sellPiece(s, { pieceId: b.pieceId }, NOW + 10000);
+  assert.deepEqual(s.gallery.sold.map((x) => x.title), ['Harbor at Dawn', 'Second']);
+});
+
+test('gallery: only signed pieces can be sold; unsigned ones are scrapped, with no refund', () => {
+  const s = producing(galleryState());
+  const canvasId = s.gallery.canvases[0];
+  const { pieceId } = startPiece(s, { canvasId }, NOW);
+  const rg = regionsOf(getCanvas(canvasId))[0];
+  const need = regionCost(s, canvasId, rg.id, pieceId);
+  addStock(s, 'madder', need);
+  assert.equal(paintRegion(s, { pieceId, regionId: rg.id, colorId: 'madder' }, NOW).ok, true);
+  assert.equal(stockOf(s, 'madder'), 0);
+  const coins = s.coins;
+  assert.equal(sellPiece(s, { pieceId }, NOW).ok, false, 'unsigned pieces cannot be sold');
+  assert.equal(sellPiece(s, { pieceId: 'nope' }, NOW).ok, false);
+  assert.equal(s.gallery.pieces.length, 1);
+  const d = discardPiece(s, { pieceId });
+  assert.equal(d.ok, true);
+  assert.equal(d.panes, 1);
+  assert.equal(s.gallery.pieces.length, 0);
+  assert.equal(stockOf(s, 'madder'), 0, 'the jars stay spent');
+  assert.equal(s.coins, coins, 'no coins either');
+  assert.equal(s.gallery.sold.length, 0, 'scrapping is not a sale');
+  assert.equal(discardPiece(s, { pieceId }).ok, false);
+  // The canvas is free again.
+  assert.equal(canvasAvailable(s, canvasId), true);
+  const again = startPiece(s, { canvasId }, NOW);
+  assert.equal(again.ok, true);
+  assert.deepEqual(s.gallery.pieces[0].regions, {});
+  assert.equal(canvasAvailable(s, 'not-a-canvas'), false);
 });
