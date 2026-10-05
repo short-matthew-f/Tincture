@@ -398,7 +398,7 @@ async function boot() {
   // release held beats, then hand off to that subgame's guide, if one is
   // registered and she has not seen it (it shows once she is on its screen).
   const GUIDES_FOR_UNLOCK = Object.freeze({
-    shelf: ['shelf'], hunters: ['hunters', 'map'], gallery: ['gallery'], shipping: ['shipping', 'yard'], commissions: ['commissions'],
+    shelf: ['shelf'], hunters: ['hunters', 'map'], gallery: ['gallery'], shipping: ['shipping', 'yard', 'packing'], commissions: ['commissions'],
   });
   game.on('unlocked', (p) => {
     releaseCeremonies();

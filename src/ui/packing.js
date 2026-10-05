@@ -463,15 +463,25 @@ function stopGuide() {
   if (guide) { try { guide.stop(); } catch (e) { /* ignore */ } guide = null; }
 }
 
+/** The packing guide's steps; `later` drops the first-drop step for a crate she has already started on. */
+function packingSteps(later) {
+  const first = { anchor: '[data-coach="packing-crates"]', text: 'Drop each jar in the crate that wants its family.', endsOn: 'action', event: 'crateDrop',
+    side: 'below', next: '[data-conveyor]' };
+  const clean = { anchor: '[data-coach="packing-crate-full"]', text: 'A clean crate ships for +25%.', endsOn: 'got-it', side: 'below',
+    when: () => !!(ROOT && ROOT.querySelector('[data-coach="packing-crate-full"]')) };
+  return later ? [clean] : [first, clean];
+}
+
+/** Registered at mount so the unlock hook (app.js) and "How this works" can find it; show() re-registers it per puzzle. */
+function registerGuide() {
+  if (typeof C.guide === 'function') C.guide('packing', packingSteps(false), { screen: 'packing' });
+}
+
 function startGuide() {
   stopGuide();
   const e = K.entry;
   if (typeof C.guide !== 'function' || !e || K.result || e.puzzle.done) return;
-  const first = { anchor: '[data-coach="packing-crates"]', text: 'Drop each jar in the crate that wants its family.', endsOn: 'action', event: 'crateDrop',
-    side: 'below', next: '[data-conveyor]' };
-  const clean = { anchor: '[data-coach="packing-crate-full"]', text: 'A clean crate ships for +25%.', endsOn: 'got-it', side: 'below',
-    when: () => !!ROOT.querySelector('[data-coach="packing-crate-full"]') };
-  guide = C.guide('packing', e.puzzle.index > 0 ? [clean] : [first, clean], { screen: 'packing' });
+  guide = C.guide('packing', packingSteps(e.puzzle.index > 0), { screen: 'packing' });
   const g = guide;
   guideTimer = setTimeout(() => { guideTimer = 0; if (g === guide && K.visible) g.start(); }, 300);
 }
@@ -523,6 +533,7 @@ export default {
     injectStyle('packing', CSS);
     ensureDefs();
     root.addEventListener('click', onClick);
+    registerGuide();
   },
 
   show(params = {}) {
