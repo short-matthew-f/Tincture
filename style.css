@@ -729,6 +729,90 @@ button.chip::before, [data-tap].chip::before { content: ''; position: absolute; 
   transform: translateX(-120%) skewX(-12deg);
 }
 
+/* v0.2 motion vocabulary (fx.js): coins, stamp, lift, drag ghost. */
+#fx-layer .fx-coin {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 34%, #F3D27A 0 28%, var(--coin, #D9A93A) 30% 100%);
+  box-shadow: inset 0 0 0 1.5px rgba(140, 101, 18, 0.75), 0 1px 0 rgba(42, 38, 34, 0.35);
+  will-change: transform, opacity;
+}
+.fx-stamp {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 2;
+  pointer-events: none;
+  padding: 6px 14px 5px;
+  border: 3px solid var(--stamp-ink, #8E3B32);
+  border-radius: 8px;
+  color: var(--stamp-ink, #8E3B32);
+  font-family: var(--font-display);
+  font-size: 22px;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  background: rgba(247, 244, 236, 0.35);
+  mix-blend-mode: multiply;
+  will-change: transform, opacity;
+}
+.fx-stamp.is-kept { position: absolute; left: 50%; top: 50%; }
+.fx-stamp::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 9px;
+  box-shadow: 0 0 0 0 var(--stamp-ink, #8E3B32);
+  opacity: 0;
+  transition: box-shadow 260ms ease-out, opacity 260ms ease-out;
+}
+.fx-stamp.is-inked::after { box-shadow: 0 0 2px 1.5px var(--stamp-ink, #8E3B32); opacity: 0.35; }
+.fx-lifted { transform-origin: 50% 100%; transform-box: fill-box; filter: drop-shadow(0 5px 0 rgba(42, 38, 34, 0.28)); }
+.fx-draggable { touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.is-drag-source > svg, .is-drag-source > img, svg.is-drag-source { opacity: 0.3; }
+#fx-layer .fx-ghost {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 3;
+  pointer-events: none;
+  transform-origin: 50% 100%;
+  filter: drop-shadow(0 8px 0 rgba(42, 38, 34, 0.28));
+  will-change: transform;
+}
+#fx-layer .fx-ghost > * { display: block; width: 100%; height: 100%; pointer-events: none; }
+
+/* Coach bubbles (guide.js; the onboarding script uses the same markup):
+ * <div class="coach-layer"><div class="coach-tag above|below|card">
+ *   <div class="coach-text">..</div><div class="coach-row">[Got it]</div>
+ * </div><div class="coach-ring"></div></div>. A pointing tag lets taps through
+ * to what lies under it; only its buttons are tappable. */
+.coach-layer, #coach-layer { position: fixed; inset: 0; z-index: 30; pointer-events: none; }
+.coach-layer .coach-tag, #coach-layer .coach-tag { position: fixed; left: 0; top: 0; width: min(296px, calc(100vw - 24px)); pointer-events: none; background: var(--glow); color: var(--ink); border: 2px solid var(--glow-ring); border-radius: 12px; padding: 12px 12px 10px; box-shadow: 0 3px 0 var(--shadow); display: flex; flex-direction: column; gap: 8px; font-size: 14px; line-height: 1.35; animation: pop-in 200ms var(--ease-out) both; }
+.coach-layer .coach-tag button, #coach-layer .coach-tag button { pointer-events: auto; }
+.coach-layer .coach-tag::before, #coach-layer .coach-tag::before { content: ''; position: absolute; left: var(--arrow-x, 50%); width: 14px; height: 14px; background: var(--glow); transform: translateX(-50%) rotate(45deg); }
+.coach-layer .coach-tag.below::before, #coach-layer .coach-tag.below::before { top: -9px; border-top: 2px solid var(--glow-ring); border-left: 2px solid var(--glow-ring); }
+.coach-layer .coach-tag.above::before, #coach-layer .coach-tag.above::before { bottom: -9px; border-bottom: 2px solid var(--glow-ring); border-right: 2px solid var(--glow-ring); }
+.coach-layer .coach-tag.card, #coach-layer .coach-tag.card { left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(340px, calc(100vw - 32px)); padding: 16px; gap: 10px; text-align: center; background: var(--paper); border: 0; pointer-events: auto; animation: fade-in 160ms ease-out both; }
+.coach-layer .coach-tag.card::before, #coach-layer .coach-tag.card::before { display: none; }
+.coach-layer .coach-head { display: flex; align-items: center; gap: 8px; }
+.coach-layer .coach-portrait { width: 32px; height: 32px; flex: 0 0 auto; border-radius: 50%; overflow: hidden; background: var(--paper); box-shadow: inset 0 0 0 1.5px rgba(42, 38, 34, 0.18); }
+.coach-layer .coach-portrait > * { width: 100%; height: 100%; display: block; }
+.coach-layer .coach-row, #coach-layer .coach-row { display: flex; gap: 8px; justify-content: flex-end; }
+.coach-layer .coach-row:empty { display: none; }
+.coach-layer .coach-row .btn, #coach-layer .coach-row .btn { min-height: 44px; min-width: 88px; }
+.coach-layer .coach-kicker, #coach-layer .coach-kicker { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-soft); font-weight: 700; }
+.coach-layer .coach-ring, #coach-layer .coach-ring { position: fixed; left: 0; top: 0; border-radius: 14px; box-shadow: 0 0 0 3px var(--glow-ring), 0 0 0 7px rgba(185, 131, 28, 0.18); pointer-events: none; animation: breathe 1.6s ease-in-out infinite; }
+
+/* "How this works": the small replay link in a subgame's header. */
+.how-link { display: inline-flex; align-items: center; min-height: 44px; padding: 0 8px; border: 0; background: none; color: var(--ink-soft); font: inherit; font-size: 13px; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+
 /* Merge hint: a soft 2% breathing pulse. */
 .pulse { animation: breathe 2.4s ease-in-out infinite; transform-origin: 50% 100%; }
 

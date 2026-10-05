@@ -10,10 +10,16 @@
  * that is missing or fails to load gets a "Coming soon" placeholder, so one
  * broken screen never takes the app down.
  *
- * Toasts: app.js sets overlay's toast gate (hold while a coach mark, a
- * ceremony or a puzzle board is up; drop "X joins your catalog" while naming
- * shows X) and sends domain-event news as kind 'info' so it collapses into one
- * slip. Naming ceremonies queue at most MAX_QUEUED_NAMINGS deep; the rest keep
+ * Toasts: app.js sets overlay's toast gate (hold while a coach mark or a
+ * guide bubble, a ceremony or a puzzle board is up; drop "X joins your
+ * catalog" while naming shows X), sends domain-event news as kind 'info' so it
+ * collapses into one slip, and calls overlay.leaveScreen() whenever the top
+ * screen changes so a toast never carries across a navigation.
+ *
+ * ctx.guide(id, steps, opts) is guide.js's guide() bound to ctx, with
+ * ctx.guide.whatsNext(opts), .howThisWorks(id), .howThisWorksHtml(id),
+ * .replay(id) and .isUp(). ctx.fx is fx.js (spring, lift, settle, drag,
+ * coinArc, stamp, pour and the older effects). Naming ceremonies queue at most MAX_QUEUED_NAMINGS deep; the rest keep
  * their catalog names and one line says so.
  *
  * Debug handle: window.tincture = {game, ctx, router, version, debug: {advance(ms), discover(colorId)}}.
@@ -29,6 +35,7 @@ import { audio } from './ui/audio.js';
 import { haptics } from './ui/haptics.js';
 import { fx } from './ui/fx.js';
 import * as overlay from './ui/overlay.js';
+import * as guides from './ui/guide.js';
 import { createRouter, TABS } from './ui/router.js';
 import { applySettings } from './ui/settings.js';
 import { registerSW, APP_VERSION } from './pwa.js';
@@ -182,9 +189,17 @@ async function boot() {
     modal: (opts) => overlay.modal(opts),
     sheet: (opts) => overlay.sheet(opts),
     celebrate: (kind, payload) => celebrate(kind, payload),
+    guide: null,
     router: null,
   };
   let router = null;
+  ctx.guide = Object.assign((id, steps, opts) => guides.guide(id, steps, ctx, opts), {
+    whatsNext: (opts) => guides.whatsNext(ctx, opts),
+    howThisWorks: guides.howThisWorks,
+    howThisWorksHtml: guides.howThisWorksHtml,
+    replay: guides.replay,
+    isUp: guides.isGuideUp,
+  });
 
   // --- screens ------------------------------------------------------------
   const loaded = await Promise.all(SCREEN_IDS.map(loadScreen));
@@ -204,6 +219,7 @@ async function boot() {
     screens[id] = { module: mod, section, ns: loaded[i].ns };
   });
 
+  let lastTopId = null;
   const observers = Object.values(screens).map((s) => s.module).filter((m) => typeof m.observe === 'function');
 
   router = createRouter({
@@ -211,7 +227,13 @@ async function boot() {
     root: document.getElementById('app'),
     tabbar: document.getElementById('tabbar'),
     overlay,
-    onChange: () => setTimeout(() => { overlay.placeToasts(); pumpCeremonies(); }, 0),
+    onChange: (top) => {
+      // A toast never carries across a navigation (synchronously, so a toast
+      // the new screen raises in its show() survives).
+      const id = top ? top.id : null;
+      if (id !== lastTopId) { lastTopId = id; overlay.leaveScreen(); }
+      setTimeout(() => { overlay.placeToasts(); pumpCeremonies(); }, 0);
+    },
     tabDots: (state) => {
       const a = sim.hunters.mapAttention(state, game.now());
       return { map: a.choices + a.hauls > 0 };
@@ -289,7 +311,7 @@ async function boot() {
   // and drop "X joins your catalog" while the naming screen is showing X.
   overlay.setToastGate(({ text, kind }) => {
     if (router.isOpen('naming') && (kind === 'discovery' || /\bjoins (your|the) catalog\b/i.test(text))) return 'drop';
-    if (document.querySelector('#coach-layer .coach-tag')) return 'hold';
+    if (document.querySelector('#coach-layer .coach-tag') || guides.isGuideUp()) return 'hold';
     const top = router.current();
     if (!top) return 'show';
     if (CEREMONY_IDS.has(top.id)) return 'hold';

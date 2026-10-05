@@ -2,7 +2,8 @@
  * overlay.js: toasts, modals and bottom sheets on #toasts / #modal.
  *
  * Owns: toast(text, {hex, ms, action, kind}), setToastGate(fn),
- * suspendToasts(), clearToasts(), placeToasts(), modal({...}) -> Promise, sheet({...})
+ * suspendToasts(), clearToasts(), leaveScreen(), placeToasts(), visibleToasts(),
+ * modal({...}) -> Promise, sheet({...})
  * -> Promise, isOpen(), dismissTop(), closeAll(), and injectStyle(id, css) for
  * the app-level UI modules (naming, phase-beat, onboarding) that keep their
  * small styles next to their code. Implements docs/UI-CONTRACT.md `ctx.toast`,
@@ -42,10 +43,17 @@ injectStyle('overlay-style', `
 // Toasts
 // ---------------------------------------------------------------------------
 //
-// Rules (docs/UX-AUDIT.md "Toasts and modals", Top 12 #6):
+// Rules (docs/UX-AUDIT.md "Toasts and modals", Top 12 #6; PLAN-v0.2 "New
+// items": toast discipline):
 //  - a small paper slip just below the visible screen's head (measured on every
 //    toast, so a tall head or a sticky sub-head is never covered);
-//  - at most MAX_TOASTS on screen, the oldest leaves first; a tap dismisses;
+//  - one toast at a time (MAX_TOASTS = 1); a tap dismisses. Direct feedback
+//    to a tap ('action') shows at once and sends a visible news slip back to
+//    the queue (once); news ('info', 'discovery') that cannot join the visible
+//    slip waits for the slot;
+//  - a toast never carries across a navigation: leaveScreen() (app.js, on
+//    every change of the top screen) clears the visible slip and stale held
+//    feedback; news nobody has seen yet stays queued;
 //  - the same text within DEDUPE_MS shows once (its timer refreshes);
 //  - informational toasts (kind 'info', the app's domain events) collapse into
 //    one slip: a second one within DEDUPE_MS joins the first as a sentence;
@@ -54,7 +62,8 @@ injectStyle('overlay-style', `
 //    screen already shows it). Held toasts show once the gate opens; held
 //    action feedback older than HOLD_ACTION_MS is stale and dropped.
 
-const MAX_TOASTS = 2;
+const MAX_TOASTS = 1;
+const REQUEUE_MS = 1500; // a news slip pushed aside sooner than this comes back once
 const DEFAULT_MS = 2400;
 const DEDUPE_MS = 3000;
 const HOLD_ACTION_MS = 4000;
@@ -107,7 +116,10 @@ function removeToast(t) {
   t._leaving = true;
   clearTimeout(t._timer);
   t.classList.add('is-leaving');
-  setTimeout(() => t.remove(), 170);
+  setTimeout(() => {
+    t.remove();
+    if (held.length && !heldTimer) heldTimer = setTimeout(pumpHeld, 60); // the slot is free
+  }, 170);
 }
 
 function liveToasts(host) {
@@ -129,6 +141,11 @@ function judge(text, kind) {
   try { return gate({ text: String(text), kind }) || 'show'; } catch (e) { return 'show'; }
 }
 
+function slotBusy() {
+  const host = doc() && doc().getElementById('toasts');
+  return !!(host && liveToasts(host).length >= MAX_TOASTS);
+}
+
 function pumpHeld() {
   clearTimeout(heldTimer);
   heldTimer = null;
@@ -137,6 +154,7 @@ function pumpHeld() {
     const item = held[0];
     const kind = item.opts.kind || 'action';
     if (kind === 'action' && now - item.at > HOLD_ACTION_MS) { held.shift(); continue; }
+    if (slotBusy()) break; // one at a time: wait for the visible slip to leave
     const verdict = judge(item.text, kind);
     if (verdict === 'hold') break;
     held.shift();
@@ -146,12 +164,13 @@ function pumpHeld() {
   if (held.length) heldTimer = setTimeout(pumpHeld, 400);
 }
 
-function hold(text, opts) {
+function hold(text, opts, { front = false } = {}) {
   const at = nowMs();
   const same = held.find((x) => x.text === String(text));
   if (same) same.at = at;
+  else if (front) held.unshift({ text: String(text), opts, at });
   else held.push({ text: String(text), opts, at });
-  while (held.length > MAX_HELD) held.shift();
+  while (held.length > MAX_HELD) { if (front) held.pop(); else held.shift(); }
   if (!heldTimer) heldTimer = setTimeout(pumpHeld, 400);
 }
 
@@ -167,12 +186,12 @@ function showToast(text, opts) {
   // The same words within a few seconds: one slip, its timer refreshed.
   const twin = live.find((x) => x._text === str || (x._parts && x._parts.includes(str)));
   if (twin) { arm(twin, ms); recent.set(str, now); return { dismiss: () => removeToast(twin) }; }
-  if (!action && now - (recent.get(str) || -1e9) < DEDUPE_MS) return { dismiss() {} };
+  if (!action && !(opts && opts.requeued) && now - (recent.get(str) || -1e9) < DEDUPE_MS) return { dismiss() {} };
   recent.set(str, now);
   for (const [k, at] of recent) if (now - at > DEDUPE_MS) recent.delete(k);
 
   // Informational news collapses into one slip ("A quest is ready. A postcard: ...").
-  if (kind === 'info' && !action) {
+  if (kind !== 'action' && !action) {
     const info = live.find((x) => x._kind === 'info' && now - x._at < DEDUPE_MS && x._parts.length < 3);
     if (info) {
       info._parts.push(str);
@@ -184,6 +203,22 @@ function showToast(text, opts) {
     }
   }
 
+  // One at a time. News waits for the slot; feedback to a tap takes it, and a
+  // news slip it pushes aside (shown only briefly) comes back once.
+  if (live.length) {
+    if (kind !== 'action' && !action) {
+      recent.delete(str);
+      hold(str, { ...opts, kind });
+      return { dismiss() { const i = held.findIndex((x) => x.text === str); if (i >= 0) held.splice(i, 1); } };
+    }
+    for (const x of live) {
+      if (x._kind !== 'action' && !x._requeued && now - x._shownAt < REQUEUE_MS) {
+        for (const part of x._parts.slice().reverse()) hold(part, { ...(x._opts || {}), kind: x._kind, requeued: true }, { front: true });
+      }
+      removeToast(x);
+    }
+  }
+
   const t = doc().createElement('div');
   t.className = 'toast';
   t.setAttribute('role', 'status');
@@ -191,6 +226,9 @@ function showToast(text, opts) {
   t._parts = [str];
   t._kind = kind;
   t._at = now;
+  t._shownAt = now;
+  t._requeued = !!(opts && opts.requeued);
+  t._opts = { hex, ms };
   t.innerHTML = String(h`${hex ? raw(`<span class="toast-dot" style="background:${safeHex(hex)}"></span>`) : ''}<span data-toast-text>${str}</span>${action ? h`<button type="button" class="btn btn-paper small" data-tap>${action.label}</button>` : ''}`);
   if (action) {
     const b = t.querySelector('button');
@@ -202,8 +240,6 @@ function showToast(text, opts) {
   }
   t.addEventListener('click', () => removeToast(t)); // a tap anywhere on a toast dismisses it
   host.appendChild(t);
-  const all = liveToasts(host);
-  while (all.length > MAX_TOASTS) removeToast(all.shift());
   arm(t, ms);
   return { dismiss: () => removeToast(t) };
 }
@@ -235,9 +271,26 @@ export function suspendToasts() {
   const host = toastsEl();
   if (!host) return;
   for (const t of liveToasts(host)) {
-    if (t._kind === 'info') for (const part of t._parts) hold(part, { kind: 'info' });
+    if (t._kind === 'info') for (const part of t._parts) hold(part, { kind: 'info', requeued: true });
     removeToast(t);
   }
+}
+
+/**
+ * leaveScreen(): the top screen changed. A toast never carries across: the
+ * visible slip leaves, held feedback to a tap is dropped (it belonged to the
+ * old screen); news nobody has seen yet stays queued for the new screen.
+ */
+export function leaveScreen() {
+  for (let i = held.length - 1; i >= 0; i--) if ((held[i].opts.kind || 'action') === 'action') held.splice(i, 1);
+  const host = doc() && doc().getElementById('toasts');
+  if (host) for (const t of liveToasts(host)) removeToast(t);
+}
+
+/** visibleToasts() -> the texts on screen now (tests and the debug panel). */
+export function visibleToasts() {
+  const host = doc() && doc().getElementById('toasts');
+  return host ? liveToasts(host).map((t) => t._parts.join(' ')) : [];
 }
 
 /** placeToasts(): move the toast stack under the (new) visible screen's head. */
@@ -393,4 +446,4 @@ export function closeAll() {
 
 export { escapeHtml };
 
-export default { toast, setToastGate, suspendToasts, clearToasts, placeToasts, modal, sheet, isOpen, dismissTop, closeAll, onOverlayChange, injectStyle };
+export default { toast, setToastGate, suspendToasts, clearToasts, leaveScreen, visibleToasts, placeToasts, modal, sheet, isOpen, dismissTop, closeAll, onOverlayChange, injectStyle };

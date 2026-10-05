@@ -21,12 +21,15 @@
  * including re-navigating to the top screen with new params; it does NOT run
  * again when an overlay above it closes (that calls reveal/render).
  *
- * Home tabs (UX-AUDIT Top 12 #7): every overlay lives under one tab
- * (HOME_TABS; settings and the ceremonies follow the screen below them). The
- * tab bar lights the top screen's home tab, not the base of the stack, so
- * Orders -> Shelf lights the Workshop. Back pops to wherever she came from;
- * an overlay opened with nothing below it sits on its home tab, so back lands
- * there.
+ * Home tabs (UX-AUDIT Top 12 #7, UX-GUIDELINES-REVIEW §D): every overlay
+ * lives under one tab (HOME_TABS). The tab bar lights the top screen's home
+ * tab, never the base of the stack, so Orders -> Shelf lights the Workshop.
+ * Settings lives in the Workshop (its gear is in the Workshop's head), so it
+ * lights the Workshop wherever it was opened from (audit shot [42] had it
+ * lighting Catalog). The ceremonies (phase-beat, onboarding) have no home: a
+ * following screen lights the home of the screen directly beneath it, else
+ * the Workshop (litTabFor). Back pops to wherever she came from; an overlay
+ * opened with nothing below it sits on its home tab, so back lands there.
  *
  * `tabDots(state)` -> {tabId: true}: a pure read run on every render; flagged
  * tabs get a small walnut `.dot` (the map: a scouting choice or an unread haul).
@@ -53,9 +56,29 @@ export const HOME_TABS = Object.freeze({
   grading: 'puzzles', purify: 'puzzles', packing: 'puzzles',
   hunter: 'map',
   naming: 'catalog',
+  settings: 'workshop',
 });
-/** Overlays without a home of their own: they light whatever is below them. */
-const FOLLOW_IDS = new Set(['settings', 'phase-beat', 'onboarding']);
+/** Ceremonies without a home of their own: they light the home of the screen directly beneath. */
+export const FOLLOW_IDS = Object.freeze(['phase-beat', 'onboarding']);
+
+/**
+ * litTabFor(ids, {tabs, home}) -> the tab to light for a stack of screen ids
+ * (bottom first): a tab lights itself, an overlay its HOME_TABS entry (unknown
+ * ids: `home`), and a following screen the home of the screen directly
+ * beneath it (itself resolved the same way), or `home` with nothing beneath.
+ */
+export function litTabFor(ids, { tabs = TABS, home = 'workshop' } = {}) {
+  const list = Array.isArray(ids) ? ids : [];
+  const homeAt = (i) => {
+    if (i < 0) return home;
+    const id = list[i];
+    if (tabs.includes(id)) return id;
+    if (FOLLOW_IDS.includes(id)) return homeAt(i - 1);
+    const h = HOME_TABS[id];
+    return h && tabs.includes(h) ? h : home;
+  };
+  return homeAt(list.length - 1);
+}
 
 export function createRouter({
   screens, root = null, tabbar = null, onChange = null, overlay = null, afterRender = null,
@@ -66,15 +89,9 @@ export function createRouter({
 
   const isTab = (id) => tabs.includes(id);
   /** homeOf(id) -> the tab id it lives under, or null when it follows the screen below. */
-  const homeOf = (id) => (isTab(id) ? id : FOLLOW_IDS.has(id) ? null : (HOME_TABS[id] && tabs.includes(HOME_TABS[id]) ? HOME_TABS[id] : home));
-  /** The tab to light: the top screen's home, walking down past screens that follow. */
-  function litTab() {
-    for (let i = stack.length - 1; i >= 0; i--) {
-      const h = homeOf(stack[i].id);
-      if (h) return h;
-    }
-    return home;
-  }
+  const homeOf = (id) => (isTab(id) ? id : FOLLOW_IDS.includes(id) ? null : (HOME_TABS[id] && tabs.includes(HOME_TABS[id]) ? HOME_TABS[id] : home));
+  /** The tab to light (litTabFor on the current stack). */
+  const litTab = () => litTabFor(stack.map((s) => s.id), { tabs, home });
   const entry = (id) => screens[id];
   const mod = (id) => (entry(id) && entry(id).module) || {};
 
