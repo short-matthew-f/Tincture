@@ -7,7 +7,7 @@ import {
 const NOW = Date.UTC(2026, 9, 2, 12);
 
 test('constants', () => {
-  assert.equal(SAVE_VERSION, 2);
+  assert.equal(SAVE_VERSION, 3);
   assert.equal(SAVE_KEY, 'tincture.save');
 });
 
@@ -31,11 +31,14 @@ test('createInitialState shape', () => {
   assert.deepEqual(Object.keys(s.catalog.discovered), ['madder', 'ochre', 'woad']);
   assert.deepEqual(s.catalog.discovered.ochre, { at: NOW, name: 'Ochre', custom: false, essence: 0 });
   assert.deepEqual(Object.values(s.apprentices), [false, false, false, false, false]);
-  assert.equal(s.shelf.cols, 5);
-  assert.equal(s.shelf.rows, 7);
-  assert.equal(s.shelf.cells.length, 35);
+  assert.equal(s.shelf.cols, 6);
+  assert.equal(s.shelf.rows, 6);
+  assert.equal(s.shelf.cells.length, 36);
   assert.ok(s.shelf.cells.every((c) => c === null));
-  assert.deepEqual(s.shelf.rowLabels, new Array(7).fill(null));
+  assert.equal(s.shelf.rowLabels, undefined);
+  assert.equal(s.shelf.pausedRemainingMs, 0);
+  assert.equal(s.nextMuddyAt, 0);
+  assert.equal(s.stats.firstBottleAt, 0);
   assert.deepEqual(s.shelf.colors, []);
   assert.equal(s.shelf.waiting, 0);
   assert.deepEqual(s.unlocks, { shelf: false, hunters: false, gallery: false, shipping: false, commissions: false });
@@ -149,7 +152,7 @@ function keyPaths(x, prefix = '', out = []) {
   return out;
 }
 
-test('a real 0.1.3 save loads as v2, grants what it used, plays a tick, and has every v2 key', () => {
+test('a real 0.1.3 save loads as v3, grants what it used, plays a tick, and has every v2 key', () => {
   const json = readFileSync(FIXTURE, 'utf8');
   const raw = JSON.parse(json);
   assert.equal(raw.v, 1);
@@ -163,7 +166,15 @@ test('a real 0.1.3 save loads as v2, grants what it used, plays a tick, and has 
   assert.deepEqual(s.onboarding.seen, {});
   assert.deepEqual(s.keep, {});
   assert.equal(s.shelf.waiting, 0);
-  const shelfColors = [...new Set(raw.state.shelf.cells.filter(Boolean).map((c) => c.color))].slice(0, 5);
+  // v3: the 5x7 shelf is now 6x6, containers kept in reading order; chips = most frequent first.
+  const old = raw.state.shelf.cells.filter(Boolean);
+  assert.equal(s.shelf.cols, 6);
+  assert.equal(s.shelf.cells.length, 36);
+  assert.equal(s.shelf.rowLabels, undefined);
+  assert.deepEqual(s.shelf.cells.filter(Boolean).map((c) => c.color), old.map((c) => c.color).slice(0, 36));
+  const counts = {};
+  for (const c of old) counts[c.color] = (counts[c.color] || 0) + 1;
+  const shelfColors = [...new Set(old.map((c) => c.color))].sort((a, b) => counts[b] - counts[a]).slice(0, 5);
   assert.deepEqual(s.shelf.colors, shelfColors);
   assert.ok(s.stations.mixers.length >= 2);
   // Every key a fresh v2 state has, the migrated save has too.
@@ -206,4 +217,68 @@ test('v1 -> v2: a one-mixer save gets its second mixer; gallery, yard and Phase 
   assert.deepEqual(back.shelf.colors, []);
   assert.equal(back.flags.whatsNew, '0.2');
   for (const k of ['lines', 'lineSkips', 'wrongDrops', 'rejectedDrags', 'coachDismissed']) assert.equal(back.stats[k], 0, k);
+});
+
+// ---------------------------------------------------------------------------
+// v2 (0.2.0) -> v3 (0.2.1) migration: the 6x6 shelf
+// ---------------------------------------------------------------------------
+
+import { stockOf } from '../src/sim/storage.js';
+
+function v2Save(shelf, extra = {}) {
+  const s = createInitialState(NOW, 4);
+  const obj = JSON.parse(serialize(s));
+  obj.v = 2;
+  obj.savedAt = NOW;
+  obj.state.v = 2;
+  obj.state.shelf = { colors: ['woad'], waiting: 0, nextSpilloverAt: NOW + 5000, ...shelf };
+  delete obj.state.nextMuddyAt;
+  delete obj.state.stats.firstBottleAt;
+  Object.assign(obj.state, extra);
+  return obj;
+}
+const c = (color, tier = 1, unit = 2) => ({ color, tier, golden: false, boost: 1, unit });
+
+test('v2 -> v3: a 5x7 shelf becomes 6x6 in reading order; labels dropped; chips most frequent first', () => {
+  const cells = new Array(35).fill(null);
+  cells[0] = c('madder');
+  cells[4] = c('ochre', 3); // row 0, col 4
+  cells[5] = c('ochre'); // row 1, col 0
+  cells[34] = c('ochre');
+  const obj = v2Save({ cols: 5, rows: 7, cells, rowLabels: new Array(7).fill('red') }, { muddyBatches: [{ id: 'b1', color: 'madder', jars: 5, value: 4, at: NOW }] });
+  const s = deserialize(JSON.stringify(obj), NOW);
+  assert.equal(s.v, 3);
+  assert.equal(s.shelf.cols, 6);
+  assert.equal(s.shelf.rows, 6);
+  assert.equal(s.shelf.cells.length, 36);
+  assert.equal(s.shelf.rowLabels, undefined);
+  assert.deepEqual(s.shelf.cells.slice(0, 4).map((x) => x && x.color), ['madder', 'ochre', 'ochre', 'ochre']);
+  assert.ok(s.shelf.cells.slice(4).every((x) => x === null));
+  assert.deepEqual(s.shelf.colors, ['ochre', 'madder']);
+  assert.equal(s.shelf.nextSpilloverAt, NOW + 5000, 'spillover timer kept');
+  assert.equal(s.stats.firstBottleAt, NOW, 'a Bottle on the shelf: golden vials allowed');
+  assert.equal(s.nextMuddyAt, 0);
+  assert.equal(s.muddyBatches[0].tier, null);
+});
+
+test('v2 -> v3: an expanded 6x9 shelf with more than 36 containers sends the extras to stock', () => {
+  const cells = new Array(54).fill(null);
+  for (let i = 0; i < 40; i++) cells[i] = c(i < 36 ? 'woad' : 'madder', i < 38 ? 1 : 2, 3);
+  const obj = v2Save({ cols: 6, rows: 9, cells, rowLabels: new Array(9).fill(null) });
+  obj.state.stock = {};
+  const s = deserialize(JSON.stringify(obj), NOW);
+  assert.equal(s.shelf.cells.length, 36);
+  assert.equal(s.shelf.cells.filter(Boolean).length, 36);
+  assert.ok(s.shelf.cells.every((x) => x.color === 'woad'));
+  // Extras: two madder vials (3 jars each) and two madder jars (3 x 2.5 each).
+  assert.ok(Math.abs(stockOf(s, 'madder') - (3 + 3 + 7.5 + 7.5)) < 1e-9);
+  assert.deepEqual(s.shelf.colors, ['woad']);
+  assert.equal(s.stats.firstBottleAt, 0, 'no Bottle yet');
+  assert.deepEqual(deserialize(serialize(s), NOW).shelf.cells.length, 36, 'v3 round trip');
+});
+
+test('v2 -> v3: an empty shelf keeps the chips she had', () => {
+  const s = deserialize(JSON.stringify(v2Save({ cols: 5, rows: 7, cells: new Array(35).fill(null), rowLabels: [] })), NOW);
+  assert.deepEqual(s.shelf.colors, ['woad']);
+  assert.equal(s.shelf.cells.length, 36);
 });

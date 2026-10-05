@@ -7,9 +7,9 @@
 // offline catch-up costs the same as a 250 ms tick). With a Dispatcher running
 // routes it sub-steps (≤ 48 steps) so trips can drain storage while away.
 
-import { MIXER, MILESTONES, GRINDER_KINDS_BY_ID, RUSH_COOLDOWN_MS, VEHICLES } from '../content/stations.js';
+import { MIXER, MIXER_PURCHASE, MILESTONES, GRINDER_KINDS_BY_ID, RUSH_COOLDOWN_MS, VEHICLES } from '../content/stations.js';
 import { SOURCES_BY_ID, MAX_SOURCES_ERA1 } from '../content/sources.js';
-import { ROOMS_BY_ID, slotsForRooms } from '../content/rooms.js';
+import { ROOMS_BY_ID, slotsForRooms, MAX_SLOTS } from '../content/rooms.js';
 import { APPRENTICES_BY_ID } from '../content/apprentices.js';
 import { stateRng, uuid } from '../rng.js';
 import { emit } from './bus.js';
@@ -23,11 +23,21 @@ import { resolveTrips, autoDispatch } from './shipping.js';
 import { tickSpillover } from './shelf.js';
 import { tickAdmission, unlock as unlockGallery } from './gallery.js';
 import { undiscoveredNear, discover, isDiscovered } from './discovery.js';
+import { puzzleReward } from './economy.js';
+import { TIERS as PURIFY_TIERS } from '../puzzles/purify.js';
 
-export const MUDDY_BASE = 0.05;
-export const MUDDY_PER_LEVEL = 0.01;
-export const MUDDY_MAX = 0.5;
-export const MUDDY_PENDING_MAX = 6;
+/**
+ * Muddy batches (docs/V02-CONTRACTS.md "Purify"): a production-time clock, not a
+ * per-batch roll. While any mixer produces, the next batch is due a random 2–3
+ * minutes of production later (state.nextMuddyAt); at most MUDDY_PENDING_MAX
+ * wait at once (a due batch past the cap is skipped, nothing lost), and one
+ * catch-up tick (dt > MUDDY_CATCH_UP_MS: offline return, debug advance) adds at
+ * most MUDDY_OFFLINE_MAX.
+ */
+export const MUDDY_WINDOW_MS = Object.freeze({ min: 120e3, max: 180e3 });
+export const MUDDY_PENDING_MAX = 10;
+export const MUDDY_OFFLINE_MAX = 3;
+export const MUDDY_CATCH_UP_MS = 60e3; // = offline.CATCH_UP_MIN_MS (not imported: offline.js imports the sim)
 /** Happy accidents: one per 4 h of production in Phase 1, 6 h later (v0.2 discovery slowdown). */
 export const ACCIDENT_MS = Object.freeze({ phase1: 4 * 3600e3, later: 6 * 3600e3 });
 export const ACCIDENT_TINT_DE = 8;
@@ -59,16 +69,36 @@ export function earn(state, coins) {
 // Tick
 // ---------------------------------------------------------------------------
 
-function geometric(rng, p) {
-  if (!(p > 0)) return Infinity;
-  if (p >= 1) return 1;
-  const u = Math.max(1e-12, rng());
-  return Math.floor(Math.log(u) / Math.log(1 - p)) + 1;
-}
+const muddyGap = (rng) => MUDDY_WINDOW_MS.min + (MUDDY_WINDOW_MS.max - MUDDY_WINDOW_MS.min) * rng();
 
-function muddyChance(state, mixer) {
-  const c = MUDDY_BASE + MUDDY_PER_LEVEL * num(mixer.level, 1) - grinderPurityBonus(state);
-  return Math.max(0, Math.min(MUDDY_MAX, c));
+/**
+ * The muddy clock over [t0, t1] -> [{i: mixerIndex, at}] batches due. Time
+ * without production (no mixer running, or storage full: 1 - runFrac) pushes
+ * the clock back so only production time counts. `budget.left` caps a
+ * catch-up tick.
+ */
+function muddyDue(state, r, t0, t1, runFrac, rng, budget) {
+  const out = [];
+  const mixers = state.stations.mixers ?? [];
+  const producing = mixers.map((m, i) => i).filter((i) => mixers[i] && mixers[i].recipe && num(r.mixerJars[i]) > 0);
+  const run = producing.length ? Math.max(0, Math.min(1, num(runFrac))) : 0;
+  // Grace period: no muddy batches during the first-session tutorial. The
+  // clock starts once onboarding is done, so her first batch lands 2-3 minutes
+  // of production after that, never in the middle of the first order.
+  if (state.onboarding && !state.onboarding.done && num(state.lifetime?.puzzles) < 2) { state.nextMuddyAt = 0; return out; }
+  if (!(num(state.nextMuddyAt) > 0)) {
+    if (!(run > 0)) return out;
+    state.nextMuddyAt = t0 + muddyGap(rng);
+  }
+  if (run < 1) state.nextMuddyAt += (t1 - t0) * (1 - run);
+  if (!(run > 0)) return out;
+  while (state.nextMuddyAt <= t1 && budget.left > 0 && state.muddyBatches.length + out.length < MUDDY_PENDING_MAX) {
+    out.push({ i: producing[Math.min(producing.length - 1, Math.floor(rng() * producing.length))], at: state.nextMuddyAt });
+    budget.left--;
+    state.nextMuddyAt += muddyGap(rng);
+  }
+  if (state.nextMuddyAt <= t1) state.nextMuddyAt = t1 + muddyGap(rng); // backlog or catch-up cap reached: skip
+  return out;
 }
 
 /** The shop keeps half the display vats stocked (her working stock for paint,
@@ -110,7 +140,7 @@ export function flow(stock0, R, s, reserve, cap, dt) {
 }
 
 /** Closed-form production/sales over [t0, t1]. */
-function step(state, t0, t1) {
+function step(state, t0, t1, muddyBudget = { left: Infinity }) {
   const dtMs = Math.max(0, t1 - t0);
   const dt = dtMs / 1000;
   if (!(dt > 0)) return { produced: 0, sold: 0, coins: 0 };
@@ -146,27 +176,34 @@ function step(state, t0, t1) {
   const pureBase = grinderPurityBonus(state);
   const mixers = state.stations.mixers ?? [];
   if (!Array.isArray(state.muddyBatches)) state.muddyBatches = [];
+  const due = muddyDue(state, r, t0, t1, runFrac, rng, muddyBudget);
   mixers.forEach((m, i) => {
     const jars = num(r.mixerJars[i]) * dt * runFrac;
     if (!(jars > 0)) return;
     let keep = jars;
     m.progress = num(m.progress) + jars;
-    let batches = Math.floor(m.progress / MIXER.batchJars);
-    m.progress -= batches * MIXER.batchJars;
-    const p = muddyChance(state, m);
-    while (batches > 0 && state.muddyBatches.length < MUDDY_PENDING_MAX && p > 0) {
-      const k = geometric(rng, p);
-      if (k > batches) break;
-      batches -= k;
+    m.progress -= Math.floor(m.progress / MIXER.batchJars) * MIXER.batchJars;
+    // A muddy batch is one mixer batch (MIXER.batchJars) set aside: from this
+    // step's output first, the rest from that color's stock (lowest purity).
+    const mine = due.filter((d) => d.i === i);
+    const owed = [];
+    for (const d of mine) {
       const take = Math.min(MIXER.batchJars, keep);
-      if (take <= 0) break;
       keep -= take;
-      state.muddyBatches.push({ id: uuid(rng), color: m.recipe, jars: take, value: take * colorPrice(state, m.recipe, 'muddy'), at: t1 });
-      emit(state, 'muddy', { mixerIndex: i, colorId: m.recipe });
+      owed.push({ at: d.at, take });
     }
     const pureShare = Math.min(PURE_SHARE_MAX, pureBase + ESSENCE_STEP * essenceOf(state, m.recipe));
     if (pureShare > 0) addStock(state, m.recipe, keep * pureShare, 'pure', { cap: false });
     addStock(state, m.recipe, keep * (1 - pureShare), 'standard', { cap: false });
+    for (const o of owed) {
+      const rest = MIXER.batchJars - o.take;
+      const jarsOut = o.take + (rest > 0 ? takeStock(state, m.recipe, rest, { prefer: 'low' }).taken : 0);
+      if (!(jarsOut > 1e-6)) continue;
+      state.muddyBatches.push({
+        id: uuid(rng), color: m.recipe, jars: jarsOut, value: jarsOut * colorPrice(state, m.recipe, 'muddy'), at: o.at, tier: null,
+      });
+      emit(state, 'muddy', { mixerIndex: i, colorId: m.recipe });
+    }
   });
 
   // Shop sales: proportional to each color's stock above its keep reserve,
@@ -273,10 +310,12 @@ export function tickFactory(state, now) {
   for (const b of state.boosts ?? []) if (num(b.until) > t0 && b.until < now) cuts.add(b.until);
   const points = [t0, ...[...cuts].sort((x, y) => x - y), now];
   const out = { produced: 0, sold: 0, coins: 0, trips: 0 };
+  // A catch-up (offline return, debug advance) adds at most MUDDY_OFFLINE_MAX muddy batches.
+  const muddyBudget = { left: dt > MUDDY_CATCH_UP_MS ? MUDDY_OFFLINE_MAX : Infinity };
   for (let k = 0; k + 1 < points.length; k++) {
     const a = points[k];
     const b = points[k + 1];
-    const res = step(state, a, b);
+    const res = step(state, a, b, muddyBudget);
     out.produced += res.produced;
     out.sold += res.sold;
     out.coins += res.coins;
@@ -428,17 +467,63 @@ export function upgradeGrinderKind(state, args = {}) {
   return { ok: true, kind: g.kind, cost: def.upgradeCost };
 }
 
-/** Make station arrays match the slots her rooms give (only ever adds). */
+/**
+ * Make station arrays match the slots her rooms give (only ever adds). Mixers
+ * bought outright (buyMixer, `stations.mixersBought`) come on top of the rooms'
+ * mixer slots, so a room bought later still adds its mixer; MAX_SLOTS caps both.
+ */
 export function syncSlots(state) {
   const slots = slotsForRooms(state.rooms ?? []);
   const st = state.stations;
-  while ((st.mixers ?? []).length < slots.mixers) st.mixers.push({ recipe: null, level: 1, progress: 0, rushedAt: 0, accident: null });
+  const mixers = Math.min(MAX_SLOTS.mixers, slots.mixers + mixersBought(state));
+  while ((st.mixers ?? []).length < mixers) st.mixers.push(newMixer());
   while ((st.vats ?? []).length < slots.vats) st.vats.push({ level: 1, color: null });
   while ((st.grinders ?? []).length < slots.grinders) st.grinders.push({ kind: 'mortar', level: 1 });
   if (!st.fleet) st.fleet = [];
   while (st.fleet.length < slots.fleet) st.fleet.push({ kind: 'handcart', level: 1, route: null, departedAt: 0, arrivesAt: 0, cargo: null, packed: false });
   if (state.gallery) state.gallery.walls = Math.max(num(state.gallery.walls), slots.walls);
   return slots;
+}
+
+function newMixer() {
+  return { recipe: null, level: 1, progress: 0, rushedAt: 0, accident: null };
+}
+
+/** How many mixers she has bought outright this run (Renovate resets stations, so these too). */
+export function mixersBought(state) {
+  return Math.max(0, Math.floor(num(state?.stations?.mixersBought)));
+}
+
+/**
+ * mixerPurchase(state) -> {cost, available, affordable, count}: the next mixer
+ * bought outright (stations.js MIXER_PURCHASE: 60 Coins, ×6 for each one after),
+ * available while her mixers are below MAX_SLOTS.mixers. Pure read.
+ */
+export function mixerPurchase(state) {
+  const n = mixersBought(state);
+  const count = (state?.stations?.mixers ?? []).length;
+  const available = count < MAX_SLOTS.mixers;
+  const cost = MIXER_PURCHASE.baseCost * Math.pow(MIXER_PURCHASE.costGrowth, n);
+  return { cost, available, affordable: available && num(state?.coins) >= cost, count };
+}
+
+/**
+ * buyMixer(state, now) -> {ok, index, cost} | {ok:false, reason:'slots'|'coins', cost}.
+ * Adds one mixer (level 1, no recipe) without a room: the cheap third mixer
+ * right after the tutorial (docs/PLAN-v0.2.md Theme A.1). Emits 'mixer' {index}.
+ */
+export function buyMixer(state, a, b) {
+  const now = typeof a === 'number' ? a : num(b); // eslint-disable-line no-unused-vars
+  const q = mixerPurchase(state);
+  if (!q.available) return { ok: false, reason: 'slots', cost: q.cost };
+  if (num(state.coins) < q.cost) return { ok: false, reason: 'coins', cost: q.cost };
+  state.coins -= q.cost;
+  state.stations.mixersBought = mixersBought(state) + 1;
+  state.stations.mixers.push(newMixer());
+  const index = state.stations.mixers.length - 1;
+  emit(state, 'mixer', { index });
+  questEvent(state, 'upgradeBought', 1, { kind: 'newMixer', level: 1 });
+  return { ok: true, index, cost: q.cost };
 }
 
 /**
@@ -602,22 +687,35 @@ export function unlockSource(state, args = {}) {
 }
 
 /**
- * purifyBatch(state, {batchId, purity:'pure'|'flawless'}, now) -> {ok, jars, coins}.
- * A solved tube sort: the batch's jars go to stock at high purity (any that
- * don't fit are sold at that purity, so nothing is lost).
+ * purifyBatch(state, {batchId, tier}, now) -> {ok, jars, coins, reward, purity, tier}.
+ * A solved tube sort on a difficulty tier (puzzles/purify.js TIERS): the
+ * batch's jars go to stock at that tier's purity (pure / pure / flawless /
+ * flawless; any that don't fit are sold at that purity, so nothing is lost)
+ * and the puzzle reward is paid: economy.puzzleReward(tier, {k: TIERS[tier].k})
+ * minutes of production (4 / 6 / 10 / 16). `coins` = overflow sales + reward.
+ * Legacy call without `tier` ({purity}): purity only, no reward (v0.1 shape).
  */
 export function purifyBatch(state, args = {}, now = 0) {
   const list = state.muddyBatches ?? [];
   const idx = list.findIndex((b) => b.id === args.batchId);
   if (idx < 0) return { ok: false };
   const b = list[idx];
+  const t = PURIFY_TIERS[args.tier] ? args.tier : null;
   list.splice(idx, 1);
-  const purity = args.purity === 'flawless' ? 'flawless' : 'pure';
+  const purity = t ? PURIFY_TIERS[t].purity : (args.purity === 'flawless' ? 'flawless' : 'pure');
   const kept = addStock(state, b.color, b.jars, purity);
   const rest = Math.max(0, b.jars - kept);
-  const coins = earn(state, rest * colorPrice(state, b.color, purity) * incomeMultiplier(state, now));
-  questEvent(state, 'batchPurified', 1, { colorId: b.color, purity });
-  return { ok: true, jars: kept, coins };
+  const sold = earn(state, rest * colorPrice(state, b.color, purity) * incomeMultiplier(state, now));
+  const reward = t ? earn(state, puzzleReward(state, t, { k: PURIFY_TIERS[t].k, now })) : 0;
+  questEvent(state, 'batchPurified', 1, { colorId: b.color, purity, tier: t });
+  return { ok: true, jars: kept, coins: sold + reward, reward, purity, tier: t };
+}
+
+/** muddyValue(state, now) -> coins every waiting muddy batch would sell for as is (the "Sell all" confirm line). */
+export function muddyValue(state, now = 0) {
+  let coins = 0;
+  for (const b of state.muddyBatches ?? []) coins += num(b.jars) * colorPrice(state, b.color, 'muddy');
+  return coins * incomeMultiplier(state, now);
 }
 
 /** sellMuddyBatch(state, {batchId}, now) -> {ok, coins}: ignoring is fine — muddy sells at 0.8×. */
@@ -628,5 +726,22 @@ export function sellMuddyBatch(state, args = {}, now = 0) {
   const b = list.splice(idx, 1)[0];
   const coins = earn(state, b.jars * colorPrice(state, b.color, 'muddy') * incomeMultiplier(state, now));
   return { ok: true, coins };
+}
+
+/** sellAllMuddy(state, args, now) -> {ok, batches, jars, coins}: "Sell all as is" (muddy, 0.8×). */
+export function sellAllMuddy(state, args = {}, now = 0) {
+  const list = Array.isArray(state.muddyBatches) ? state.muddyBatches : [];
+  const t = typeof args === 'number' ? args : now;
+  let jars = 0;
+  let coins = 0;
+  for (const b of list) {
+    jars += num(b.jars);
+    coins += num(b.jars) * colorPrice(state, b.color, 'muddy');
+  }
+  const batches = list.length;
+  state.muddyBatches = [];
+  const paid = earn(state, coins * incomeMultiplier(state, t));
+  if (state.activePuzzles && state.activePuzzles.purify) state.activePuzzles.purify = null;
+  return { ok: batches > 0, batches, jars, coins: paid };
 }
 

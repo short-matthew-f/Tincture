@@ -3,7 +3,9 @@
 // src/game.js under SAVE_KEY. Every shape change bumps SAVE_VERSION and adds a
 // step in migrate().
 
-export const SAVE_VERSION = 2;
+import { addStock } from './sim/storage.js';
+
+export const SAVE_VERSION = 3;
 export const SAVE_KEY = 'tincture.save';
 /** Coins in the till of a brand-new workshop. */
 export const STARTING_COINS = 25;
@@ -100,15 +102,18 @@ export function createInitialState(now = 0, seed) {
     stewardOn: false,
     orders: { open: [], nextRefreshAt: 0, reputation: 0, filledCount: 0 },
     muddyBatches: [],
+    nextMuddyAt: 0,            // production-time clock for the next muddy batch (factory.js)
     boosts: [],
+    // The Merge Shelf (src/sim/shelf.js): a fixed 6 x 6 grid; lines of six of a
+    // hue family sell together (docs/V02-CONTRACTS.md "Line rule").
     shelf: {
-      cols: 5,
-      rows: 7,
-      cells: new Array(35).fill(null),
-      rowLabels: new Array(7).fill(null),
+      cols: 6,
+      rows: 6,
+      cells: new Array(36).fill(null),
       colors: [],              // the (≤5) color chips spillover delivers
       waiting: 0,              // vials piled behind the glass before the shelf is bought
       nextSpilloverAt: 0,
+      pausedRemainingMs: 0,    // spillover time left while nothing produces
     },
     gallery: {
       unlocked: false,
@@ -138,6 +143,7 @@ export function createInitialState(now = 0, seed) {
       sessionStartedAt: now, lastCloseUpAt: 0, fastSolves: 0,
       // Local-only feel counters (debug panel; docs/PLAN-v0.2.md amendments).
       lines: 0, lineSkips: 0, wrongDrops: 0, rejectedDrags: 0, coachDismissed: 0,
+      firstBottleAt: 0,        // first Bottle ever made on the shelf (golden vials from then on)
     },
     activePuzzles: {},         // puzzle id -> in-progress board (grading, purify, ...)
     flags: {},                 // sim bookkeeping (storageFull edge, firstTickAt, ...)
@@ -170,6 +176,7 @@ export function migrate(saveObj) {
   if (v > SAVE_VERSION) throw new Error(`Save is from a newer version (v${v})`);
   switch (v) { // eslint-disable-line default-case
     case 1: migrateV1toV2(saveObj.state); v = 2; // falls through
+    case 2: migrateV2toV3(saveObj.state, saveObj.savedAt); v = 3; // falls through
     default:
       break;
   }
@@ -185,7 +192,7 @@ const UNLOCK_IDS = ['shelf', 'hunters', 'gallery', 'shipping', 'commissions'];
  * already used, a second mixer, the shelf's color chips and waiting pile, the
  * shop reserve, purify tier, guide bookkeeping, local counters and the one-time
  * "What changed in 0.2" note (state.flags.whatsNew). The shelf grid itself
- * (5x7 -> 6x6, rowLabels) is converted by the step-3 shelf rework.
+ * (5x7 -> 6x6, rowLabels) is converted by migrateV2toV3.
  */
 function migrateV1toV2(st) {
   const cells = Array.isArray(st.shelf?.cells) ? st.shelf.cells : [];
@@ -228,6 +235,55 @@ function migrateV1toV2(st) {
   }
   if (!isPlainObject(st.flags)) st.flags = {};
   st.flags.whatsNew = '0.2';
+}
+
+const SHELF_COLS = 6;
+const SHELF_ROWS = 6;
+const SHELF_MAX_COLORS = 5;
+const TIER_VALUE = [1, 2.5, 6, 15, 40]; // src/sim/shelf.js TIER_VALUES (no import: shelf.js pulls in the sim)
+
+/**
+ * v2 -> v3 (0.2.1, Theme B): the shelf becomes a fixed 6 x 6 grid. Containers
+ * keep their reading order (row by row of the old grid); any beyond 36 (an
+ * expanded 6 x 9 shelf) go to stock as jars worth what they stood for
+ * (unit x tier value x boost). Row labels are dropped; the color chips are the
+ * (≤5) colors on the shelf, most frequent first, else the ones she had. A save
+ * that already made a Bottle or bigger may get golden vials (stats.firstBottleAt).
+ */
+function migrateV2toV3(st, savedAt) {
+  const old = isPlainObject(st.shelf) ? st.shelf : {};
+  const items = (Array.isArray(old.cells) ? old.cells : []).filter((c) => c && typeof c === 'object' && typeof c.color === 'string');
+  const cells = new Array(SHELF_COLS * SHELF_ROWS).fill(null);
+  items.slice(0, cells.length).forEach((c, i) => { cells[i] = c; });
+  for (const c of items.slice(cells.length)) {
+    const tier = Math.max(1, Math.min(5, Number(c.tier) | 0));
+    const jars = (Number(c.unit) > 0 ? Number(c.unit) : 1) * TIER_VALUE[tier - 1] * (Number(c.boost) > 0 ? Number(c.boost) : 1);
+    addStock(st, c.color, jars, 'standard', { cap: false });
+  }
+  const counts = new Map();
+  items.slice(0, cells.length).forEach((c) => counts.set(c.color, (counts.get(c.color) || 0) + 1));
+  const byCount = [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => id);
+  const prevColors = Array.isArray(old.colors) ? old.colors.filter((id) => typeof id === 'string') : [];
+  const shelf = {
+    ...old,
+    cols: SHELF_COLS,
+    rows: SHELF_ROWS,
+    cells,
+    colors: (byCount.length ? byCount : prevColors).slice(0, SHELF_MAX_COLORS),
+    waiting: Number.isFinite(old.waiting) ? old.waiting : 0,
+    nextSpilloverAt: Number.isFinite(old.nextSpilloverAt) ? old.nextSpilloverAt : 0,
+    pausedRemainingMs: Number.isFinite(old.pausedRemainingMs) ? old.pausedRemainingMs : 0,
+  };
+  delete shelf.rowLabels;
+  st.shelf = shelf;
+  if (!isPlainObject(st.stats)) st.stats = {};
+  if (!(Number(st.stats.firstBottleAt) > 0)) {
+    st.stats.firstBottleAt = items.some((c) => Number(c.tier) >= 3) ? (Number(savedAt) > 0 ? Number(savedAt) : 1) : 0;
+  }
+  if (!Number.isFinite(st.nextMuddyAt)) st.nextMuddyAt = 0;
+  for (const b of Array.isArray(st.muddyBatches) ? st.muddyBatches : []) {
+    if (b && typeof b === 'object' && b.tier === undefined) b.tier = null;
+  }
 }
 
 function isPlainObject(x) {

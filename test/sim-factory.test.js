@@ -182,9 +182,10 @@ test('factory: buyRoom enforces colorsRequired, adds slots, gates phase 2', () =
   assert.equal(r1.ok, false);
   assert.equal(r1.reason, 'colors');
   assert.equal(s.coins, 1e6);
-  const extra = CATALOG.filter((c) => !s.catalog.discovered[c.id]).slice(0, 7);
+  // Mill Room: 15 colors (TUNING.md change 8; the Phase 2 gate's 10 colors is met first).
+  const extra = CATALOG.filter((c) => !s.catalog.discovered[c.id]).slice(0, 12);
   for (const c of extra) discover(s, { colorId: c.id, method: 'hunt' }, NOW);
-  assert.equal(Object.keys(s.catalog.discovered).length, 10);
+  assert.equal(Object.keys(s.catalog.discovered).length, 15);
   const r2 = buyRoom(s, { id: 'mill-room' }, NOW);
   assert.equal(r2.ok, true);
   assert.equal(s.stations.mixers.length, 3, 'two at the start + the Mill Room');
@@ -291,4 +292,144 @@ test('factory: a boost that ends mid-tick only counts until it ends', () => {
   const out = tickFactory(s, NOW + HOUR);
   assert.ok(Math.abs(out.produced - base * (2 * 600 + 3000)) < 1e-6, `${out.produced}`);
   assert.equal(s.boosts.length, 0, 'expired boosts are cleared');
+});
+
+// ---------------------------------------------------------------------------
+// Muddy batches (v0.2 Theme C): a production-time clock, backlog 10, offline 3
+// ---------------------------------------------------------------------------
+
+import {
+  MUDDY_PENDING_MAX, MUDDY_OFFLINE_MAX, MUDDY_WINDOW_MS, purifyBatch, sellMuddyBatch, sellAllMuddy, muddyValue,
+} from '../src/sim/factory.js';
+import { catchUp } from '../src/sim/offline.js';
+import { isAllCaughtUp, pendingItems, buildReturnSummary, snapshot } from '../src/sim/ledger.js';
+import { TIERS as PURIFY_TIERS } from '../src/puzzles/purify.js';
+
+function muddyState(seed = 3) {
+  const s = orangeState(seed);
+  s.onboarding.done = true; // the tutorial grace period is over
+  assert.equal(assignRecipe(s, { mixer: 1, colorId: 'madder' }).ok, true);
+  s.stations.mixers.forEach((m) => { m.level = 20; }); // fast mixers: the old per-batch roll flooded here
+  s.cellarLevel = 400; // storage never fills: production runs the whole time
+  return s;
+}
+
+test('muddy: over 8 hours of play, at most one batch per 2 minutes and never more than 10 waiting', () => {
+  const s = muddyState();
+  const spawned = [];
+  let t = NOW;
+  let maxPending = 0;
+  for (let k = 1; k <= 8 * 360; k++) { // 10-second ticks
+    t = NOW + k * 10e3;
+    const before = new Set(s.muddyBatches.map((b) => b.id));
+    tickFactory(s, t);
+    for (const b of s.muddyBatches) if (!before.has(b.id)) spawned.push(b);
+    maxPending = Math.max(maxPending, s.muddyBatches.length);
+    // She sorts the backlog now and then (every 40 minutes), but not always.
+    if (k % 240 === 0 && k < 6 * 360) sellAllMuddy(s, {}, t);
+  }
+  assert.ok(maxPending <= MUDDY_PENDING_MAX, `pending ${maxPending}`);
+  assert.equal(maxPending, MUDDY_PENDING_MAX, 'the backlog does reach its cap when left alone');
+  assert.ok(spawned.length <= (8 * 60) / 2, `at most one per 2 min (got ${spawned.length})`);
+  assert.ok(spawned.length >= 20, `purify stays frequent (got ${spawned.length})`);
+  for (let i = 1; i < spawned.length; i++) {
+    assert.ok(spawned[i].at - spawned[i - 1].at >= MUDDY_WINDOW_MS.min - 1, `gap ${spawned[i].at - spawned[i - 1].at}`);
+  }
+  for (const b of spawned) {
+    assert.equal(b.tier, null, 'tier chosen when she opens it');
+    assert.ok(b.jars > 0 && b.value > 0);
+    assert.ok(['orange', 'madder'].includes(b.color));
+  }
+});
+
+test('muddy: nothing spawns while no mixer produces; the clock counts production time only', () => {
+  const s = createInitialState(NOW, 4);
+  tickFactory(s, NOW + 2 * HOUR);
+  assert.equal(s.muddyBatches.length, 0);
+  assert.equal(s.nextMuddyAt, 0);
+  const m = muddyState(5);
+  tickFactory(m, NOW + 1000);
+  const due = m.nextMuddyAt;
+  assert.ok(due >= NOW + MUDDY_WINDOW_MS.min && due <= NOW + 1000 + MUDDY_WINDOW_MS.max);
+  m.stations.mixers.forEach((x) => { x.recipe = null; });
+  tickFactory(m, NOW + 1000 + HOUR);
+  assert.equal(m.muddyBatches.length, 0, 'an idle hour adds nothing');
+  assert.ok(Math.abs(m.nextMuddyAt - (due + HOUR)) < 1, 'the idle hour pushed the clock back');
+});
+
+test('muddy: an offline catch-up adds at most 3 batches', () => {
+  const s = muddyState(8);
+  tickFactory(s, NOW + 1000);
+  s.lastSeenAt = NOW + 1000;
+  const summary = catchUp(s, NOW + 3 * DAY);
+  assert.ok(summary);
+  assert.equal(s.muddyBatches.length, MUDDY_OFFLINE_MAX);
+  // A one-hour absence: still 3 at most.
+  sellAllMuddy(s, {}, NOW + 3 * DAY);
+  catchUp(s, NOW + 3 * DAY + HOUR);
+  assert.ok(s.muddyBatches.length <= MUDDY_OFFLINE_MAX);
+  // Live play after the return keeps the 2-3 minute pace.
+  const n = s.muddyBatches.length;
+  for (let k = 1; k <= 60; k++) tickFactory(s, NOW + 3 * DAY + HOUR + k * 10e3);
+  assert.ok(s.muddyBatches.length - n <= 5 && s.muddyBatches.length - n >= 3, `${s.muddyBatches.length - n} in 10 minutes`);
+});
+
+test('muddy: purifyBatch sets purity by tier and pays the puzzle reward', () => {
+  const expectPurity = { relaxed: 'pure', steady: 'pure', tricky: 'flawless', master: 'flawless' };
+  for (const tier of Object.keys(PURIFY_TIERS)) {
+    const s = muddyState(11);
+    s.muddyBatches = [{ id: 'b', color: 'orange', jars: 5, value: 1, at: NOW, tier: null }];
+    const reward = puzzleReward(s, tier, { k: PURIFY_TIERS[tier].k, now: NOW });
+    const coins = s.coins;
+    const before = s.stock.orange ? s.stock.orange.purity[expectPurity[tier]] : 0;
+    const r = purifyBatch(s, { batchId: 'b', tier }, NOW);
+    assert.equal(r.ok, true);
+    assert.equal(r.purity, expectPurity[tier]);
+    assert.equal(r.tier, tier);
+    assert.ok(reward > 0);
+    assert.ok(close(r.reward, reward, 1e-9));
+    assert.ok(close(s.coins - coins, r.coins, 1e-9));
+    assert.ok(r.coins >= reward - 1e-9);
+    assert.ok(close(s.stock.orange.purity[expectPurity[tier]] - before, 5, 1e-9), tier);
+    assert.equal(s.muddyBatches.length, 0);
+  }
+  // Bigger tiers pay more minutes.
+  const s = muddyState(12);
+  const ks = Object.keys(PURIFY_TIERS).map((t) => puzzleReward(s, t, { k: PURIFY_TIERS[t].k, now: NOW }));
+  for (let i = 1; i < ks.length; i++) assert.ok(ks[i] >= ks[i - 1]);
+  assert.equal(purifyBatch(s, { batchId: 'missing', tier: 'relaxed' }, NOW).ok, false);
+});
+
+test('muddy: sellAllMuddy sells every batch as is in one go', () => {
+  const s = muddyState(13);
+  s.muddyBatches = [
+    { id: 'a', color: 'orange', jars: 5, value: 0, at: NOW, tier: null },
+    { id: 'b', color: 'madder', jars: 3, value: 0, at: NOW, tier: null },
+  ];
+  s.activePuzzles = { purify: { batchId: 'a' } };
+  const total = muddyValue(s, NOW);
+  const expect = (5 * colorPrice(s, 'orange', 'muddy') + 3 * colorPrice(s, 'madder', 'muddy')) * incomeMultiplier(s, NOW);
+  assert.ok(close(total, expect, 1e-9));
+  const coins = s.coins;
+  const r = sellAllMuddy(s, {}, NOW);
+  assert.deepEqual({ ok: r.ok, batches: r.batches, jars: r.jars }, { ok: true, batches: 2, jars: 8 });
+  assert.ok(close(r.coins, expect, 1e-9));
+  assert.ok(close(s.coins - coins, expect, 1e-9));
+  assert.deepEqual(s.muddyBatches, []);
+  assert.equal(s.activePuzzles.purify, null);
+  assert.equal(sellAllMuddy(s, {}, NOW).ok, false);
+  assert.equal(sellMuddyBatch(s, { batchId: 'a' }, NOW).ok, false);
+});
+
+test('muddy: waiting batches never block All caught up; the Ledger line is optional', () => {
+  const s = createInitialState(NOW, 14);
+  s.muddyBatches = [1, 2, 3].map((i) => ({ id: `m${i}`, color: 'madder', jars: 5, value: 4, at: NOW, tier: null }));
+  assert.ok(!pendingItems(s).includes('muddy'));
+  assert.equal(isAllCaughtUp(s), true);
+  const before = snapshot(s);
+  const summary = buildReturnSummary(s, before, NOW + HOUR);
+  const line = summary.lines.find((l) => l.icon === 'tube');
+  assert.ok(line, 'the Ledger still mentions them');
+  assert.equal(line.text, '3 muddy batches to sort, if you like');
+  assert.equal(line.optional, true);
 });

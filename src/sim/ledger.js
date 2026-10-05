@@ -150,7 +150,8 @@ export function buildReturnSummary(state, before, now = 0) {
   const accidents = ((state.stations && state.stations.mixers) || []).filter((m) => m && m.accident).length;
   if (accidents) lines.push({ icon: 'sparkle', text: accidents === 1 ? 'A happy accident is waiting at a mixer' : `${accidents} happy accidents are waiting`, screen: 'workshop', params: { panel: 'mixers' } });
   const muddy = (state.muddyBatches || []).length;
-  if (muddy) lines.push({ icon: 'tube', text: muddy === 1 ? 'A batch is ready to purify' : `${muddy} batches are ready to purify`, screen: 'puzzles', params: { puzzle: 'purify' } });
+  // Optional work: never blocks All caught up (docs/PLAN-v0.2.md Theme C amendments).
+  if (muddy) lines.push({ icon: 'tube', text: muddyLine(muddy), screen: 'puzzles', params: { puzzle: 'purify' }, optional: true });
   const qr = questsReady(state);
   if (qr) lines.push({ icon: 'quest', text: qr === 1 ? 'A quest is ready to claim' : `${qr} quests are ready to claim`, screen: 'quests' });
   const steps = claimableSteps(state).length;
@@ -333,14 +334,21 @@ export function almostThere(state, now = state.lastTick ?? 0) {
 // All caught up
 // ---------------------------------------------------------------------------
 
-/** pendingItems(state) — little things still waiting for a tap. */
+/** The Ledger's muddy line: "3 muddy batches to sort, if you like". */
+export function muddyLine(n) {
+  return n === 1 ? 'A muddy batch to sort, if you like' : `${n} muddy batches to sort, if you like`;
+}
+
+/**
+ * pendingItems(state) — little things still waiting for a tap. Muddy batches
+ * are optional work and never count (they never block All caught up).
+ */
 export function pendingItems(state) {
   const out = [];
   if (state.ledger && state.ledger.pending) out.push('ledger');
   if (questsReady(state)) out.push('quests');
   if (claimableSteps(state).length) out.push('event');
   if (((state.stations && state.stations.mixers) || []).some((m) => m && m.accident)) out.push('accident');
-  if ((state.muddyBatches || []).length) out.push('muddy');
   if (state.gallery && state.gallery.collectorOffer) out.push('collector');
   return out;
 }

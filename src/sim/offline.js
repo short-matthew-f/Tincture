@@ -11,6 +11,8 @@ export const CATCH_UP_MIN_MS = 60e3;
 /**
  * catchUp(state, now) -> LedgerSummary | null. Runs only when she has been away at
  * least a minute; stores the summary in state.ledger.pending and stamps lastSeenAt.
+ * The one tick adds at most factory.MUDDY_OFFLINE_MAX (3) muddy batches: a
+ * return opens on a pleasant job, not a wall of ten (PLAN-v0.2 Theme C).
  */
 export function catchUp(state, a, b) {
   const now = typeof a === 'number' ? a : b;
@@ -30,7 +32,7 @@ export function catchUp(state, a, b) {
 /**
  * shiftClock(state, ms) -> state. Moves every saved moment and schedule `ms`
  * into the past: the loop clocks (lastTick, lastSeenAt) and everything that
- * waits on an absolute time (order refresh and Order Clerk, shelf spillover,
+ * waits on an absolute time (order refresh and Order Clerk, shelf spillover, muddy clock,
  * collector visit and offer, gallery admission, hunter trips and scouting
  * calls, fleet trips, Rush cooldowns, boosts, the coach-mark gap).
  *
@@ -48,6 +50,7 @@ export function shiftClock(state, ms) {
   back(state.orders, 'nextRefreshAt');
   back(state.orders, 'nextClerkAt');
   back(state.shelf, 'nextSpilloverAt');
+  back(state, 'nextMuddyAt');
   back(state.gallery, 'nextCollectorAt');
   back(state.gallery, 'lastAdmissionAt');
   back(state.gallery && state.gallery.collectorOffer, 'until');

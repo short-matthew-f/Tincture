@@ -287,11 +287,12 @@ test('matching blend, any-you-love and bouquet', () => {
 // Purify
 // ---------------------------------------------------------------------------
 
-/** DFS tube-sort solver with visited-state hashing. Returns moves or null. */
+/** DFS tube-sort solver with visited-state hashing. Returns moves or null.
+ *  Strict goal (v0.2): every non-empty tube full and one color (corked). */
 function solveTubes(p, nodeCap = 200000) {
   const cap = p.capacity;
   const key = (tubes) => tubes.map((t) => t.join(',')).sort().join('|');
-  const solved = (tubes) => tubes.every((t) => t.every((c) => c === t[0]));
+  const solved = (tubes) => tubes.every((t) => !t.length || (t.length === cap && t.every((c) => c === t[0])));
   const seen = new Set();
   let nodes = 0;
   const path = [];
@@ -347,10 +348,34 @@ test('purify sizes scale with batch value', () => {
   }
 });
 
-test('purify: 50 instances per size are valid and solvable', () => {
-  for (let colors = 4; colors <= 9; colors++) {
-    for (let s = 0; s < 50; s++) {
-      const p = purify.create({ colors, tubes: colors + 2, capacity: 4 }, mulberry32(colors * 1000 + s), { palette: PALETTE });
+test('purify tiers: sizes, expected minutes, rewards and the extra-tube rule', () => {
+  assert.deepEqual(Object.keys(purify.TIERS), ['relaxed', 'steady', 'tricky', 'master']);
+  assert.deepEqual(purify.sizeForTier('relaxed'), { colors: 4, tubes: 6 });
+  assert.deepEqual(purify.sizeForTier('steady'), { colors: 6, tubes: 8 });
+  assert.deepEqual(purify.sizeForTier('tricky'), { colors: 8, tubes: 10 });
+  assert.deepEqual(purify.sizeForTier('master'), { colors: 9, tubes: 11 });
+  assert.deepEqual(purify.sizeForTier('nope'), { colors: 4, tubes: 6 });
+  assert.deepEqual(['relaxed', 'steady', 'tricky', 'master'].map(purify.expectedMinutes), [1, 2, 3, 5]);
+  assert.deepEqual(Object.values(purify.TIERS).map((t) => t.purity), ['pure', 'pure', 'flawless', 'flawless']);
+  assert.deepEqual(Object.values(purify.TIERS).map((t) => t.k), [4, 6, 10, 16]);
+  for (const tier of purify.TIER_IDS) {
+    const p = purify.createForTier(tier, mulberry32(7), { palette: PALETTE });
+    assert.equal(p.tier, tier);
+    assert.equal(p.colors.length, purify.TIERS[tier].colors);
+    assert.equal(p.tubes.length, purify.TIERS[tier].tubes);
+    const n = p.tubes.length;
+    const r = purify.addTube(p);
+    assert.equal(r.ok, tier === 'relaxed', `extra tube on ${tier}`);
+    assert.equal(p.tubes.length, tier === 'relaxed' ? n + 1 : n);
+    assert.equal(purify.apply(p, { addTube: true }).events[0], 'refused');
+  }
+});
+
+test('purify: 30 instances per tier are valid and solvable to the strict rule', () => {
+  for (const tier of ['relaxed', 'steady', 'tricky', 'master']) {
+    const colors = purify.TIERS[tier].colors;
+    for (let s = 0; s < 30; s++) {
+      const p = purify.createForTier(tier, mulberry32(colors * 1000 + s), { palette: PALETTE });
       assert.equal(p.tubes.length, colors + 2);
       assert.equal(p.colors.length, colors);
       assert.equal(new Set(p.colors).size, colors);
@@ -404,9 +429,13 @@ test('purify pour, undo, addTube and isSolved', () => {
   assert.equal(p.extraTubeUsed, true);
   assert.equal(purify.addTube(p).ok, false);
 
-  const solved = { tubes: [[0, 0, 0, 0], [1, 1, 1, 1], [], [2, 2]], capacity: 4, colors: [], history: [], moves: 0, extraTubeUsed: false };
+  const solved = { tubes: [[0, 0, 0, 0], [1, 1, 1, 1], [], [2, 2, 2, 2]], capacity: 4, colors: [], history: [], moves: 0, extraTubeUsed: false };
   assert.equal(purify.isSolved(solved), true);
-  solved.tubes[2] = [2];
+  assert.equal(purify.isCorked(solved, 0), true);
+  assert.equal(purify.isCorked(solved, 2), false);
+  solved.tubes[2] = [2, 2];
+  solved.tubes[3] = [2, 2];
+  assert.equal(purify.isSolved(solved), false, 'one color split over two tubes: sorted but not corked');
   solved.tubes[3] = [2, 1];
   assert.equal(purify.isSolved(solved), false);
 
@@ -417,9 +446,13 @@ test('purify pour, undo, addTube and isSolved', () => {
   assert.equal(purify.pour(q, 0, 1).ok, false); // full
   assert.equal(purify.pour(q, 3, 0).ok, false); // empty source
   assert.equal(purify.pour(q, 1, 2).ok, false); // top colors differ
-  // Every non-empty tube is one color now (full is not required).
-  assert.deepEqual(purify.pour(q, 2, 3), { ok: true, moved: 1, completedTube: false, solved: true });
+  // Every non-empty tube is one color now, but not full: not solved (strict rule).
+  assert.deepEqual(purify.pour(q, 2, 3), { ok: true, moved: 1, completedTube: false, solved: false });
   assert.equal(q.moves, 2);
+  // Pour the lone 1s together and the 2 back: [[1,1], [0x4], [2], []] still open...
+  assert.deepEqual(purify.pour(q, 3, 0), { ok: true, moved: 1, completedTube: false, solved: false });
+  const done = { tubes: [[1, 1, 1], [0, 0, 0, 0], [1], []], capacity: 4, colors: [], history: [], moves: 0, extraTubeUsed: false };
+  assert.deepEqual(purify.pour(done, 2, 0), { ok: true, moved: 1, completedTube: true, solved: true });
 });
 
 // ---------------------------------------------------------------------------
