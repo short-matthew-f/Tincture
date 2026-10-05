@@ -101,17 +101,17 @@ A healthy game tells her when she's done. These moments give each session a sati
 
 ### First ten minutes
 
-The first session has to hook her fast and show the shape of the whole game.
+The first session has to hook her fast and show the shape of the whole game. Naming stays the high point, the third mixer is the new possibility, and the Merge Shelf is session two's landmark. Coins buy every new system, so the first session shows the prices and lets her feel the need; it never opens one for her.
 
-1. **0:00** She mixes her first orange for a customer and names it.
-2. **1:00** A Relaxed grading board reveals a tint.
-3. **3:00** First upgrades; the flow meter lights up its first bottleneck.
-4. **4:00** At 5 colors the Merge Shelf opens, seeded so her first drop triggers a chain merge.
-5. **6:00** The order board fills; the Mill Room goal (10 colors) appears.
-6. **8:00** Locked but visible: the hunters' map window and the Gallery door, each with its unlock goal.
-7. **9:00** Close up shop is introduced, ending the session on a promise.
+1. **0:00** The welcome card, then her first orange for a neighbor (a seeded madder + ochre order that pays a tutorial reward), and she names it. Naming is the app's ceremony; the script waits for it. Her orange goes straight onto Mixer 1, so the workshop earns from the first minute.
+2. **1:30** A Relaxed grading board in her own colors reveals one tint.
+3. **3:00** First upgrades: one bubble on the Next button, only once what it offers is affordable. Next always picks something she can do now.
+4. **4:30** The third mixer. When Next offers "Buy Mixer 3 for 60", one bubble says a third mixer means three colors at once; a new jar appears in the scene.
+5. **6:00** The order board fills, and from 6 colors the closed shelf starts collecting vials behind its glass. No bubble: the shelf's tag says "N vials waiting" and shows the price.
+6. **8:00** One quiet bubble on "Still to open" in Rooms & staff: the Mill Room goal (15 colors and 1,500 coins) and the map window and Gallery door tags, each with its price.
+7. **9:00** Close up shop appears at the foot of the Workshop, ending the session on a promise. Closing up finishes the tour.
 
-Target for the first ten minutes: 6 colors, 1 named color, 1 chain merge, about 10 upgrades.
+Target for the first ten minutes: 5 colors, 1 named color, 8 to 10 purchases including the third mixer, no shelf yet (it opens at 8 colors and 400 coins, usually in session two), and no more than 5 coach bubbles in all (at most 2 before her first action, at most 15 words each, every action step ending on its action). Nothing in the script blocks play; each subgame then teaches itself from its own unlock.
 
 ### Banned patterns
 
@@ -585,9 +585,11 @@ Each era plays out in three phases (Workshop, Factory, Commissions), and two lay
 
 | Phase | What changes | New systems | Gate to next phase | Era 1 target |
 | --- | --- | --- | --- | --- |
-| 1 Workshop | Everything by hand; a few colors; local orders | Matching, Grading, Mixing bench, Merge Shelf | 10 colors + Mill Room | First 1 to 2 sessions |
+| 1 Workshop | Everything by hand; a few colors; local orders | Matching, Grading, Mixing bench, Merge Shelf | 15 colors + Mill Room | First 1 to 2 sessions |
 | 2 Factory | Automation and shipping arrive | Fleet, routes, Purifying, Packing, apprentices, Hue Hunters, Gallery | 30 colors + Loading Yard | Days 1 to 3 |
 | 3 Commissions | Big multi-color projects; Renovate unlocks | Commissions, Atelier, Steward, event track | Era capstone commission | Days 3 to 10+ |
+
+The Mill Room gate is 15 colors + 1,500 coins (content `rooms.js`); buying it with 15 colors is the Phase 2 gate.
 
 Phase changes are Paperclips moments: a short illustrated beat, a new room opens, the HUD gains a panel.
 

@@ -16,6 +16,12 @@
  * collapses into one slip, and calls overlay.leaveScreen() whenever the top
  * screen changes so a toast never carries across a navigation.
  *
+ * Unlock purchases: an unlock that is a room (Gallery Wing, Loading Yard)
+ * drops its 'room' phase beat (the scene's unlock ceremony is the beat) and
+ * holds other beats until workshop.js emits 'unlocked'; 'unlocked' {id} then
+ * starts that subgame's guide (guide id = the unlock id; hunters also 'map',
+ * shipping also 'yard') when one is registered and not yet seen.
+ *
  * ctx.guide(id, steps, opts) is guide.js's guide() bound to ctx, with
  * ctx.guide.whatsNext(opts), .howThisWorks(id), .howThisWorksHtml(id),
  * .replay(id) and .isUp(). ctx.fx is fx.js (spring, lift, settle, drag,
@@ -259,8 +265,29 @@ async function boot() {
     return !!(top && CEREMONY_IDS.has(top.id));
   }
 
+  // An unlock that IS a room (Gallery Wing, Loading Yard) plays its own 1.5 s
+  // ceremony in the scene and then emits 'unlocked'. Its 'room' beat would
+  // repeat the "What this opens" sheet, so it is dropped, and any other beat the
+  // purchase raised (Phase 3 with the Loading Yard) waits until 'unlocked' (or
+  // UNLOCK_HOLD_MS, for a purchase made where no ceremony plays).
+  const ROOM_UNLOCKS = Object.freeze({ gallery: 'gallery-wing', shipping: 'loading-yard' });
+  const UNLOCK_HOLD_MS = 4000;
+  const unlockRooms = new Set();
+  let ceremonyHold = 0;
+  function holdCeremonies(ms) {
+    clearTimeout(ceremonyHold);
+    ceremonyHold = setTimeout(releaseCeremonies, ms);
+  }
+  function releaseCeremonies() {
+    unlockRooms.clear();
+    if (!ceremonyHold) return;
+    clearTimeout(ceremonyHold);
+    ceremonyHold = 0;
+    pumpCeremonies();
+  }
+
   function pumpCeremonies() {
-    if (ceremonyActive()) return;
+    if (ceremonyActive() || ceremonyHold) return;
     if (quietlyNamed && !ceremonyQueue.some((c) => c.screen === 'naming')) {
       const n = quietlyNamed;
       quietlyNamed = 0;
@@ -357,7 +384,30 @@ async function boot() {
   });
 
   game.on('phase', (p) => celebrate('phase', { phase: p.phase }));
-  game.on('room', (p) => celebrate('room', { id: p.id }));
+  game.on('unlock', (p) => {
+    const room = p && ROOM_UNLOCKS[p.id];
+    if (!room) return;
+    unlockRooms.add(room);
+    holdCeremonies(UNLOCK_HOLD_MS);
+  });
+  game.on('room', (p) => {
+    if (p && unlockRooms.delete(p.id)) return; // the unlock ceremony is the beat
+    celebrate('room', { id: p.id });
+  });
+  // After an unlock's ceremony (workshop.js emits 'unlocked' {id, object}):
+  // release held beats, then hand off to that subgame's guide, if one is
+  // registered and she has not seen it (it shows once she is on its screen).
+  const GUIDES_FOR_UNLOCK = Object.freeze({
+    shelf: ['shelf'], hunters: ['hunters', 'map'], gallery: ['gallery'], shipping: ['shipping', 'yard'], commissions: ['commissions'],
+  });
+  game.on('unlocked', (p) => {
+    releaseCeremonies();
+    const id = p && p.id;
+    for (const gid of GUIDES_FOR_UNLOCK[id] || (id ? [id] : [])) {
+      if (guides.isSeen(game.state, gid)) break;
+      if (guides.replay(gid)) break;
+    }
+  });
   game.on('renovate', (p) => celebrate('renovate', { heritage: p.heritage }));
 
   game.on('hunterReturn', (p, meta) => { if (!quiet(meta)) audio.knock(); });
@@ -433,6 +483,9 @@ async function boot() {
   game.on('import', (state) => {
     applySettings(state.settings, { audio, haptics });
     ceremonyQueue.length = 0;
+    unlockRooms.clear();
+    clearTimeout(ceremonyHold);
+    ceremonyHold = 0;
     quietlyNamed = 0;
     pendingLedger = null;
     router.navigate('workshop');

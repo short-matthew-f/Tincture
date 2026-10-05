@@ -262,14 +262,21 @@ function totalOwned(state) {
   return Object.values((state && state.album && state.album.cards) || {}).filter((x) => x.count > 0).length;
 }
 
+/** "Hunters open with the map window for 2.5K" (+ "3 more colors" until the price is revealed). */
+function huntersGoal(state) {
+  const u = ctx.sim.unlocks.status(state, 'hunters');
+  if (!u) return 'Hunters open with the map window';
+  const base = `Hunters open with the map window for ${ctx.format.num(u.cost)}`;
+  if (u.colorsLeft > 0) return `${base}: ${u.colorsLeft} more ${u.colorsLeft === 1 ? 'color' : 'colors'}`;
+  return base;
+}
+
 function emptyAlbumHtml(state) {
-  const U = ctx.sim.HUNTERS_UNLOCK_COLORS;
   const on = ctx.sim.hunters.unlocked(state);
   return h`<div class="card al-empty" data-empty>
     <div class="al-h">Hunters bring postcards home</div>
-    <div class="hint">${on ? 'Send one from the Map, and the first card lands here.' : 'Your first hunters arrive soon, and every trip can bring a card home.'}</div>
-    ${on ? button('Go to the Map', { variant: 'primary', attrs: { 'data-action': 'go-map' } })
-    : lockTag(`Hunters arrive at ${U} colors: ${Math.max(0, U - ctx.sim.discoveredCount(state))} more`)}
+    <div class="hint">${on ? 'Send one from the Map, and the first card lands here.' : 'Your first hunters set out from the map window, and every trip can bring a card home.'}</div>
+    ${on ? button('Go to the Map', { variant: 'primary', attrs: { 'data-action': 'go-map' } }) : lockTag(huntersGoal(state))}
   </div>`;
 }
 

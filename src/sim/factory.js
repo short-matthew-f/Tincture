@@ -638,7 +638,10 @@ export function addBoost(state, args = {}, now = 0) {
   return { ok: true, boost };
 }
 
-/** checkPhase(state) -> {phase, changed}. 2: 10 colors + Mill Room; 3: 30 colors + Loading Yard. */
+/**
+ * checkPhase(state) -> {phase, changed}. 2: 15 colors + Mill Room (PHASE_GATES asks 10, but the
+ * Mill Room itself needs 15 colors and 1,500 coins, so 15 is the real gate); 3: 30 colors + Loading Yard.
+ */
 export function checkPhase(state, args = {}, now = 0) { // eslint-disable-line no-unused-vars
   const before = state.phase ?? 1;
   let phase = before;
