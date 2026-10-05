@@ -142,3 +142,67 @@ export function fillTimeMs(state) {
 
 /** ARCHITECTURE.md alias. */
 export const fillTime = fillTimeMs;
+
+// ---------------------------------------------------------------------------
+// Shop keep reserve (docs/PLAN-v0.2.md Theme A.3, docs/V02-CONTRACTS.md)
+// ---------------------------------------------------------------------------
+
+/** Jars kept by default of a pinned color or one used by an unsigned painting. */
+export const DEFAULT_KEEP = 20;
+
+/** Colors the default rule keeps: pinned, or painted on a started (unsigned) piece. */
+function defaultKept(state) {
+  const out = new Set();
+  for (const id of state?.catalog?.pinned ?? []) if (typeof id === 'string') out.add(id);
+  for (const p of state?.gallery?.pieces ?? []) {
+    if (!p || p.signedAt) continue;
+    for (const c of Object.values(p.regions ?? {})) if (typeof c === 'string') out.add(c);
+  }
+  return out;
+}
+
+/**
+ * keepMap(state) -> {colorId: jars} for every color with a reserve above 0.
+ * Explicit `state.keep` entries override the default rule (0 turns it off).
+ * The shop and the Dispatcher never sell these jars.
+ */
+export function keepMap(state) {
+  const out = {};
+  for (const id of defaultKept(state)) out[id] = DEFAULT_KEEP;
+  const explicit = state?.keep;
+  if (explicit && typeof explicit === 'object') {
+    for (const [id, jars] of Object.entries(explicit)) {
+      if (!Number.isFinite(jars)) continue;
+      if (jars > 0) out[id] = jars;
+      else delete out[id];
+    }
+  }
+  return out;
+}
+
+/** keepOf(state, colorId) -> jars of that color the shop keeps (0 = sells it all). */
+export function keepOf(state, colorId) {
+  const e = state?.keep?.[colorId];
+  if (Number.isFinite(e)) return Math.max(0, e);
+  return defaultKept(state).has(colorId) ? DEFAULT_KEEP : 0;
+}
+
+/** Jars of a color above its keep reserve (what the shop / auto-ship may take). */
+export function sellableOf(state, colorId) {
+  return Math.max(0, stockOf(state, colorId) - keepOf(state, colorId));
+}
+
+/**
+ * setKeep(state, {colorId, jars}) -> {ok, colorId, jars}. A number ≥ 0 sets an
+ * explicit reserve (0 = sell it all); null/undefined goes back to the default
+ * rule (20 jars if pinned or on a started painting).
+ */
+export function setKeep(state, args = {}) {
+  const id = args.colorId;
+  if (!id || typeof id !== 'string') return { ok: false, reason: 'color' };
+  if (!state.keep || typeof state.keep !== 'object' || Array.isArray(state.keep)) state.keep = {};
+  if (args.jars === null || args.jars === undefined) delete state.keep[id];
+  else if (Number.isFinite(args.jars)) state.keep[id] = Math.max(0, Math.round(args.jars));
+  else return { ok: false, reason: 'jars' };
+  return { ok: true, colorId: id, jars: keepOf(state, id) };
+}

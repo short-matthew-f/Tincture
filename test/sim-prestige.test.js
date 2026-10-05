@@ -27,7 +27,7 @@ test('suggest renovating when gain beats half of current Heritage (Phase 3)', ()
   assert.equal(shouldSuggest(s), false);
 });
 
-test('renovate resets the factory and keeps catalog, gallery, essence, hunters', () => {
+test('renovate resets the factory and unlocks; keeps catalog, gallery pieces, essence, hunters', () => {
   const s = createInitialState(NOW, 4);
   s.phase = 3;
   s.coins = 123456;
@@ -43,6 +43,7 @@ test('renovate resets the factory and keeps catalog, gallery, essence, hunters',
   s.catalog.discovered.orange = { at: NOW, name: 'Sunrise', custom: true, essence: 1 };
   s.shelf.cells[0] = { color: 'madder', tier: 3, golden: false };
   s.gallery.unlocked = true;
+  s.unlocks = { shelf: true, hunters: true, gallery: true, shipping: false, commissions: true };
   s.gallery.canvases = ['harbor-window'];
   s.gallery.pieces = [{ id: 'p1', canvas: 'harbor-window', title: 'Dawn', regions: {}, signedAt: NOW, value: 100, hung: true }];
   s.gallery.hung = ['p1'];
@@ -61,14 +62,16 @@ test('renovate resets the factory and keeps catalog, gallery, essence, hunters',
   assert.deepEqual(s.rooms, ['bench']);
   assert.equal(s.stations.sources.madder.level, 1);
   assert.deepEqual(s.stations.sources.saffron, { level: 1 });
-  assert.equal(s.stations.mixers.length, 1);
+  assert.equal(s.stations.mixers.length, 2, 'a new run starts with two mixers');
   assert.deepEqual(s.stock, {});
+  assert.deepEqual(s.unlocks, { shelf: false, hunters: false, gallery: false, shipping: false, commissions: false });
+  assert.deepEqual(s.renovateReopen, ['shelf', 'hunters', 'gallery', 'commissions']);
   assert.equal(s.raw.madder, 0);
   assert.ok(s.shelf.cells.every((c) => c === null));
   // kept
   assert.equal(s.catalog.discovered.madder.essence, 3);
   assert.equal(s.catalog.discovered.orange.name, 'Sunrise');
-  assert.equal(s.gallery.unlocked, true);
+  assert.equal(s.gallery.unlocked, false, 'the Gallery closes with its unlock (mirror)');
   assert.equal(s.gallery.pieces.length, 1);
   assert.deepEqual(s.gallery.canvases, ['harbor-window']);
   assert.equal(s.gallery.walls, 8); // wall slots survive Renovate
@@ -76,7 +79,7 @@ test('renovate resets the factory and keeps catalog, gallery, essence, hunters',
   assert.equal(s.hunters.roster[0].level, 3);
   assert.ok(s.album.cards['meadow-1']);
   assert.equal(s.apprentices.orderClerk, true);
-  assert.ok(s._events.some((e) => e.type === 'renovate' && e.heritage === 6));
+  assert.ok(s._events.some((e) => e.type === 'renovate' && e.heritage === 6 && e.closed.length === 4));
   // not available before Phase 3
   assert.equal(renovate(s, NOW).ok, false);
 });
@@ -92,7 +95,7 @@ test('Heritage tree: buy nodes, starting bonuses apply on the next run', () => {
   assert.equal(buyHeritageNode(s, { id: 'trusted-clerk' }).reason, 'max');
   assert.equal(buyHeritageNode(s, { id: 'trusted-steward' }).reason, 'heritage');
   const fx = heritageEffects(s);
-  assert.deepEqual(fx, { startVats: 1, startCoins: 2500, startMixers: 0, phaseSpeed: 0, autoApprentices: ['orderClerk'] });
+  assert.deepEqual(fx, { startVats: 1, startCoins: 2500, startMixers: 0, phaseSpeed: 0, autoApprentices: ['orderClerk'], keepUnlocks: [] });
   s.phase = 3;
   s.runEarned = 0;
   renovate(s, NOW);

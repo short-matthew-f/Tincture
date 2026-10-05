@@ -72,7 +72,7 @@ test('rooms: ordered by cost ascending, spec numbers, slot caps', () => {
   const costs = ROOMS.map((r) => r.cost);
   assert.deepEqual(costs, [...costs].sort((a, b) => a - b));
   assert.equal(ROOMS[0].id, 'bench');
-  const expect = { 'mill-room': [500, 10], 'mixing-hall': [3000, 18], cellar: [12000, 24], 'loading-yard': [40000, 30], atelier: [150000, 45], 'gallery-wing': [8000, 20], 'long-hall': [60000, 40], rotunda: [400000, 70] };
+  const expect = { 'mill-room': [500, 10], 'mixing-hall': [3000, 18], cellar: [12000, 24], 'loading-yard': [40000, 35], atelier: [150000, 45], 'gallery-wing': [8000, 25], 'long-hall': [60000, 40], rotunda: [400000, 70] };
   for (const [id, [cost, colors]] of Object.entries(expect)) {
     assert.equal(getRoom(id).cost, cost, id);
     assert.equal(getRoom(id).colorsRequired, colors, id);
@@ -86,7 +86,9 @@ test('rooms: ordered by cost ascending, spec numbers, slot caps', () => {
   assert.equal(all.vats, MAX_SLOTS.vats);
   assert.equal(all.grinders, MAX_SLOTS.grinders);
   assert.ok(all.fleet <= MAX_SLOTS.fleet);
-  assert.equal(slotsForRooms(['bench']).mixers, 1);
+  assert.equal(slotsForRooms(['bench']).mixers, 2, 'two mixers from the start (v0.2)');
+  assert.equal(getRoom('gallery-wing').unlock, 'gallery', 'the Gallery Wing IS the gallery unlock');
+  assert.equal(getRoom('loading-yard').unlock, 'shipping', 'the Loading Yard IS the shipping unlock');
   for (const r of ROOMS) assert.ok([1, 2, 3].includes(r.phase));
 });
 
@@ -209,13 +211,14 @@ test('heritage: tree is well-formed, formula constants', () => {
   assert.equal(heritageForRun(0), 0);
   assert.ok(HERITAGE_TREE.length >= 8);
   const apprenticeIds = new Set(ids(APPRENTICES));
-  const effectKeys = ['startVats', 'startCoins', 'phaseSpeed', 'autoApprentice', 'startMixers'];
+  const effectKeys = ['startVats', 'startCoins', 'phaseSpeed', 'autoApprentice', 'startMixers', 'keepUnlock'];
   for (const n of HERITAGE_TREE) {
     assert.equal(n.cost.length, n.maxLevel, n.id);
     const keys = Object.keys(n.effect);
     assert.equal(keys.length, 1);
     assert.ok(effectKeys.includes(keys[0]), `${n.id}: ${keys[0]}`);
     if (keys[0] === 'autoApprentice') assert.ok(apprenticeIds.has(n.effect.autoApprentice));
+    if (keys[0] === 'keepUnlock') assert.ok(['shelf', 'hunters', 'gallery'].includes(n.effect.keepUnlock), n.id);
     for (let i = 1; i < n.cost.length; i++) assert.ok(n.cost[i] >= n.cost[i - 1]);
   }
 });

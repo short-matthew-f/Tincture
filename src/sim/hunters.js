@@ -32,7 +32,7 @@ export const HAUL_VIAL_CHANCE = 0.2;      // hauls sometimes include a vial of a
 export const SCHOLAR_TINT_DE = 8;         // Scholar reveals an undiscovered tint within this ΔE of a haul pigment
 export const SCOUT_AT = 0.4;
 const TINT_FOUND_BY = Object.freeze(['grade', 'mix']); // Scholar notes reveal grading/mixing cells only              // scouting choice radios in at 40% of a long/overnight trip
-export const HUNTERS_UNLOCK_COLORS = 10;  // end of Phase 1
+export const HUNTERS_UNLOCK_COLORS = 15;  // the map window's price shows at 15 colors (src/sim/unlocks.js)
 
 // ---------------------------------------------------------------------------
 // Shared catalog helpers (also used by the other sim modules in this folder).
@@ -132,9 +132,9 @@ function ensureHunters(state) {
   return state.hunters;
 }
 
-/** Hunters unlock at the end of Phase 1: phase >= 2 or 10 colors discovered. */
+/** Hunters are a coin-bought unlock (the map window, src/sim/unlocks.js): open once bought. */
 export function unlocked(state) {
-  return (state.phase ?? 1) >= 2 || discoveredCount(state) >= HUNTERS_UNLOCK_COLORS;
+  return !!state?.unlocks?.hunters;
 }
 
 function newHunterRecord(def) {

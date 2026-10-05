@@ -1,0 +1,791 @@
+{
+ "v": 1,
+ "savedAt": 1791032400000,
+ "state": {
+  "v": 1,
+  "seed": 1650653561,
+  "createdAt": 1791014400000,
+  "lastTick": 1791032400000,
+  "lastSeenAt": 1791032400000,
+  "settings": {
+   "sound": true,
+   "haptics": true,
+   "reducedMotion": "system",
+   "colorblind": false,
+   "notation": "short",
+   "disabledQuestTypes": [],
+   "notifyHunters": false,
+   "notifyVats": false,
+   "puzzleTier": {
+    "grading": "relaxed"
+   }
+  },
+  "onboarding": {
+   "step": 0,
+   "done": false,
+   "flags": {}
+  },
+  "era": 1,
+  "phase": 2,
+  "coins": 2437.96,
+  "seals": 0,
+  "heritage": 0,
+  "heritageSpent": {},
+  "runEarned": 2037.96,
+  "lifetime": {
+   "earned": 2037.96,
+   "puzzles": 0,
+   "discoveries": 9,
+   "renovations": 0
+  },
+  "rooms": [
+   "bench",
+   "mill-room"
+  ],
+  "stations": {
+   "sources": {
+    "madder": {
+     "level": 1
+    },
+    "ochre": {
+     "level": 1
+    },
+    "woad": {
+     "level": 1
+    }
+   },
+   "grinders": [
+    {
+     "kind": "mortar",
+     "level": 1
+    },
+    {
+     "kind": "mortar",
+     "level": 1
+    }
+   ],
+   "mixers": [
+    {
+     "recipe": "orange",
+     "level": 1,
+     "progress": 0,
+     "rushedAt": 0,
+     "accident": {
+      "kind": "tint",
+      "colorId": "autumn-harvest-7",
+      "hex": "#c16f00",
+      "at": 1791028800000
+     }
+    },
+    {
+     "recipe": "green",
+     "level": 1,
+     "progress": 1,
+     "rushedAt": 0,
+     "accident": null
+    }
+   ],
+   "vats": [
+    {
+     "level": 1,
+     "color": null
+    },
+    {
+     "level": 1,
+     "color": null
+    },
+    {
+     "level": 1,
+     "color": null
+    }
+   ],
+   "shop": {
+    "level": 1
+   },
+   "fleet": []
+  },
+  "cellarLevel": 1,
+  "raw": {
+   "madder": 24,
+   "ochre": 24,
+   "woad": 24
+  },
+  "pigment": {
+   "madder": 2.5,
+   "ochre": 5,
+   "woad": 2.5
+  },
+  "stock": {
+   "orange": {
+    "jars": 302.9318833125138,
+    "purity": {
+     "muddy": 0,
+     "standard": 302.9318833125138,
+     "pure": 0,
+     "flawless": 0
+    }
+   },
+   "green": {
+    "jars": 297.0681166874862,
+    "purity": {
+     "muddy": 0,
+     "standard": 297.0681166874862,
+     "pure": 0,
+     "flawless": 0
+    }
+   }
+  },
+  "catalog": {
+   "discovered": {
+    "madder": {
+     "at": 1791014400000,
+     "name": "Madder",
+     "custom": false,
+     "essence": 0
+    },
+    "ochre": {
+     "at": 1791014400000,
+     "name": "Ochre",
+     "custom": false,
+     "essence": 0
+    },
+    "woad": {
+     "at": 1791014400000,
+     "name": "Woad",
+     "custom": false,
+     "essence": 0
+    },
+    "orange": {
+     "at": 1791014400000,
+     "name": "Orange",
+     "custom": false,
+     "essence": 0
+    },
+    "green": {
+     "at": 1791014400000,
+     "name": "Green",
+     "custom": false,
+     "essence": 0
+    },
+    "violet": {
+     "at": 1791014400000,
+     "name": "Violet",
+     "custom": false,
+     "essence": 0
+    },
+    "olive": {
+     "at": 1791014400000,
+     "name": "Olive",
+     "custom": false,
+     "essence": 0
+    },
+    "marigold": {
+     "at": 1791014400000,
+     "name": "Marigold",
+     "custom": false,
+     "essence": 0
+    },
+    "teal": {
+     "at": 1791014400000,
+     "name": "Teal",
+     "custom": false,
+     "essence": 0
+    },
+    "rose": {
+     "at": 1791014400000,
+     "name": "Rose",
+     "custom": false,
+     "essence": 0
+    },
+    "sage": {
+     "at": 1791014400000,
+     "name": "Sage",
+     "custom": false,
+     "essence": 0
+    },
+    "rust": {
+     "at": 1791014400000,
+     "name": "Rust",
+     "custom": false,
+     "essence": 0
+    }
+   },
+   "pinned": []
+  },
+  "apprentices": {
+   "errandRunner": true,
+   "orderClerk": false,
+   "dispatcher": false,
+   "packer": false,
+   "steward": false
+  },
+  "stewardOn": false,
+  "orders": {
+   "open": [
+    {
+     "id": "o-m0mbq0pu",
+     "postedAt": 1791018000000,
+     "customer": "The Harvest Fair",
+     "minutes": 3.097338558640331,
+     "pay": 22.300837622210384,
+     "container": null,
+     "kind": "match",
+     "target": "#da9e5c",
+     "recipe": [
+      {
+       "pigment": "ochre",
+       "weight": 2
+      },
+      {
+       "pigment": "madder",
+       "weight": 1
+      },
+      {
+       "pigment": "white",
+       "weight": 2
+      }
+     ]
+    },
+    {
+     "id": "o-g9xbvoyk",
+     "postedAt": 1791018000000,
+     "customer": "Old Man Feeney",
+     "minutes": 3.9008830203674734,
+     "pay": 28.086357746645806,
+     "container": null,
+     "kind": "match",
+     "target": "#7a636f",
+     "recipe": [
+      {
+       "pigment": "madder",
+       "weight": 3
+      },
+      {
+       "pigment": "woad",
+       "weight": 3
+      },
+      {
+       "pigment": "white",
+       "weight": 1
+      }
+     ]
+    },
+    {
+     "id": "o-1rmi87js",
+     "postedAt": 1791018000000,
+     "customer": "The Toy Maker",
+     "minutes": 3.2899882877245545,
+     "pay": 23.687915671616793,
+     "container": null,
+     "kind": "match",
+     "target": "#ca762f",
+     "recipe": [
+      {
+       "pigment": "madder",
+       "weight": 1
+      },
+      {
+       "pigment": "ochre",
+       "weight": 2
+      }
+     ]
+    },
+    {
+     "id": "o-0xfpw17y",
+     "postedAt": 1791019200000,
+     "customer": "Widow Hollis",
+     "minutes": 3.857888257596642,
+     "pay": 27.77679545469582,
+     "container": null,
+     "kind": "match",
+     "target": "#8f8943",
+     "recipe": [
+      {
+       "pigment": "ochre",
+       "weight": 2
+      },
+      {
+       "pigment": "woad",
+       "weight": 1
+      }
+     ]
+    },
+    {
+     "id": "o-eulccioi",
+     "postedAt": 1791020400000,
+     "customer": "The Orchard House",
+     "minutes": 3.278494988102466,
+     "pay": 23.605163914337755,
+     "container": null,
+     "kind": "match",
+     "target": "#7c432b",
+     "recipe": [
+      {
+       "pigment": "ochre",
+       "weight": 1
+      },
+      {
+       "pigment": "madder",
+       "weight": 2
+      },
+      {
+       "pigment": "black",
+       "weight": 1
+      }
+     ]
+    },
+    {
+     "id": "o-1dpyomgf",
+     "postedAt": 1791021600000,
+     "customer": "Signwriter Pell",
+     "minutes": 3.2961486158892512,
+     "pay": 23.732270034402607,
+     "container": null,
+     "kind": "match",
+     "target": "#5983ae",
+     "recipe": [
+      {
+       "pigment": "woad",
+       "weight": 3
+      },
+      {
+       "pigment": "white",
+       "weight": 1
+      }
+     ]
+    }
+   ],
+   "nextRefreshAt": 1791033600000,
+   "reputation": 0,
+   "filledCount": 0
+  },
+  "muddyBatches": [
+   {
+    "id": "om7svrp3",
+    "color": "orange",
+    "jars": 5,
+    "value": 12.000000000000002,
+    "at": 1791018000000
+   },
+   {
+    "id": "ufvz6syo",
+    "color": "orange",
+    "jars": 5,
+    "value": 12.000000000000002,
+    "at": 1791018000000
+   },
+   {
+    "id": "let0cor6",
+    "color": "orange",
+    "jars": 5,
+    "value": 12.000000000000002,
+    "at": 1791018000000
+   },
+   {
+    "id": "nf5pk1mz",
+    "color": "orange",
+    "jars": 5,
+    "value": 12.000000000000002,
+    "at": 1791018000000
+   },
+   {
+    "id": "i5i9jh0h",
+    "color": "orange",
+    "jars": 5,
+    "value": 12.000000000000002,
+    "at": 1791028800000
+   },
+   {
+    "id": "aqfe57co",
+    "color": "orange",
+    "jars": 5,
+    "value": 12.000000000000002,
+    "at": 1791028800000
+   }
+  ],
+  "boosts": [],
+  "shelf": {
+   "cols": 5,
+   "rows": 7,
+   "cells": [
+    {
+     "color": "green",
+     "tier": 1,
+     "golden": false,
+     "boost": 1,
+     "unit": 1
+    },
+    {
+     "color": "orange",
+     "tier": 1,
+     "golden": false,
+     "boost": 1,
+     "unit": 1
+    },
+    {
+     "color": "orange",
+     "tier": 1,
+     "golden": false,
+     "boost": 1,
+     "unit": 1
+    },
+    {
+     "color": "green",
+     "tier": 1,
+     "golden": false,
+     "boost": 1,
+     "unit": 1
+    },
+    {
+     "color": "orange",
+     "tier": 1,
+     "golden": false,
+     "boost": 1,
+     "unit": 1
+    },
+    {
+     "color": "orange",
+     "tier": 1,
+     "golden": false,
+     "boost": 1,
+     "unit": 1
+    },
+    {
+     "color": "green",
+     "tier": 1,
+     "golden": false,
+     "boost": 1,
+     "unit": 1
+    },
+    {
+     "color": "green",
+     "tier": 1,
+     "golden": false,
+     "boost": 1,
+     "unit": 1
+    },
+    {
+     "color": "orange",
+     "tier": 1,
+     "golden": true,
+     "boost": 1,
+     "unit": 1
+    },
+    {
+     "color": "green",
+     "tier": 1,
+     "golden": false,
+     "boost": 1,
+     "unit": 1
+    },
+    {
+     "color": "orange",
+     "tier": 1,
+     "golden": false,
+     "boost": 1,
+     "unit": 1
+    },
+    {
+     "color": "orange",
+     "tier": 1,
+     "golden": false,
+     "boost": 1,
+     "unit": 1
+    },
+    {
+     "color": "green",
+     "tier": 1,
+     "golden": true,
+     "boost": 1,
+     "unit": 1
+    },
+    {
+     "color": "orange",
+     "tier": 1,
+     "golden": false,
+     "boost": 1,
+     "unit": 1
+    },
+    {
+     "color": "green",
+     "tier": 1,
+     "golden": false,
+     "boost": 1,
+     "unit": 1
+    },
+    {
+     "color": "green",
+     "tier": 1,
+     "golden": false,
+     "boost": 1,
+     "unit": 1
+    },
+    {
+     "color": "orange",
+     "tier": 1,
+     "golden": false,
+     "boost": 1,
+     "unit": 1
+    },
+    {
+     "color": "green",
+     "tier": 1,
+     "golden": false,
+     "boost": 1,
+     "unit": 1
+    },
+    {
+     "color": "orange",
+     "tier": 1,
+     "golden": false,
+     "boost": 1,
+     "unit": 1
+    },
+    {
+     "color": "orange",
+     "tier": 1,
+     "golden": false,
+     "boost": 1,
+     "unit": 1
+    },
+    {
+     "color": "green",
+     "tier": 2,
+     "golden": false,
+     "boost": 1,
+     "unit": 1
+    },
+    {
+     "color": "green",
+     "tier": 1,
+     "golden": false,
+     "boost": 1,
+     "unit": 1
+    },
+    {
+     "color": "orange",
+     "tier": 1,
+     "golden": true,
+     "boost": 1,
+     "unit": 1
+    },
+    {
+     "color": "green",
+     "tier": 1,
+     "golden": false,
+     "boost": 1,
+     "unit": 1
+    },
+    {
+     "color": "orange",
+     "tier": 1,
+     "golden": false,
+     "boost": 1,
+     "unit": 1
+    },
+    {
+     "color": "orange",
+     "tier": 1,
+     "golden": false,
+     "boost": 1,
+     "unit": 1
+    },
+    {
+     "color": "green",
+     "tier": 1,
+     "golden": false,
+     "boost": 1,
+     "unit": 1
+    },
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "rowLabels": [
+    "orange",
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+   ],
+   "nextSpilloverAt": 1791033000000,
+   "pausedRemainingMs": 0
+  },
+  "gallery": {
+   "unlocked": false,
+   "canvases": [],
+   "pieces": [],
+   "walls": 4,
+   "hung": [],
+   "taste": null,
+   "nextCollectorAt": 0,
+   "collectorOffer": null,
+   "lastAdmissionAt": 1791032400000
+  },
+  "hunters": {
+   "roster": [
+    {
+     "id": "wren",
+     "name": "Wren",
+     "trait": "botanist",
+     "trait2": null,
+     "level": 1,
+     "xp": 0,
+     "state": "out",
+     "trip": {
+      "region": "meadow",
+      "duration": "long",
+      "departedAt": 1791028800000,
+      "returnsAt": 1791043200000,
+      "choice": null,
+      "choiceOfferedAt": 1791034560000,
+      "scoutId": "river-or-ridge",
+      "choiceSeen": false
+     },
+     "pityStreak": 0,
+     "perks": [],
+     "lastHaul": null
+    }
+   ],
+   "regionsUnlocked": [
+    "meadow",
+    "orchard"
+   ]
+  },
+  "album": {
+   "cards": {},
+   "setsDone": []
+  },
+  "quests": {
+   "daily": [
+    {
+     "id": "2026-10-03-0-khxd4u2n",
+     "type": "name-color",
+     "event": "colorNamed",
+     "region": null,
+     "text": "Name 1 new color",
+     "target": 1,
+     "progress": 0,
+     "done": false,
+     "claimed": false,
+     "reward": {
+      "seals": 20,
+      "boostMin": 10
+     }
+    },
+    {
+     "id": "2026-10-03-1-u0z3hlrh",
+     "type": "buy-upgrades",
+     "event": "upgradeBought",
+     "region": null,
+     "text": "Buy 3 upgrades",
+     "target": 3,
+     "progress": 0,
+     "done": false,
+     "claimed": false,
+     "reward": {
+      "seals": 20,
+      "boostMin": 10
+     }
+    },
+    {
+     "id": "2026-10-03-2-y8xz3dr6",
+     "type": "merge-bottle",
+     "event": "merged",
+     "region": null,
+     "text": "Merge 2 Bottles",
+     "target": 2,
+     "progress": 0,
+     "done": false,
+     "claimed": false,
+     "reward": {
+      "seals": 20,
+      "boostMin": 10
+     }
+    }
+   ],
+   "dailyDate": "2026-10-03",
+   "rerollUsed": false,
+   "weekly": {
+    "id": "blue-hour",
+    "weekKey": "2026-W40",
+    "steps": [
+     {
+      "event": "colorDiscovered",
+      "n": 5,
+      "text": "Discover 5 new blues",
+      "progress": 0,
+      "done": false,
+      "family": "blue"
+     },
+     {
+      "event": "boardSolved",
+      "n": 2,
+      "text": "Solve 2 grading boards",
+      "progress": 0,
+      "done": false
+     },
+     {
+      "event": "orderFilled",
+      "n": 3,
+      "text": "Fill 3 orders",
+      "progress": 0,
+      "done": false
+     }
+    ],
+    "done": false,
+    "claimed": false,
+    "reward": {
+     "seals": 150,
+     "rare": "wild"
+    }
+   },
+   "weeklyKey": "2026-W40",
+   "bank": 0
+  },
+  "event": {
+   "key": "autumn-harvest",
+   "weekKey": "2026-W40",
+   "points": 0,
+   "claimed": [],
+   "region": "orchard"
+  },
+  "eventProgress": {
+   "autumn-harvest": {
+    "points": 0,
+    "claimed": []
+   }
+  },
+  "commissions": {
+   "open": [],
+   "done": []
+  },
+  "ledger": {
+   "pending": null,
+   "allCaughtUpAt": 1791014400000
+  },
+  "stats": {
+   "sessionStartedAt": 1791014400000,
+   "lastCloseUpAt": 0,
+   "fastSolves": 0
+  },
+  "activePuzzles": {},
+  "flags": {
+   "storageFull": false,
+   "accidentIn": 10694518.451672047,
+   "firstTickAt": 1791018000000
+  },
+  "pendingCollect": 0,
+  "discoveredMarkets": [],
+  "routesDiscovered": [],
+  "cosmetics": [],
+  "trophies": []
+ }
+}

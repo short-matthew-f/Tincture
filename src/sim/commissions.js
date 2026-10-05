@@ -36,8 +36,13 @@ export function capstoneDef(state) {
   return era ? getCommission(era.capstoneCommission) : null;
 }
 
+/** Commissions are a coin-bought unlock (Phase 3, src/sim/unlocks.js). */
+export function commissionsOpen(state) {
+  return (state?.phase ?? 1) >= 3 && !!state?.unlocks?.commissions;
+}
+
 /**
- * refresh(state, now) — keeps up to three commissions open (from Phase 3, by catalog
+ * refresh(state, now) — keeps up to three commissions open (once bought in Phase 3, by catalog
  * size), adding the era capstone on top when ~80% of the catalog is found.
  * Returns the ids added.
  */
@@ -46,7 +51,7 @@ export function refresh(state, now = 0) {
   // drop records whose content vanished between versions
   c.open = c.open.filter((x) => x && getCommission(x.id));
   const added = [];
-  if ((state.phase ?? 1) < 3) return added;
+  if (!commissionsOpen(state)) return added;
   const colors = discoveredCount(state);
   const taken = new Set([...c.open.map((x) => x.id), ...c.done]);
   const pool = availableCommissions({ era: state.era ?? 1, phase: state.phase ?? 3, colors })

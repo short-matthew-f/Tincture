@@ -17,7 +17,7 @@ import { eventPoints } from './events.js';
 import {
   colorPrice, colorFamily, incomeMultiplier, vehicleCapacity, vehicleTripMs, discoveredCount,
 } from './economy.js';
-import { takeStock, addStock, PURITY_ORDER } from './storage.js';
+import { takeStock, addStock, keepOf, PURITY_ORDER } from './storage.js';
 
 const DAY = 86400e3;
 const num = (x, d = 0) => (Number.isFinite(x) ? x : d);
@@ -51,8 +51,14 @@ export function discoverMarket(state, args = {}) {
   return { ok: true };
 }
 
-/** Routes open to her now. */
+/** Shipping is a coin-bought unlock: the Loading Yard (src/sim/unlocks.js). */
+export function shippingOpen(state) {
+  return !!state?.unlocks?.shipping;
+}
+
+/** Routes open to her now (none until the Loading Yard is bought). */
 export function availableRoutes(state, now = 0) { // eslint-disable-line no-unused-vars
+  if (!shippingOpen(state)) return [];
   const colors = discoveredCount(state);
   const markets = discoveredMarkets(state);
   return ROUTES.filter((r) => {
@@ -212,13 +218,15 @@ export function resolveTrips(state, now = 0) {
 function bestPicks(state, routeId, room, now) {
   const r = ROUTES_BY_ID[routeId];
   const d = currentDemand(state, routeId, now);
+  // Kept jars (storage.keepOf) never ship on their own.
   const list = Object.entries(state.stock ?? {})
-    .filter(([, e]) => num(e?.jars) > 0)
-    .map(([colorId, e]) => {
+    .map(([colorId, e]) => [colorId, Math.max(0, num(e?.jars) - keepOf(state, colorId))])
+    .filter(([, jars]) => jars > 0)
+    .map(([colorId, jars]) => {
       const fam = colorFamily(colorId);
       const on = r.any || r.palette.includes(fam);
       const score = (fam === d.family ? 2 : 0) + (on ? 1 : 0);
-      return { colorId, jars: e.jars, score, price: colorPrice(state, colorId) };
+      return { colorId, jars, score, price: colorPrice(state, colorId) };
     })
     .filter((x) => x.score > 0 || r.any)
     .sort((a, b) => b.score - a.score || b.price - a.price);

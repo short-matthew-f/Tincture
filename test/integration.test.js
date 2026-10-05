@@ -17,6 +17,7 @@ const WEEK = 7 * 86400e3;
 
 test('a market found by hunters (routesDiscovered) opens its route', () => {
   const s = createInitialState(NOW, 1);
+  s.unlocks.shipping = true; // the Loading Yard is bought (v0.2)
   const market = ROUTES.find((r) => r.unlock.type === 'discovered');
   assert.ok(market);
   assert.ok(!availableRoutes(s).some((r) => r.id === market.id));

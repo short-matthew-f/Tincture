@@ -6,7 +6,9 @@
 // are resolved explicitly below: `discoveredCount` (discovery), `ESSENCE_MAX` (economy).
 // `unlocked` exists in hunters and shelf, so it is NOT exported bare: use
 // `huntersUnlocked` / `shelfUnlocked`. Each module is also available as a namespace
-// (e.g. `hunters.send`, `shelf.unlocked`).
+// (e.g. `hunters.send`, `shelf.unlocked`, `unlocks.buy`). The coin-bought unlocks
+// (unlocks.js: UNLOCKS, status, canBuy, buy, batchRebuy, tierRevealed, ...) and
+// the workshop's single Next button (`next`, next.js) are exported bare too.
 
 import { currentEvent } from './events.js';
 import { rollDaily, rollWeekly } from './quests.js';
@@ -33,6 +35,8 @@ export * from './ledger.js';
 export * from './offline.js';
 export * from './closeUp.js';
 export * from './settings.js';
+export * from './unlocks.js';
+export { next, unlockLabel } from './next.js';
 export { emit } from './bus.js';
 
 export * as economy from './economy.js';
@@ -52,6 +56,7 @@ export * as ledger from './ledger.js';
 export * as offline from './offline.js';
 export * as closeUp from './closeUp.js';
 export * as settings from './settings.js';
+export * as unlocks from './unlocks.js';
 
 // Explicit resolutions of names exported by more than one module.
 export { unlocked as huntersUnlocked } from './hunters.js';

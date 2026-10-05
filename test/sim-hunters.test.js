@@ -15,15 +15,18 @@ const MIN = 60e3;
 function fresh(seed = 7) {
   const s = createInitialState(NOW, seed);
   s.phase = 2;
+  s.unlocks.hunters = true; // the map window is bought (v0.2)
   unlockRegions(s, {}, NOW);
   return s;
 }
 
-test('hunters unlock at the end of Phase 1 and Wren joins free', () => {
+test('hunters open when the map window is bought (not by phase) and Wren joins free', () => {
   const s = createInitialState(NOW, 1);
   assert.equal(unlocked(s), false);
   assert.deepEqual(unlockRegions(s, {}, NOW), []);
   s.phase = 2;
+  assert.equal(unlocked(s), false, 'Phase 2 no longer opens the map by itself');
+  s.unlocks.hunters = true;
   assert.equal(unlocked(s), true);
   unlockRegions(s, {}, NOW);
   assert.ok(s.hunters.roster.some((h) => h.id === 'wren'));

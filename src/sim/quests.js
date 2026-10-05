@@ -23,7 +23,7 @@ import {
 import { levelForXp, xpForLevel, perksAtLevel, LEVELS } from '../content/hunters.js';
 
 export const QUEST_BOOST_MULT = 0.5;  // the 10-minute production boost: +50%
-export const SHELF_UNLOCK_COLORS = 5; // the Merge Shelf opens at 5 colors
+export const SHELF_UNLOCK_COLORS = 8; // the Merge Shelf's price shows at 8 colors (it opens when bought)
 
 const fin = (x, d = 0) => (Number.isFinite(x) ? x : d);
 
@@ -37,18 +37,14 @@ function ensureQuests(state) {
   return q;
 }
 
-function colorCount(state) {
-  return Object.keys((state.catalog && state.catalog.discovered) || {}).length;
-}
-
 /** unlocksOf(state) -> {phase, hunters, gallery, shelf, fleet} for quest eligibility. */
 export function unlocksOf(state) {
   const shelfCells = state.shelf && Array.isArray(state.shelf.cells) ? state.shelf.cells : [];
   return {
     phase: state.phase ?? 1,
     hunters: huntersUnlocked(state),
-    gallery: !!(state.gallery && state.gallery.unlocked),
-    shelf: colorCount(state) >= SHELF_UNLOCK_COLORS || shelfCells.some((c) => c),
+    gallery: state.unlocks ? !!state.unlocks.gallery : !!(state.gallery && state.gallery.unlocked),
+    shelf: !!(state.unlocks && state.unlocks.shelf) || shelfCells.some((c) => c),
     fleet: !!(state.stations && Array.isArray(state.stations.fleet) && state.stations.fleet.length > 0),
   };
 }

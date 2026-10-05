@@ -459,9 +459,12 @@ export function switchTier(board, newTier, rng) {
   return next;
 }
 
-/** 1 (Relaxed/Steady) or 2 (Tricky/Master) in-between tints from the interior. */
+/** In-between tints a solved board reveals for discovery (v0.2: relaxed 1, steady 1, tricky 2, master 2). */
+export const REVEALED_TINTS = Object.freeze({ relaxed: 1, steady: 1, tricky: 2, master: 2 });
+
+/** REVEALED_TINTS[tier] in-between tints from the interior. */
 export function revealedTints(board, rng) {
-  const n = board.tier === 'tricky' || board.tier === 'master' ? 2 : 1;
+  const n = REVEALED_TINTS[board.tier] ?? 1;
   const corners = new Set(cornerCells(board.mask, board.cols, board.rows));
   const edges = new Set(inPlayEdges(board.mask, board.cols, board.rows));
   let pool = [];

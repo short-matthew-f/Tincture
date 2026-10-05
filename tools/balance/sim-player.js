@@ -23,7 +23,7 @@ import { getPigment } from '../../src/content/pigments.js';
 import { getCanvas } from '../../src/content/canvases.js';
 import { ROUTES_BY_ID } from '../../src/content/routes.js';
 
-const { economy, factory, storage, shelf, gallery, hunters, prestige, discovery, orders, shipping, closeUp } = sim;
+const { economy, factory, storage, shelf, gallery, hunters, prestige, discovery, orders, shipping, closeUp, unlocks } = sim;
 
 export const HOUR = 3600e3;
 export const DAY = 24 * HOUR;
@@ -67,19 +67,31 @@ export function offlineWindowMs(state) {
 function nextRoom(state) {
   const owned = new Set(state.rooms ?? []);
   for (const room of ROOMS) {
-    if (owned.has(room.id)) continue;
+    if (owned.has(room.id) || room.unlock) continue; // Gallery Wing / Loading Yard are unlocks (savingGoal)
     if ((state.phase ?? 1) < room.phase) continue;
     return room;
   }
   return null;
 }
 
-/** A purchase she is saving for (room with its color gate met, then the Dispatcher), or null. */
+/**
+ * A purchase she is saving for, or null: the cheapest of the next room with its
+ * color gate met, every coin-bought unlock whose colors (and phase) are met
+ * (v0.2, src/sim/unlocks.js: shelf, hunters, gallery, shipping, commissions) and
+ * the half-price re-buy after Renovate; then the Dispatcher.
+ */
 function savingGoal(state) {
+  const goals = [];
+  const rq = unlocks.rebuyQuote(state);
+  if (rq.ids.length) goals.push({ kind: 'rebuy', cost: rq.cost });
   const room = nextRoom(state);
   if (room && discovery.discoveredCount(state) >= room.colorsRequired) {
-    return { kind: 'room', id: room.id, cost: room.cost };
+    goals.push({ kind: 'room', id: room.id, cost: room.cost });
   }
+  for (const u of unlocks.statusAll(state)) {
+    if (u && !u.open && u.revealed) goals.push({ kind: 'unlock', id: u.id, cost: u.cost });
+  }
+  if (goals.length) return goals.sort((a, b) => a.cost - b.cost)[0];
   const disp = APPRENTICES_BY_ID.dispatcher;
   if ((state.stations.fleet ?? []).length && !state.apprentices?.dispatcher && (state.phase ?? 1) >= disp.phase) {
     return { kind: 'apprentice', id: 'dispatcher', cost: disp.cost };
@@ -88,6 +100,8 @@ function savingGoal(state) {
 }
 
 function buyGoal(state, goal, now) {
+  if (goal.kind === 'rebuy') return unlocks.batchRebuy(state, {}, now).ok;
+  if (goal.kind === 'unlock') return unlocks.buy(state, { id: goal.id }, now).ok;
   if (goal.kind === 'room') return factory.buyRoom(state, { id: goal.id }, now).ok;
   if (goal.kind === 'apprentice') return factory.buyApprentice(state, { id: goal.id }).ok;
   return false;
@@ -126,11 +140,12 @@ export function buyGreedy(state, now, ctx) {
       if (!ok) break; // saving for storage
       continue;
     }
-    // 2. Next room (or the Dispatcher once the fleet exists).
+    // 2. Saving goal: the re-buy, a room or an unlock whose colors are met (or the Dispatcher).
     const goal = savingGoal(state);
     if (goal) {
       if (state.coins >= goal.cost && buyGoal(state, goal, now)) {
         bought++;
+        if (ctx) ctx.buys[goal.kind] = (ctx.buys[goal.kind] ?? 0) + 1;
         assignRecipes(state, now);
         setRoutes(state, now);
         continue;
@@ -139,10 +154,19 @@ export function buyGreedy(state, now, ctx) {
     }
     // 3. Hunters: hire when affordable.
     if (hireHunters(state, ctx)) { bought++; continue; }
-    // 4. Bottleneck: the flow meter's suggestion.
-    let s = fm.suggestion;
-    if (!s || s.kind === 'assign') { assignRecipes(state, now); s = economy.cheapestUpgrade(state); }
-    if (s && s.kind === 'grinder') {
+    // 4. The workshop's single Next button (sim.next): unlocks, rooms, the flow
+    //    meter's suggestion, then the cheapest affordable upgrade.
+    let nx = sim.next(state, now);
+    if (nx.action.kind === 'assign') { assignRecipes(state, now); nx = sim.next(state, now); }
+    const a = nx.action;
+    if (a.kind === 'rebuy' && unlocks.batchRebuy(state, {}, now).ok) { bought++; continue; }
+    if (a.kind === 'unlock' && unlocks.buy(state, { id: a.id }, now).ok) { bought++; assignRecipes(state, now); continue; }
+    if (a.kind === 'room' && factory.buyRoom(state, { id: a.id }, now).ok) { bought++; assignRecipes(state, now); setRoutes(state, now); continue; }
+    // The greedy buyer saves for the bottleneck instead of taking next()'s
+    // "cheapest affordable upgrade" fallback (spec "Buying strategy").
+    if (a.kind !== 'upgrade' || nx.why !== 'bottleneck') break;
+    const s = { kind: a.upgrade, index: a.index, id: a.id, cost: nx.cost };
+    if (s.kind === 'grinder') {
       // A better grinder kind when it is affordable (Mortar → Millstone → Roller Mill).
       const g = state.stations.grinders.findIndex((x) => GRINDER_KINDS_BY_ID[x.kind]?.next);
       const def = g >= 0 ? GRINDER_KINDS_BY_ID[state.stations.grinders[g].kind] : null;
@@ -150,7 +174,7 @@ export function buyGreedy(state, now, ctx) {
         if (factory.upgradeGrinderKind(state, { index: g }).ok) { bought++; continue; }
       }
     }
-    if (s && Number.isFinite(s.cost) && state.coins >= s.cost && buyOption(state, s, now)) {
+    if (Number.isFinite(s.cost) && state.coins >= s.cost && buyOption(state, s, now)) {
       bought++;
       if (ctx) ctx.buys[s.kind] = (ctx.buys[s.kind] ?? 0) + 1;
       continue;

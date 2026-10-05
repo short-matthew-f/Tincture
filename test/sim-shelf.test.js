@@ -18,17 +18,20 @@ function shelfState() {
   discover(s, { colorId: 'orange', method: 'bench' }, NOW);
   const more = CATALOG.find((c) => !s.catalog.discovered[c.id]);
   discover(s, { colorId: more.id, method: 'hunt' }, NOW);
+  s.unlocks.shelf = true; // bought (v0.2: src/sim/unlocks.js)
   return s;
 }
 
 const vial = (color, tier = 1, extra = {}) => ({ color, tier, golden: false, boost: 1, unit: 10, ...extra });
 
-test('shelf: tiers and unlock at 5 colors', () => {
+test('shelf: tiers; open once bought, not by color count', () => {
   assert.deepEqual(TIERS.map((t) => t.id), ['vial', 'jar', 'bottle', 'urn', 'cask']);
   assert.deepEqual(TIER_VALUES, [1, 2.5, 6, 15, 40]);
   for (let t = 1; t < 5; t++) assert.ok(TIER_VALUES[t] > 2 * TIER_VALUES[t - 1], 'merging always pays');
   const s = createInitialState(NOW, 1);
   assert.equal(unlocked(s), false);
+  for (const c of CATALOG.slice(0, 20)) discover(s, { colorId: c.id, method: 'debug' }, NOW);
+  assert.equal(unlocked(s), false, 'colors only reveal the price');
   assert.equal(unlocked(shelfState()), true);
 });
 

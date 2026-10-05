@@ -18,7 +18,7 @@ import {
   rates, stationCost, colorPrice, incomeMultiplier, shopPriceBonus, grinderPurityBonus,
   essenceOf, recipeShares, colorDef, flowMeter, discoveredCount, ESSENCE_STEP,
 } from './economy.js';
-import { capacity, stockTotal, addStock, takeStock, convertPurity, PURITY_ORDER } from './storage.js';
+import { capacity, stockTotal, addStock, takeStock, convertPurity, keepMap, PURITY_ORDER } from './storage.js';
 import { resolveTrips, autoDispatch } from './shipping.js';
 import { tickSpillover } from './shelf.js';
 import { tickAdmission, unlock as unlockGallery } from './gallery.js';
@@ -28,7 +28,8 @@ export const MUDDY_BASE = 0.05;
 export const MUDDY_PER_LEVEL = 0.01;
 export const MUDDY_MAX = 0.5;
 export const MUDDY_PENDING_MAX = 6;
-export const ACCIDENT_MS = Object.freeze({ phase1: 3 * 3600e3, later: 6 * 3600e3 });
+/** Happy accidents: one per 4 h of production in Phase 1, 6 h later (v0.2 discovery slowdown). */
+export const ACCIDENT_MS = Object.freeze({ phase1: 4 * 3600e3, later: 6 * 3600e3 });
 export const ACCIDENT_TINT_DE = 8;
 export const RUSH_SECONDS = 60;
 export const SHOP_RESERVE_SHARE = 0.02;
@@ -118,7 +119,15 @@ function step(state, t0, t1) {
   const s = r.shop;
   const capInfo = capacity(state);
   const cap = capInfo.total;
-  const reserve = shopReserve(state, capInfo);
+  // Shop keep reserve (storage.keepMap): kept jars are never sold, so they add
+  // to the closed form's reserve (what each kept color will hold by t1, up to
+  // its keep); sales come out of each color's surplus above its keep.
+  const keeps = keepMap(state);
+  let locked = 0;
+  for (const [colorId, k] of Object.entries(keeps)) {
+    locked += Math.min(k, num(state.stock?.[colorId]?.jars) + num(r.byColor?.[colorId]) * dt);
+  }
+  const reserve = shopReserve(state, capInfo) + locked;
   const stock0 = stockTotal(state);
   const { produced: p0, sold: s0 } = flow(stock0, R, s, reserve, cap, dt);
   let produced = p0;
@@ -160,19 +169,27 @@ function step(state, t0, t1) {
     addStock(state, m.recipe, keep * (1 - pureShare), 'standard', { cap: false });
   });
 
-  // Shop sales: proportional to each color's stock, lowest purity first. Muddy
-  // batches set aside above come out of the shop's share, so stock lands
-  // exactly where the closed form says (keeps split ticks equal).
+  // Shop sales: proportional to each color's stock above its keep reserve,
+  // lowest purity first. Muddy batches set aside above come out of the shop's
+  // share, so stock lands exactly where the closed form says (keeps split
+  // ticks equal).
   let coins = 0;
   const total = stockTotal(state);
   const target = Math.max(0, stock0 + produced - sold);
-  sold = Math.max(0, Math.min(sold, total - target));
-  if (sold > 0 && total > 0) {
-    const share = Math.min(1, sold / total);
+  const surplus = {};
+  let pool = 0;
+  for (const colorId of Object.keys(state.stock ?? {})) {
+    const x = Math.max(0, num(state.stock[colorId].jars) - num(keeps[colorId]));
+    surplus[colorId] = x;
+    pool += x;
+  }
+  sold = Math.max(0, Math.min(sold, total - target, pool));
+  if (sold > 0 && pool > 0) {
+    const share = Math.min(1, sold / pool);
     const bonus = shopPriceBonus(state);
-    for (const colorId of Object.keys(state.stock)) {
-      const e = state.stock[colorId];
-      const got = takeStock(state, colorId, num(e.jars) * share, { prefer: 'low' });
+    for (const colorId of Object.keys(surplus)) {
+      if (!(surplus[colorId] > 0)) continue;
+      const got = takeStock(state, colorId, surplus[colorId] * share, { prefer: 'low' });
       for (const pur of PURITY_ORDER) if (got.byPurity[pur] > 0) coins += got.byPurity[pur] * colorPrice(state, colorId, pur) * bonus;
     }
     coins *= incomeMultiplier(state, t0);
@@ -200,7 +217,7 @@ function step(state, t0, t1) {
   if (!state.pigment) state.pigment = {};
   for (const [p, rate] of Object.entries(r.pigment)) state.pigment[p] = rate * MIXER.batchSeconds;
 
-  // Happy accidents: one per 3 h (Phase 1) / 2 h (later) of running production.
+  // Happy accidents: one per 4 h (Phase 1) / 6 h (later) of running production.
   if (R > 0) {
     const f = flags(state);
     const interval = (state.phase ?? 1) <= 1 ? ACCIDENT_MS.phase1 : ACCIDENT_MS.later;
@@ -424,7 +441,35 @@ export function syncSlots(state) {
   return slots;
 }
 
-/** buyRoom(state, {id}, now) -> {ok, reason?}. Needs Coins, catalog colors and the room's phase. */
+/**
+ * grantRoom(state, {id}, now) -> {ok, id}: the room is hers (slots, walls, the
+ * unlock it IS, phase check) with no price or gate checks. buyRoom and
+ * unlocks.buy / batchRebuy charge first and then call this.
+ */
+export function grantRoom(state, args = {}, now = 0) {
+  const room = ROOMS_BY_ID[args.id];
+  if (!room) return { ok: false, reason: 'unknown' };
+  if ((state.rooms ?? []).includes(room.id)) return { ok: false, reason: 'owned' };
+  state.rooms = [...(state.rooms ?? []), room.id];
+  syncSlots(state);
+  if (room.unlock) {
+    if (!state.unlocks || typeof state.unlocks !== 'object') state.unlocks = {};
+    const was = !!state.unlocks[room.unlock];
+    state.unlocks[room.unlock] = true;
+    if (Array.isArray(state.renovateReopen)) state.renovateReopen = state.renovateReopen.filter((x) => x !== room.unlock);
+    if (room.unlock === 'gallery') unlockGallery(state, {}, now);
+    if (!was) emit(state, 'unlock', { id: room.unlock });
+  }
+  emit(state, 'room', { id: room.id });
+  checkPhase(state, {}, now);
+  return { ok: true, id: room.id };
+}
+
+/**
+ * buyRoom(state, {id}, now) -> {ok, reason?}. Needs Coins, catalog colors and the
+ * room's phase. Gallery Wing and Loading Yard ARE the gallery / shipping unlocks
+ * (content rooms `unlock`): buying either opens that system, at the room's price.
+ */
 export function buyRoom(state, args = {}, now = 0) {
   const room = ROOMS_BY_ID[args.id];
   if (!room) return { ok: false, reason: 'unknown' };
@@ -434,12 +479,7 @@ export function buyRoom(state, args = {}, now = 0) {
   if ((state.phase ?? 1) < room.phase) return { ok: false, reason: 'phase', phase: room.phase };
   if (num(state.coins) < room.cost) return { ok: false, reason: 'coins', cost: room.cost };
   state.coins -= room.cost;
-  state.rooms = [...(state.rooms ?? []), room.id];
-  syncSlots(state);
-  if (room.adds.walls > 0 || room.id === 'gallery-wing') unlockGallery(state, {}, now);
-  emit(state, 'room', { id: room.id });
-  checkPhase(state, {}, now);
-  return { ok: true, id: room.id };
+  return grantRoom(state, args, now);
 }
 
 /** setVatColor(state, {vat, colorId}) — which stock a display vat shows. */

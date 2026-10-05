@@ -40,6 +40,7 @@ function busyState(seed = 11) {
   s._events = [];
   for (const id of ['mill-room', 'mixing-hall', 'cellar', 'loading-yard']) sim.buyRoom(s, { id }, T0);
   s.phase = 2;
+  s.unlocks.hunters = true; // the map window is bought (v0.2)
   sim.unlockRegions(s, {}, T0);
   for (const h of HUNTERS) sim.hunters.hire(s, { hunterId: h.id });
   s.stations.mixers.forEach((m, i) => {
@@ -74,7 +75,7 @@ test('a v1 save missing newer keys loads with every default (deep enough)', () =
   delete obj.state.pendingCollect;
   const back = deserialize(JSON.stringify(obj), T0);
   assert.equal(back.v, SAVE_VERSION);
-  assert.deepEqual(back.settings.puzzleTier, { grading: 'relaxed' });
+  assert.deepEqual(back.settings.puzzleTier, { grading: 'relaxed', purify: 'relaxed' });
   assert.deepEqual(back.activePuzzles, {});
   assert.equal(back.gallery.collectorOffer, null);
   assert.equal(back.gallery.nextCollectorAt, 0);
@@ -115,6 +116,7 @@ test('the clock moved back a day: production keeps flowing, trips keep their tim
   const game = new Game({ now: () => clock.t, storage, setInterval: () => 0, clearInterval: () => {}, setTimeout: () => 0, clearTimeout: () => {} });
   const s = game.state;
   s.phase = 2;
+  s.unlocks.hunters = true; // the map window is bought (v0.2)
   sim.unlockRegions(s, {}, T0);
   game.act(sim.discover, { colorId: 'orange', method: 'bench' });
   assert.equal(game.act(sim.assignRecipe, { mixer: 0, colorId: 'orange' }).ok, true);
@@ -268,6 +270,7 @@ test('puzzleReward is always a positive finite number', () => {
 test('map tab dot: a waiting scouting choice or an unread haul (a pure read)', () => {
   const s = createInitialState(T0, 12);
   s.phase = 2;
+  s.unlocks.hunters = true; // the map window is bought (v0.2)
   sim.unlockRegions(s, {}, T0);
   assert.deepEqual(sim.mapAttention(s, T0), { choices: 0, hauls: 0 });
   sim.send(s, { hunterId: 'wren', regionId: 'meadow', duration: 'long' }, T0);

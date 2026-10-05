@@ -73,10 +73,27 @@ function findPiece(state, pieceId) {
   return gal(state).pieces.find((p) => p.id === pieceId) ?? null;
 }
 
-/** unlock(state) — the Gallery Wing opens: starter canvases, 4 walls. Idempotent. */
+/**
+ * galleryOpen(state) — the Gallery is a coin-bought unlock (the Gallery Wing,
+ * src/sim/unlocks.js): reads state.unlocks.gallery. `gallery.unlocked` mirrors
+ * it (kept in step by unlock() and prestige.renovate); hand-built states with
+ * no `unlocks` block fall back to that mirror.
+ */
+export function galleryOpen(state) {
+  if (state?.unlocks && typeof state.unlocks === 'object') return !!state.unlocks.gallery;
+  return !!state?.gallery?.unlocked;
+}
+
+/**
+ * unlock(state) — the Gallery Wing opens: state.unlocks.gallery, starter
+ * canvases (first time only), 4 walls. Idempotent.
+ */
 export function unlock(state, args = {}, now = 0) { // eslint-disable-line no-unused-vars
   const g = gal(state);
-  if (g.unlocked) return { ok: false, already: true };
+  if (!state.unlocks || typeof state.unlocks !== 'object') state.unlocks = {};
+  const wasOpen = !!state.unlocks.gallery && g.unlocked;
+  state.unlocks.gallery = true;
+  if (wasOpen) return { ok: false, already: true };
   g.unlocked = true;
   let starters = [];
   try { starters = starterCanvases(); } catch { starters = []; }
@@ -100,7 +117,7 @@ export function addCanvas(state, args = {}) {
 /** startPiece(state, {canvasId}, now) -> {ok, pieceId}. */
 export function startPiece(state, args = {}, now = 0) {
   const g = gal(state);
-  if (!g.unlocked) return { ok: false, reason: 'locked' };
+  if (!galleryOpen(state)) return { ok: false, reason: 'locked' };
   if (!g.canvases.includes(args.canvasId) || !canvasDef(args.canvasId)) return { ok: false, reason: 'canvas' };
   const id = 'p-' + uuid(stateRng(state));
   g.pieces.push({ id, canvas: args.canvasId, title: '', regions: {}, purity: {}, jars: {}, paintRate: paintRate(state, now), startedAt: now, signedAt: 0, value: 0, hung: false });
@@ -268,7 +285,7 @@ export function tickAdmission(state, now = 0) {
   const g = gal(state);
   const last = num(g.lastAdmissionAt, num(state.lastTick, now));
   g.lastAdmissionAt = now;
-  if (!g.unlocked) return { coins: 0 };
+  if (!galleryOpen(state)) return { coins: 0 };
   g.taste = weeklyTaste(now);
   const dt = Math.max(0, now - last) / 1000;
   const coins = admissionRate(state, now) * dt;
@@ -299,7 +316,7 @@ function tickCollector(state, now) {
 
 /** collectorOffer(state, now) -> the visiting collector's offer {pieceId, pay, until} or null (schedules the next visit). */
 export function collectorOffer(state, now = 0) {
-  if (!gal(state).unlocked) return null;
+  if (!galleryOpen(state)) return null;
   tickCollector(state, now);
   return gal(state).collectorOffer ?? null;
 }

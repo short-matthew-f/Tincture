@@ -5,6 +5,9 @@
 // Rooms cost Coins plus a catalog requirement (colorsRequired). The array is
 // ordered by cost ascending (so Gallery Wing sits between Mixing Hall and Cellar).
 // adds: station slots / walls / cellar multiplier granted by the room.
+// unlock: the coin-bought system (src/sim/unlocks.js) this room IS. Buying the
+// room opens it, and its colorsRequired is that unlock's reveal count
+// (docs/V02-CONTRACTS.md "Unlocks": Gallery Wing 25, Loading Yard 35).
 
 const NONE = { mixerSlots: 0, vatSlots: 0, grinderSlots: 0, fleetSlots: 0, walls: 0, cellarMult: 1 };
 const adds = (o) => Object.freeze({ ...NONE, ...o });
@@ -16,11 +19,11 @@ export const ROOMS = Object.freeze([
     blurb: 'Stone floors and room for a second grinder and mixer.' },
   { id: 'mixing-hall', name: 'Mixing Hall', cost: 3000, colorsRequired: 18, phase: 2, adds: adds({ mixerSlots: 2, vatSlots: 3 }),
     blurb: 'High windows, long tables and three more tall glass vats.' },
-  { id: 'gallery-wing', name: 'Gallery Wing', cost: 8000, colorsRequired: 20, phase: 2, adds: adds({ walls: 4 }),
+  { id: 'gallery-wing', name: 'Gallery Wing', cost: 8000, colorsRequired: 25, phase: 2, unlock: 'gallery', adds: adds({ walls: 4 }),
     blurb: 'Quiet white walls, waiting for your first paintings.' },
   { id: 'cellar', name: 'Cellar', cost: 12000, colorsRequired: 24, phase: 2, adds: adds({ vatSlots: 3, cellarMult: 4 }),
     blurb: 'Cool, dark and deep: four times the storage for everything else.' },
-  { id: 'loading-yard', name: 'Loading Yard', cost: 40000, colorsRequired: 30, phase: 2, adds: adds({ fleetSlots: 3, mixerSlots: 1 }),
+  { id: 'loading-yard', name: 'Loading Yard', cost: 40000, colorsRequired: 35, phase: 2, unlock: 'shipping', adds: adds({ fleetSlots: 3, mixerSlots: 1 }),
     blurb: 'Carts, crates and the smell of rope. Time to ship.' },
   { id: 'long-hall', name: 'Long Hall', cost: 60000, colorsRequired: 40, phase: 3, adds: adds({ walls: 8 }),
     blurb: 'A long skylit hall with eight more walls to hang.' },
@@ -33,8 +36,8 @@ export const ROOMS = Object.freeze([
 /** Era 1 slot caps (spec "Stations" table). Fleet unlocks in Phase 2. */
 export const MAX_SLOTS = Object.freeze({ mixers: 6, vats: 12, grinders: 3, fleet: 6 });
 
-/** What the player owns before buying any room (spec "Stations": starts with). */
-export const STARTING_SLOTS = Object.freeze({ mixers: 1, vats: 3, grinders: 1, fleet: 0, walls: 0, cellarMult: 1 });
+/** What the player owns before buying any room (spec "Stations": starts with; two mixers since v0.2). */
+export const STARTING_SLOTS = Object.freeze({ mixers: 2, vats: 3, grinders: 1, fleet: 0, walls: 0, cellarMult: 1 });
 
 export const ROOMS_BY_ID = Object.freeze(Object.fromEntries(ROOMS.map((r) => [r.id, r])));
 export const byId = ROOMS_BY_ID;

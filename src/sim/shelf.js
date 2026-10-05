@@ -25,7 +25,12 @@ export const TIERS = Object.freeze([
 ]);
 export const TIER_VALUES = Object.freeze(TIERS.map((t) => t.value));
 export const MAX_TIER = 5;
-export const UNLOCK_COLORS = 5;
+/** The shelf's price shows at 8 colors (src/sim/unlocks.js); it opens when bought. */
+export const UNLOCK_COLORS = 8;
+/** Before the shelf is bought, spillover piles vials behind its glass from this many colors... */
+export const WAITING_FROM_COLORS = 6;
+/** ...up to this many (they become real vials when the shelf is bought). */
+export const WAITING_MAX = 12;
 export const SPILLOVER_MS = 10 * 60e3;
 export const SPILLOVER_SECONDS = 15;
 export const GOLDEN_CHANCE = 1 / 40;
@@ -38,7 +43,7 @@ export { ESSENCE_MAX };
 const num = (x, d = 0) => (Number.isFinite(x) ? x : d);
 
 function shelfOf(state) {
-  if (!state.shelf) state.shelf = { cols: 5, rows: 7, cells: new Array(35).fill(null), rowLabels: new Array(7).fill(null), nextSpilloverAt: 0 };
+  if (!state.shelf) state.shelf = { cols: 5, rows: 7, cells: new Array(35).fill(null), rowLabels: new Array(7).fill(null), colors: [], waiting: 0, nextSpilloverAt: 0 };
   const s = state.shelf;
   const n = s.cols * s.rows;
   if (!Array.isArray(s.cells)) s.cells = [];
@@ -48,9 +53,9 @@ function shelfOf(state) {
   return s;
 }
 
-/** The shelf opens at 5 catalog colors. */
+/** The Merge Shelf is a coin-bought unlock: open once bought (state.unlocks.shelf). */
 export function unlocked(state) {
-  return discoveredCount(state) >= UNLOCK_COLORS;
+  return !!state?.unlocks?.shelf;
 }
 
 export function tierValue(tier) {
@@ -94,12 +99,17 @@ export function addVial(state, args = {}) {
 }
 
 /**
- * tickSpillover(state, now) -> {added}. One vial per 10 minutes of production in
- * a random active (assigned) color; accumulates while away; stops when full.
+ * tickSpillover(state, now) -> {added, waiting}. One vial per 10 minutes of
+ * production in a random active (assigned) color; accumulates while away; stops
+ * when full. Before the shelf is bought (from WAITING_FROM_COLORS colors) the
+ * same timer piles vials behind the glass instead: `shelf.waiting` counts up to
+ * WAITING_MAX, and unlocks.buy('shelf') turns them into vials.
  */
 export function tickSpillover(state, now = 0) {
   const s = shelfOf(state);
-  if (!unlocked(state)) { s.nextSpilloverAt = 0; return { added: 0 }; }
+  const open = unlocked(state);
+  if (!Number.isFinite(s.waiting)) s.waiting = 0;
+  if (!open && discoveredCount(state) < WAITING_FROM_COLORS) { s.nextSpilloverAt = 0; return { added: 0, waiting: 0 }; }
   const r = rates(state);
   const active = Object.entries(r.byColor).filter(([, j]) => j > 0);
   if (!active.length) {
@@ -107,13 +117,24 @@ export function tickSpillover(state, now = 0) {
     // neither resets to a fresh 10 minutes every tick nor fires while idle.
     if (s.nextSpilloverAt > 0) s.pausedRemainingMs = Math.max(0, s.nextSpilloverAt - now);
     s.nextSpilloverAt = 0;
-    return { added: 0 };
+    return { added: 0, waiting: 0 };
   }
   if (!(s.nextSpilloverAt > 0)) {
     const remaining = s.pausedRemainingMs > 0 ? s.pausedRemainingMs : SPILLOVER_MS;
     s.pausedRemainingMs = 0;
     s.nextSpilloverAt = now + remaining;
-    return { added: 0 };
+    return { added: 0, waiting: 0 };
+  }
+  if (!open) {
+    let waiting = 0;
+    while (s.nextSpilloverAt <= now && s.waiting < WAITING_MAX) {
+      s.waiting++;
+      waiting++;
+      s.nextSpilloverAt += SPILLOVER_MS;
+    }
+    if (s.nextSpilloverAt <= now) s.nextSpilloverAt = now + SPILLOVER_MS; // the pile is full: wait, nothing lost
+    if (waiting) emit(state, 'shelfWaiting', { waiting: s.waiting });
+    return { added: 0, waiting };
   }
   const rng = stateRng(state);
   let added = 0;
@@ -127,6 +148,28 @@ export function tickSpillover(state, now = 0) {
     s.nextSpilloverAt += SPILLOVER_MS;
   }
   if (s.nextSpilloverAt <= now) s.nextSpilloverAt = now + SPILLOVER_MS; // full: wait, nothing lost
+  return { added, waiting: 0 };
+}
+
+/**
+ * openWaiting(state) -> {added}: the vials piled behind the glass land on the
+ * newly bought shelf, round-robin over the mixers' colors (the madder / ochre /
+ * woad primaries if no mixer is set). Called by unlocks.buy('shelf').
+ */
+export function openWaiting(state) {
+  const s = shelfOf(state);
+  const n = Math.max(0, Math.min(WAITING_MAX, Math.floor(num(s.waiting))));
+  s.waiting = 0;
+  let colors = [...new Set((state.stations?.mixers ?? []).map((m) => m && m.recipe).filter(Boolean))];
+  if (!colors.length) colors = ['madder', 'ochre', 'woad'].filter((id) => state.catalog?.discovered?.[id]);
+  if (!Array.isArray(s.colors)) s.colors = [];
+  if (!s.colors.length) s.colors = colors.slice(0, 5);
+  if (!colors.length) return { added: 0 };
+  let added = 0;
+  for (let k = 0; k < n; k++) {
+    if (addVial(state, { colorId: colors[k % colors.length] }) === null) break;
+    added++;
+  }
   return { added };
 }
 

@@ -2,7 +2,9 @@
 // Spec: DESIGN.md "Progression, eras and prestige" > "Renovate (soft prestige)":
 //   Heritage earned = floor(sqrt(E_run / 1e7)); income multiplier = 1 + 0.05 · H_total.
 // Renovate resets stations, Coins, rooms, raw/pigment/stock, shelf contents, orders,
-// boosts and the phase; it keeps the catalog (with Essence), hunters (recalled home
+// boosts, the phase and the coin-bought unlocks (src/sim/unlocks.js; those open
+// before are listed in state.renovateReopen for one half-price batch re-buy, and
+// Heritage keep-* nodes hold theirs open); it keeps the catalog (with Essence), hunters (recalled home
 // with their hauls), album, apprentices, Heritage, Seals, quests, the event, finished
 // commissions, trophies, cosmetics and the whole Gallery (paintings never reset).
 //
@@ -16,6 +18,7 @@ import { createInitialState } from '../state.js';
 import { emit } from './bus.js';
 import { recallAll } from './hunters.js';
 import { addCanvas } from './gallery.js';
+import { UNLOCK_IDS } from './unlocks.js';
 
 const fin = (x, d = 0) => (Number.isFinite(x) ? x : d);
 export const RENOVATE_PHASE = 3;
@@ -61,9 +64,9 @@ export function heritageAvailable(state) {
   return Math.max(0, fin(state.heritage) - heritageSpentTotal(state));
 }
 
-/** heritageEffects(state) -> {startVats, startCoins, startMixers, phaseSpeed, autoApprentices:[id]}. */
+/** heritageEffects(state) -> {startVats, startCoins, startMixers, phaseSpeed, autoApprentices:[id], keepUnlocks:[id]}. */
 export function heritageEffects(state) {
-  const out = { startVats: 0, startCoins: 0, startMixers: 0, phaseSpeed: 0, autoApprentices: [] };
+  const out = { startVats: 0, startCoins: 0, startMixers: 0, phaseSpeed: 0, autoApprentices: [], keepUnlocks: [] };
   for (const n of HERITAGE_TREE) {
     const lvl = Math.min(n.maxLevel, fin(state.heritageSpent && state.heritageSpent[n.id]));
     if (lvl <= 0) continue;
@@ -73,6 +76,7 @@ export function heritageEffects(state) {
     if (e.startMixers) out.startMixers += e.startMixers * lvl;
     if (e.phaseSpeed) out.phaseSpeed += e.phaseSpeed * lvl;
     if (e.autoApprentice && !out.autoApprentices.includes(e.autoApprentice)) out.autoApprentices.push(e.autoApprentice);
+    if (e.keepUnlock && !out.keepUnlocks.includes(e.keepUnlock)) out.keepUnlocks.push(e.keepUnlock);
   }
   return out;
 }
@@ -110,6 +114,15 @@ export function grantHeritageCanvases(state) {
   return out;
 }
 
+/**
+ * renovateCloses(state) -> [unlock id] that a Renovate now would close (open
+ * now, not held by a Heritage keep-* node). The Renovate sheet lists them.
+ */
+export function renovateCloses(state) {
+  const keep = heritageEffects(state).keepUnlocks;
+  return UNLOCK_IDS.filter((id) => state?.unlocks?.[id] && !keep.includes(id));
+}
+
 /** Fresh starting stations for a new run, with Heritage tree bonuses applied. */
 export function startingStations(state, now) {
   const fresh = createInitialState(now, 1).stations;
@@ -137,6 +150,19 @@ export function renovate(state, a, b) {
   state.lifetime.renovations = fin(state.lifetime.renovations) + 1;
   const fx = heritageEffects(state);
 
+  // Coin-bought unlocks close (Heritage keep-* nodes hold theirs open); what was
+  // open is listed for the one-purchase re-buy (unlocks.batchRebuy).
+  const before = state.unlocks && typeof state.unlocks === 'object' ? state.unlocks : {};
+  const unlocks = {};
+  const reopen = [];
+  for (const id of UNLOCK_IDS) {
+    const kept = !!before[id] && fx.keepUnlocks.includes(id);
+    unlocks[id] = kept;
+    if (before[id] && !kept) reopen.push(id);
+  }
+  state.unlocks = unlocks;
+  state.renovateReopen = reopen;
+
   // Factory: back to the bench.
   state.stations = startingStations(state, now);
   state.cellarLevel = 1;
@@ -160,19 +186,22 @@ export function renovate(state, a, b) {
   if (state.shelf && Array.isArray(state.shelf.cells)) {
     state.shelf.cells = state.shelf.cells.map(() => null); // Essence lives in the catalog and stays
     state.shelf.nextSpilloverAt = 0;
+    state.shelf.waiting = 0;
   }
   for (const ap of fx.autoApprentices) if (state.apprentices) state.apprentices[ap] = true;
 
   // Gallery persists whole: paintings, wall slots and canvases survive Renovate
   // (DESIGN.md). Rebuying a room never adds walls twice: factory.syncSlots sets
   // walls = max(current, rooms-derived).
+  // The Gallery closes with its unlock (pieces stay); `unlocked` mirrors it.
   if (state.gallery) {
     state.gallery.walls = Math.max(BASE_WALLS, fin(state.gallery.walls, BASE_WALLS));
+    state.gallery.unlocked = !!state.unlocks.gallery;
   }
 
   state.lastTick = now;
   // Hunters come home now, and their hauls start the new run.
   const returns = recallAll(state, now);
-  emit(state, 'renovate', { heritage: gained });
+  emit(state, 'renovate', { heritage: gained, closed: reopen.slice() });
   return { ok: true, gained, heritage: state.heritage, returns };
 }

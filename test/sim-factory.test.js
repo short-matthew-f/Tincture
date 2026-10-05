@@ -187,7 +187,7 @@ test('factory: buyRoom enforces colorsRequired, adds slots, gates phase 2', () =
   assert.equal(Object.keys(s.catalog.discovered).length, 10);
   const r2 = buyRoom(s, { id: 'mill-room' }, NOW);
   assert.equal(r2.ok, true);
-  assert.equal(s.stations.mixers.length, 2);
+  assert.equal(s.stations.mixers.length, 3, 'two at the start + the Mill Room');
   assert.equal(s.stations.grinders.length, 2);
   assert.ok(s.rooms.includes('mill-room'));
   assert.equal(s.phase, 2, 'phase 2 at 10 colors + Mill Room');
@@ -216,6 +216,7 @@ function yardState() {
   const s = orangeState(41);
   s.phase = 2;
   s.rooms.push('loading-yard');
+  s.unlocks.shipping = true; // the Loading Yard IS the shipping unlock (v0.2)
   syncSlots(s);
   return s;
 }

@@ -11,6 +11,7 @@
 //   startCoins      +n Coins at the start of every run
 //   phaseSpeed      fractional production bonus while in Phases 1-2 (so early phases go faster)
 //   autoApprentice  apprentice id that starts every run already hired (maxLevel 1)
+//   keepUnlock      unlock id (src/sim/unlocks.js) that Renovate leaves open (maxLevel 1)
 
 export const HERITAGE_DIVISOR = 1e7;
 export const HERITAGE_INCOME = 0.05;
@@ -36,6 +37,12 @@ export const HERITAGE_TREE = Object.freeze([
     blurb: 'The Packer returns every run, already hired.' }),
   node({ id: 'trusted-steward', name: 'Trusted Steward', maxLevel: 1, cost: [8], effect: { autoApprentice: 'steward' },
     blurb: 'The Steward returns every run, already hired.' }),
+  node({ id: 'keep-shelf', name: 'Keep the Shelf', maxLevel: 1, cost: [2], effect: { keepUnlock: 'shelf' },
+    blurb: 'The Merge Shelf stays open through every Renovate.' }),
+  node({ id: 'keep-map', name: 'Keep the Map', maxLevel: 1, cost: [2], effect: { keepUnlock: 'hunters' },
+    blurb: 'The map window stays open: your hunters set out on day one.' }),
+  node({ id: 'keep-gallery', name: 'Keep the Gallery', maxLevel: 1, cost: [2], effect: { keepUnlock: 'gallery' },
+    blurb: 'The Gallery stays open through every Renovate, visitors and all.' }),
 ]);
 
 export const HERITAGE_BY_ID = Object.freeze(Object.fromEntries(HERITAGE_TREE.map((n) => [n.id, n])));

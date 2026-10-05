@@ -46,6 +46,7 @@ test('tick is safe at dt = 0 and dt = 3 days', () => {
 test('a 3-day catch-up returns a summary with produced lines and no NaN', () => {
   const s = factoryState(3);
   s.phase = 2;
+  s.unlocks.hunters = true; // the map window is bought (v0.2)
   unlockRegions(s, {}, NOW);
   send(s, { hunterId: 'wren', regionId: 'meadow', duration: 'overnight' }, NOW);
   tick(s, NOW);
@@ -72,6 +73,7 @@ test('a 3-day catch-up returns a summary with produced lines and no NaN', () => 
 test('close up shop sends idle hunters overnight and queues mixers; caught-up stamp', () => {
   const s = factoryState(4);
   s.phase = 2;
+  s.unlocks.hunters = true; // the map window is bought (v0.2)
   s.stations.mixers[0].recipe = null;
   unlockRegions(s, {}, NOW);
   const r = closeUpShop(s, NOW);

@@ -3,7 +3,7 @@
 // src/game.js under SAVE_KEY. Every shape change bumps SAVE_VERSION and adds a
 // step in migrate().
 
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
 export const SAVE_KEY = 'tincture.save';
 /** Coins in the till of a brand-new workshop. */
 export const STARTING_COINS = 25;
@@ -44,9 +44,10 @@ export function createInitialState(now = 0, seed) {
       disabledQuestTypes: [],
       notifyHunters: false,
       notifyVats: false,
-      puzzleTier: { grading: 'relaxed' },
+      puzzleTier: { grading: 'relaxed', purify: 'relaxed' },
     },
-    onboarding: { step: 0, done: false, flags: {} },
+    // `seen`: one entry per subgame guide (src/ui/guide.js) that has run.
+    onboarding: { step: 0, done: false, flags: {}, seen: {} },
     era: 1,
     phase: 1,
     // "A few coins left in the drawer": the inherited workshop starts with a small
@@ -63,7 +64,11 @@ export function createInitialState(now = 0, seed) {
     stations: {
       sources,
       grinders: [{ kind: 'mortar', level: 1 }],
-      mixers: [{ recipe: null, level: 1, progress: 0, rushedAt: 0, accident: null }],
+      // Two mixers from the start (docs/PLAN-v0.2.md Theme A.1): two colors to mix and paint with.
+      mixers: [
+        { recipe: null, level: 1, progress: 0, rushedAt: 0, accident: null },
+        { recipe: null, level: 1, progress: 0, rushedAt: 0, accident: null },
+      ],
       vats: [
         { level: 1, color: null },
         { level: 1, color: null },
@@ -77,6 +82,14 @@ export function createInitialState(now = 0, seed) {
     pigment,
     stock: {},
     catalog: { discovered, pinned: [] },
+    // Coin-bought systems (src/sim/unlocks.js); colors only reveal the price.
+    // Reset on Renovate unless a Heritage keep-* node holds them open.
+    unlocks: { shelf: false, hunters: false, gallery: false, shipping: false, commissions: false },
+    renovateReopen: [],        // unlock ids open before the last Renovate (batch re-buy)
+    // Shop reserve: colorId -> jars the shop and the Dispatcher never sell.
+    // Missing entries use the default rule (storage.keepOf): 20 jars of a pinned
+    // color or one used by a started painting.
+    keep: {},
     apprentices: {
       errandRunner: false,
       orderClerk: false,
@@ -93,6 +106,8 @@ export function createInitialState(now = 0, seed) {
       rows: 7,
       cells: new Array(35).fill(null),
       rowLabels: new Array(7).fill(null),
+      colors: [],              // the (≤5) color chips spillover delivers
+      waiting: 0,              // vials piled behind the glass before the shelf is bought
       nextSpilloverAt: 0,
     },
     gallery: {
@@ -119,7 +134,11 @@ export function createInitialState(now = 0, seed) {
     eventProgress: {},
     commissions: { open: [], done: [] },
     ledger: { pending: null, allCaughtUpAt: now },
-    stats: { sessionStartedAt: now, lastCloseUpAt: 0, fastSolves: 0 },
+    stats: {
+      sessionStartedAt: now, lastCloseUpAt: 0, fastSolves: 0,
+      // Local-only feel counters (debug panel; docs/PLAN-v0.2.md amendments).
+      lines: 0, lineSkips: 0, wrongDrops: 0, rejectedDrags: 0, coachDismissed: 0,
+    },
     activePuzzles: {},         // puzzle id -> in-progress board (grading, purify, ...)
     flags: {},                 // sim bookkeeping (storageFull edge, firstTickAt, ...)
     pendingCollect: 0,         // shop till waiting for Collect
@@ -150,8 +169,7 @@ export function migrate(saveObj) {
   let v = Number.isInteger(saveObj.v) ? saveObj.v : 1;
   if (v > SAVE_VERSION) throw new Error(`Save is from a newer version (v${v})`);
   switch (v) { // eslint-disable-line default-case
-    // case 1: /* v1 -> v2 transform on saveObj.state */ v = 2; // falls through
-    case 1:
+    case 1: migrateV1toV2(saveObj.state); v = 2; // falls through
     default:
       break;
   }
@@ -160,13 +178,65 @@ export function migrate(saveObj) {
   return saveObj;
 }
 
+const UNLOCK_IDS = ['shelf', 'hunters', 'gallery', 'shipping', 'commissions'];
+
+/**
+ * v1 (0.1.x) -> v2 (0.2): coin-bought unlocks granted for every system the save
+ * already used, a second mixer, the shelf's color chips and waiting pile, the
+ * shop reserve, purify tier, guide bookkeeping, local counters and the one-time
+ * "What changed in 0.2" note (state.flags.whatsNew). The shelf grid itself
+ * (5x7 -> 6x6, rowLabels) is converted by the step-3 shelf rework.
+ */
+function migrateV1toV2(st) {
+  const cells = Array.isArray(st.shelf?.cells) ? st.shelf.cells : [];
+  const prev = isPlainObject(st.unlocks) ? st.unlocks : {};
+  const rooms = Array.isArray(st.rooms) ? st.rooms : [];
+  const granted = {
+    shelf: cells.some((c) => c && typeof c === 'object'),
+    hunters: Array.isArray(st.hunters?.roster) && st.hunters.roster.length > 0,
+    gallery: !!st.gallery?.unlocked,
+    shipping: rooms.includes('loading-yard'),
+    commissions: (Number(st.phase) || 1) >= 3,
+  };
+  st.unlocks = {};
+  for (const id of UNLOCK_IDS) st.unlocks[id] = !!(prev[id] || granted[id]);
+  if (!Array.isArray(st.renovateReopen)) st.renovateReopen = [];
+  const mixers = st.stations?.mixers;
+  if (Array.isArray(mixers) && mixers.length === 1) {
+    mixers.push({ recipe: null, level: 1, progress: 0, rushedAt: 0, accident: null });
+  }
+  if (isPlainObject(st.shelf)) {
+    if (!Array.isArray(st.shelf.colors)) {
+      const colors = [];
+      for (const c of cells) {
+        if (c && typeof c.color === 'string' && !colors.includes(c.color) && colors.length < 5) colors.push(c.color);
+      }
+      st.shelf.colors = colors;
+    }
+    if (!Number.isFinite(st.shelf.waiting)) st.shelf.waiting = 0;
+  }
+  if (!isPlainObject(st.keep)) st.keep = {};
+  if (isPlainObject(st.settings)) {
+    if (!isPlainObject(st.settings.puzzleTier)) st.settings.puzzleTier = { grading: 'relaxed' };
+    if (!st.settings.puzzleTier.purify) st.settings.puzzleTier.purify = 'relaxed';
+  }
+  if (isPlainObject(st.onboarding) && !isPlainObject(st.onboarding.seen)) st.onboarding.seen = {};
+  if (isPlainObject(st.stats)) {
+    for (const k of ['lines', 'lineSkips', 'wrongDrops', 'rejectedDrags', 'coachDismissed']) {
+      if (!Number.isFinite(st.stats[k])) st.stats[k] = 0;
+    }
+  }
+  if (!isPlainObject(st.flags)) st.flags = {};
+  st.flags.whatsNew = '0.2';
+}
+
 function isPlainObject(x) {
   return x !== null && typeof x === 'object' && !Array.isArray(x);
 }
 
 /** Top-level sections whose own keys mergeDefaults fills in (one level deep). */
 const DEEP_SECTIONS = ['onboarding', 'lifetime', 'stations', 'catalog', 'apprentices', 'orders', 'shelf',
-  'gallery', 'hunters', 'album', 'quests', 'commissions', 'ledger'];
+  'gallery', 'hunters', 'album', 'quests', 'commissions', 'ledger', 'unlocks'];
 
 function fillMissing(target, defaults) {
   for (const [k, d] of Object.entries(defaults)) {
@@ -208,6 +278,9 @@ export function mergeDefaults(state, now = 0) {
     fillMissing(state[key], defaults[key]);
   }
   if (!isPlainObject(state.onboarding.flags)) state.onboarding.flags = {};
+  if (!isPlainObject(state.onboarding.seen)) state.onboarding.seen = {};
+  if (!isPlainObject(state.keep)) state.keep = {};
+  if (!Array.isArray(state.renovateReopen)) state.renovateReopen = [];
   for (const key of ['coins', 'seals', 'heritage', 'runEarned']) {
     if (!Number.isFinite(state[key])) state[key] = key === 'coins' ? 0 : defaults[key];
   }

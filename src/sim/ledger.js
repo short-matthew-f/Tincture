@@ -18,6 +18,7 @@ import { displayName, discoveredCount } from './discovery.js';
 import { incomeRate, cheapestUpgrade } from './economy.js';
 import { allColors, familyOfColor, colorInfo } from './hunters.js';
 import { questsReady } from './quests.js';
+import { statusAll, rebuyQuote } from './unlocks.js';
 import { claimableSteps } from './events.js';
 
 const fin = (x, d = 0) => (Number.isFinite(x) ? x : d);
@@ -275,17 +276,39 @@ export function almostThere(state, now = state.lastTick ?? 0) {
   // The next room two colors away.
   const colors = discoveredCount(state);
   const rooms = state.rooms || [];
-  const nextRoom = ROOMS.find((r) => !rooms.includes(r.id) && r.colorsRequired > colors);
+  const nextRoom = ROOMS.find((r) => !r.unlock && !rooms.includes(r.id) && r.colorsRequired > colors); // unlock rooms: below
   if (nextRoom && nextRoom.colorsRequired - colors <= 2) {
     const n = nextRoom.colorsRequired - colors;
     items.push({ icon: 'room', text: `${n === 1 ? 'One more color opens' : 'Two more colors open'} the ${nextRoom.name}`, screen: 'catalog', score: n / 10 });
+  }
+
+  // A coin-bought unlock: ready to open, nearly affordable, or two colors from its price.
+  const rate = fin(incomeRate(state, now));
+  const the = (u) => (u.id === 'commissions' ? u.name : `the ${u.name}`);
+  const The = (u) => (u.id === 'commissions' ? u.name : `The ${u.name}`);
+  const is = (u) => (u.id === 'commissions' ? 'are' : 'is');
+  for (const u of statusAll(state)) {
+    if (!u || u.open) continue;
+    if (u.canBuy) {
+      items.push({ icon: 'unlock', text: `${The(u)} ${is(u)} ready to open`, screen: 'workshop', params: { unlock: u.id }, score: 0.02 });
+    } else if (u.revealed) {
+      const short = u.cost - fin(state.coins);
+      if (rate > 0 && short / rate <= 600) {
+        items.push({ icon: 'unlock', text: `${The(u)} ${is(u)} nearly affordable`, screen: 'workshop', params: { unlock: u.id }, score: Math.min(1, short / rate / 600) });
+      }
+    } else if (u.phaseOk && u.colorsLeft > 0 && u.colorsLeft <= 2) {
+      items.push({ icon: 'unlock', text: `${u.colorsLeft === 1 ? 'One more color' : 'Two more colors'} and ${the(u)} can open`, screen: 'catalog', params: { unlock: u.id }, score: u.colorsLeft / 10 });
+    }
+  }
+  const rq = rebuyQuote(state);
+  if (rq.ids.length && fin(state.coins) >= rq.cost) {
+    items.push({ icon: 'unlock', text: 'Everything Renovate closed can reopen in one go', screen: 'workshop', params: { rebuy: true }, score: 0.01 });
   }
 
   // An upgrade affordable soon (or now).
   const up = cheapestUpgrade(state);
   if (up && Number.isFinite(up.cost)) {
     const short = up.cost - fin(state.coins);
-    const rate = fin(incomeRate(state, now));
     if (short <= 0) {
       items.push({ icon: 'coin', text: `${up.label ?? 'An upgrade'} is ready to buy`, screen: 'workshop', params: { upgrade: up.kind }, score: 0.05 });
     } else if (rate > 0 && short / rate <= 600) {
