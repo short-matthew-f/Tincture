@@ -192,10 +192,27 @@ export function flushTints(ctx, s, now = 0) {
   return found;
 }
 
-/** Create the tube-sort puzzle for a muddy batch and store it. Returns the entry or null. */
-export function createPurifyPuzzle(ctx, s, { batchId } = {}, now = 0) {
+/**
+ * Remembered Purify tier (settings.puzzleTier.purify), clamped to what she has
+ * revealed (Relaxed always; Steady 10, Tricky 25, Master 45 colors). The saved
+ * default is Relaxed, so her first batches open there unless she picked another.
+ */
+export function purifyTier(ctx, state) {
+  const t = state && state.settings && state.settings.puzzleTier && state.settings.puzzleTier.purify;
+  if (!TIER_IDS.includes(t)) return 'relaxed';
+  try { if (!ctx.sim.unlocks.tierRevealed(state, t)) return 'relaxed'; } catch { /* keep t */ }
+  return t;
+}
+
+/**
+ * Create the tube-sort puzzle for a muddy batch at `tier` (default: her
+ * remembered Purify tier) and store it as activePuzzles.purify =
+ * {batchId, color, puzzle, tier, startedAt}. Returns the entry or null.
+ */
+export function createPurifyPuzzle(ctx, s, { batchId, tier } = {}, now = 0) {
   const batch = (s.muddyBatches || []).find((b) => b.id === batchId);
   if (!batch) return null;
+  const t = TIER_IDS.includes(tier) ? tier : purifyTier(ctx, s);
   const hex = ctx.sim.economy.colorHex(batch.color);
   const near = ctx.sim.discovery.discoveredColors(s)
     .map((c) => ({ hex: c.hex, de: deltaEHex(c.hex, hex) }))
@@ -203,16 +220,13 @@ export function createPurifyPuzzle(ctx, s, { batchId } = {}, now = 0) {
     .slice(0, 8)
     .map((c) => c.hex);
   const palette = [hex, ...near];
-  const rate = num(ctx.sim.economy.incomeRate(s, now));
-  const minutes = rate > 0 ? num(batch.value) / (rate * 60) : 0;
-  const size = ctx.puzzles.purify.sizeForBatch(minutes);
   const rng = stateRng(s);
   let puzzle = null;
   for (let attempt = 0; attempt < 8; attempt++) {
-    puzzle = ctx.puzzles.purify.create(size, rng, { palette });
+    puzzle = ctx.puzzles.purify.createForTier(t, rng, { palette });
     if (puzzle.colors.some((c) => deltaEHex(c, hex) < 3)) break; // her batch's own color is in the tubes
   }
-  const entry = { batchId, color: batch.color, puzzle, startedAt: now };
+  const entry = { batchId, color: batch.color, puzzle, tier: t, startedAt: now };
   ensureActive(s).purify = entry;
   return entry;
 }
@@ -307,6 +321,12 @@ export const PZ_CSS = `
 .pz-hub .btn.small, .pz-nudge .btn.small { min-height: 44px; }
 .pz-hub .btn.quiet { box-shadow: 0 3px 0 var(--shadow), inset 0 0 0 1.5px rgba(42,38,34,.2); }
 .pz-hub .tierdesc { min-height: 18px; }
+.pz-hub .seg-control > button.has-sub { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; padding: 4px 2px; line-height: 1.15; min-width: 0; }
+.pz-hub .seg-control > button.has-sub small { font-size: 11px; font-weight: 500; color: var(--ink-soft); white-space: nowrap; }
+.pz-hub .batches { display: flex; flex-direction: column; }
+.pz-hub .batch-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; }
+.pz-hub .batch-row + .batch-row { border-top: 1px solid rgba(42,38,34,.1); }
+.pz-hub .batch-row .btn { flex: 0 0 auto; }
 .pz-hub .reward { font-weight: 700; color: var(--ink); }
 .pz-hub .banner { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--glow); box-shadow: 0 0 0 1.5px var(--glow-ring); font-size: 13px; }
 .pz-hub .batch { display: flex; flex-direction: column; gap: 8px; padding: 10px 0; }
@@ -322,6 +342,7 @@ let C = null;      // ctx
 let ROOT = null;
 let SIG = '';
 let section = null;
+let confirmSell = false;
 
 function fmt(n) {
   return C.format && C.format.num ? C.format.num(n) : Math.round(n).toLocaleString();
@@ -331,6 +352,57 @@ function rewardOf(state, tier) {
   const tiers = C.sim.PUZZLE_TIERS || {};
   const def = tiers[tier] || { k: 8, mult: 1 };
   return C.sim.economy.puzzleReward(state, tier, { ...def });
+}
+
+const PURITY_LINE = { pure: 'A pure batch sells for 50% more.', flawless: 'A flawless batch sells for 2\u00d7.' };
+
+/** The Purify card: tier control (same component as grading's), waiting batches, Sort one, Sell all. */
+function purifyCardHtml(state, active) {
+  const P = C.puzzles.purify;
+  const tier = purifyTier(C, state);
+  const revealed = (t) => !C.sim.unlocks || C.sim.unlocks.tierRevealed(state, t);
+  const shown = TIER_IDS.filter((t) => t === tier || revealed(t));
+  const lockedNext = TIER_IDS.find((t) => !revealed(t));
+  const needColors = lockedNext ? C.sim.unlocks.TIER_REVEAL[lockedNext] : 0;
+  const moreToGo = lockedNext ? Math.max(1, needColors - C.sim.discoveredCount(state)) : 0;
+  const seg = h`<div class="seg-control" role="group" aria-label="Purify difficulty" data-coach="purify-tier">${shown.map((t) => h`<button type="button" class="has-sub" data-action="purify-tier" data-tier="${t}" data-tap aria-pressed="${t === tier ? 'true' : 'false'}"><span>${TIER_LABEL[t]}</span><small>about ${P.expectedMinutes(t)} min</small></button>`)}</div>
+${lockedNext ? h`<div class="pz-tiertag" data-tier-tag>${lockTag(`${TIER_LABEL[lockedNext]} at ${needColors} colors \u2014 ${moreToGo} more`, { cls: 'pz-tag' })}</div>` : ''}`;
+  const def = P.TIERS[tier];
+  const tierDesc = `${def.colors} colors, ${def.tubes} tubes${def.extraTube ? ', plus a spare tube' : ''}. ${PURITY_LINE[def.purity]}`;
+
+  const batches = state.muddyBatches || [];
+  const pur = active.purify;
+  const rows = batches.map((b) => {
+    const name = C.sim.displayName ? C.sim.displayName(state, b.color) : b.color;
+    const hex = C.sim.economy.colorHex(b.color);
+    const going = pur && pur.batchId === b.id;
+    const jars = Math.max(1, Math.round(num(b.jars)));
+    return h`<div class="batch-row" data-batch-row="${b.id}">${swatch(hex, 36, { label: name })}<div class="grow"><div class="semi pz-name">${name}</div><div class="hint">${jars} ${jars === 1 ? 'jar' : 'jars'}${going ? ', a pour is under way' : ''}</div></div>${button('Sell as is', { small: true, cls: 'quiet', attrs: { 'data-action': 'sell-muddy', 'data-batch': b.id } })}</div>`;
+  });
+  const underway = pur && batches.some((b) => b.id === pur.batchId) ? pur : null;
+  const keepGoing = !!(underway && (underway.puzzle.moves > 0 || underway.tier === tier));
+  const sortLabel = keepGoing ? 'Continue sorting' : 'Sort one';
+  let sellAll = '';
+  if (confirmSell && batches.length) {
+    const coins = C.sim.factory.muddyValue(state, C.game.now());
+    sellAll = h`<div class="pz-nudge" data-confirm-sell><div class="semi">Sell ${batches.length === 1 ? 'this batch' : `all ${batches.length} batches`} as is for about ${coinsText(C, coins)} coins?</div><div class="row"><button type="button" class="btn btn-primary small" data-action="sell-all-confirm" data-tap>Sell as is</button><button type="button" class="btn small" data-action="sell-all-cancel" data-tap>Keep them</button></div></div>`;
+  } else if (batches.length > 1) {
+    sellAll = button('Sell all as is', { small: true, block: true, cls: 'quiet', attrs: { 'data-action': 'sell-all' } });
+  }
+  const waiting = batches.length
+    ? h`<div class="hint" data-muddy-line>${C.sim.ledger && C.sim.ledger.muddyLine ? C.sim.ledger.muddyLine(batches.length) : `${batches.length} muddy batches to sort, if you like`}</div>
+<div class="batches">${rows}</div>
+${button(sortLabel, { variant: 'primary', block: true, attrs: { 'data-action': 'sort-one', 'data-coach': 'purify-sort' } })}
+${sellAll}`
+    : h`<div class="hint">Muddy batches come from fast mixers. When one is made, it waits here for you.</div>
+${button('Go to the workshop', { block: true, cls: 'quiet', attrs: { 'data-action': 'to-workshop' } })}`;
+  return h`<div class="card" id="pz-purify" data-coach="purify">
+<div class="row between"><div class="h3">Purify</div>${batches.length ? h`<span class="chip">${batches.length} ${batches.length === 1 ? 'batch' : 'batches'}</span>` : ''}</div>
+<div class="hint">Sort the layers of a muddy batch into pure tubes.</div>
+${seg}
+<div class="hint tierdesc">${tierDesc}</div>
+${waiting}
+</div>`;
 }
 
 function build(state) {
@@ -380,25 +452,7 @@ ${board
 ${tw ? h`<button type="button" class="btn small block quiet" data-action="new-grading" data-mode="own" data-tap>New board in my own colors</button>` : ''}
 </div>`;
 
-  const batches = state.muddyBatches || [];
-  const pur = active.purify;
-  const batchRows = batches.map((b) => {
-    const name = C.sim.displayName ? C.sim.displayName(state, b.color) : b.color;
-    const hex = C.sim.economy.colorHex(b.color);
-    const going = pur && pur.batchId === b.id;
-    const jars = Math.max(1, Math.round(num(b.jars)));
-    return h`<div class="batch">
-<div class="row">${swatch(hex, 40, { label: name })}<div class="grow"><div class="semi pz-name">${name}</div><div class="hint">${jars} ${jars === 1 ? 'jar' : 'jars'}${going ? ', a pour is under way' : ''}</div></div></div>
-${button(going ? `Continue purifying ${name}` : `Purify a batch of ${name} (${jars} ${jars === 1 ? 'jar' : 'jars'})`, { variant: 'primary', block: true, attrs: { 'data-action': 'purify', 'data-batch': b.id } })}
-${button('Sell as is for 80% of the price', { small: true, block: true, cls: 'quiet', attrs: { 'data-action': 'sell-muddy', 'data-batch': b.id } })}
-</div>`;
-  });
-  const purifyCard = h`<div class="card" id="pz-purify">
-<div class="row between"><div class="h3">Purify</div>${batches.length ? h`<span class="chip">${batches.length} ${batches.length === 1 ? 'batch' : 'batches'}</span>` : ''}</div>
-<div class="hint">Sort the layers of a muddy batch into pure tubes. A pure batch sells for 50% more.</div>
-${batches.length ? batchRows : h`<div class="hint">Muddy batches come from fast mixers. When one is made, it waits here for you.</div>
-${button('Go to the workshop', { block: true, cls: 'quiet', attrs: { 'data-action': 'to-workshop' } })}`}
-</div>`;
+  const purifyCard = purifyCardHtml(state, active);
 
   const pk = active.packing;
   const yard = yardStatus(C, state);
@@ -423,7 +477,8 @@ function sigOf(state) {
   const tw = boardTwist(C, state);
   return JSON.stringify([
     tier, fmt(rewardOf(state, tier)), a.grading ? [a.grading.tier, C.puzzles.grading.wrongCount(a.grading)] : 0,
-    a.purify ? a.purify.batchId : 0, a.packing ? 1 : 0, tw ? tw.id : 0,
+    a.purify ? [a.purify.batchId, a.purify.tier, a.purify.puzzle.moves > 0] : 0, a.packing ? 1 : 0, tw ? tw.id : 0,
+    purifyTier(C, state), confirmSell, confirmSell ? Math.round(C.sim.factory.muddyValue(state, C.game.now())) : 0,
     (state.muddyBatches || []).map((b) => [b.id, Math.round(num(b.jars))]),
     (() => { const y = yardStatus(C, state); const u = C.sim.unlocks.status(state, 'shipping'); return [y.open, y.need, u.revealed, u.affordable]; })(),
     num(state.stats && state.stats.fastSolves) >= 3,
@@ -475,14 +530,35 @@ function onClick(e) {
   } else if (act === 'dismiss-nudge') {
     C.game.act((s) => { s.stats = s.stats || {}; s.stats.fastSolves = 0; });
     draw(C.game.state, true);
-  } else if (act === 'purify') {
-    const batchId = t.dataset.batch;
-    const cur = activeOf(C.game.state).purify;
-    if (!cur || cur.batchId !== batchId) {
-      const made = C.game.act((s, a, now) => createPurifyPuzzle(C, s, a, now), { batchId });
-      if (!made) { C.toast('That batch is already taken care of.'); return; }
+  } else if (act === 'purify-tier') {
+    const tier = t.dataset.tier;
+    if (C.sim.unlocks && !C.sim.unlocks.tierRevealed(C.game.state, tier)) return;
+    C.game.act((s, a) => C.sim.settings.setPuzzleTier(s, { puzzle: 'purify', tier: a.tier }), { tier });
+    draw(C.game.state, true);
+  } else if (act === 'sort-one' || act === 'purify') {
+    const st = C.game.state;
+    const cur = activeOf(st).purify;
+    const batches = st.muddyBatches || [];
+    const tier = purifyTier(C, st);
+    let batchId = t.dataset.batch || (cur && batches.some((b) => b.id === cur.batchId) ? cur.batchId : (batches[0] && batches[0].id));
+    if (!batchId) { draw(st, true); return; }
+    const keep = cur && cur.batchId === batchId && (cur.puzzle.moves > 0 || cur.tier === tier);
+    if (!keep) {
+      const made = C.game.act((s, a, now) => createPurifyPuzzle(C, s, a, now), { batchId, tier });
+      if (!made) { C.toast('That batch is already taken care of.'); draw(C.game.state, true); return; }
     }
     C.navigate('purify', { batchId });
+  } else if (act === 'sell-all') {
+    confirmSell = true;
+    draw(C.game.state, true);
+  } else if (act === 'sell-all-cancel') {
+    confirmSell = false;
+    draw(C.game.state, true);
+  } else if (act === 'sell-all-confirm') {
+    confirmSell = false;
+    const res = C.game.act((s, _a, now) => C.sim.factory.sellAllMuddy(s, {}, now));
+    if (res && res.ok) C.toast(`Sold ${res.batches === 1 ? 'a batch' : `${res.batches} batches`} for ${coinsText(C, res.coins)} coins`);
+    draw(C.game.state, true);
   } else if (act === 'sell-muddy') {
     const batchId = t.dataset.batch;
     const res = C.game.act((s, a, now) => {
@@ -515,6 +591,7 @@ export default {
 
   show(params = {}) {
     section = params.puzzle || null;
+    confirmSell = false;
     const st = C.game.state;
     if (activeOf(st).pendingTints && activeOf(st).pendingTints.length) {
       C.game.act((s, _a, now) => flushTints(C, s, now));
