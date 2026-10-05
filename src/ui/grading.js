@@ -2,11 +2,13 @@
  * grading.js: the Grading board (overlay `grading`, fullscreen).
  *
  * Owns: the tile grid (anchors with a dot, masked cells invisible), tap-tap and
- * drag-and-drop swapping (8 px drag threshold), the 180 ms swap slide with a 3%
- * overshoot, the tile settle + one-frame shimmer + glass tink at a tile's own
- * note, "Hear the board", colorblind index numbers, the tier switch sheet, and
- * the solve celebration (shimmer sweep, seams closing, arpeggio, tints rising,
- * effort stamp, result card). Implements DESIGN.md "Active play > Grading",
+ * drag-and-drop swapping (fx.drag in handle mode on the grid: the tile lifts on
+ * touch, a ghost follows the finger above it, a drop on a tile swaps), the swap
+ * glide (fx.spring firm, 3% overshoot), the tile settle (fx.settle) + one-frame
+ * shimmer + glass tink at a tile's own note, "Hear the board" (a 90 ms highlight
+ * walking the reading order), colorblind index numbers, the tier switch sheet,
+ * and the solve celebration (shimmer sweep, seams closing, arpeggio, tints
+ * rising, fx.stamp effort stamp, result card; about 1.3 s, skippable by tap). Implements DESIGN.md "Active play > Grading",
  * "Interaction feel" (Swap two tiles, Tile lands, Board solved, Effort stamps,
  * Hear the board, Correctness without failure) and "UX > Accessibility".
  *
@@ -28,28 +30,30 @@ const CSS = `
 .gr-body { gap: 12px; }
 .gr-frame { position: relative; background: var(--paper); border-radius: 18px; padding: 12px; box-shadow: 0 4px 0 rgba(42,38,34,.26); display: flex; flex-direction: column; align-items: center; gap: 8px; }
 .gr-frametag { align-self: stretch; display: flex; justify-content: space-between; font-size: 12px; font-weight: 600; color: var(--ink-soft); }
-.gr-grid { position: relative; display: grid; grid-template-columns: repeat(var(--cols), var(--cell)); grid-auto-rows: var(--cell); border-radius: 10px; touch-action: none; user-select: none; -webkit-user-select: none; }
-.gr-tile { position: relative; display: flex; align-items: center; justify-content: center; border: 0; padding: 0; margin: 0; border-radius: 6px; box-shadow: inset 0 0 0 2px var(--paper); touch-action: none; cursor: pointer;
-  transition: transform 150ms var(--ease-out), box-shadow 150ms var(--ease-out), border-radius 320ms var(--ease-in-out); }
+.gr-grid { position: relative; display: grid; grid-template-columns: repeat(var(--cols), var(--cell)); grid-auto-rows: var(--cell); border-radius: 10px; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.gr-tile { position: relative; display: flex; align-items: center; justify-content: center; border: 0; padding: 0; margin: 0; border-radius: 6px; box-shadow: inset 0 0 0 2px var(--paper); touch-action: manipulation; cursor: pointer; -webkit-tap-highlight-color: transparent;
+  transition: box-shadow 150ms var(--ease-out), border-radius 320ms var(--ease-in-out); }
+.gr-tile.fx-draggable { touch-action: none; }
 .gr-tile.is-void { visibility: hidden; pointer-events: none; }
+.gr-tile.fx-lifted { z-index: 2; transform-origin: 50% 50%; transform-box: border-box; filter: none; box-shadow: 0 6px 0 var(--shadow), inset 0 0 0 2px var(--paper); }
 .gr-tile.is-sel { transform: scale(1.06); z-index: 2; box-shadow: 0 6px 0 var(--shadow), inset 0 0 0 3px var(--paper), inset 0 0 0 5px var(--ink); }
-.gr-tile.is-flying { z-index: 3; box-shadow: 0 6px 0 var(--shadow), inset 0 0 0 2px var(--paper); transition: none; }
-.gr-tile.is-drag { z-index: 4; transition: none; box-shadow: 0 8px 0 var(--shadow), inset 0 0 0 3px var(--paper), inset 0 0 0 5px var(--ink); }
+.gr-tile.is-flying { z-index: 3; box-shadow: 0 6px 0 var(--shadow), inset 0 0 0 2px var(--paper); }
+.gr-tile.is-drag-source { opacity: .35; }
 .gr-tile.is-target { box-shadow: inset 0 0 0 3px var(--paper), inset 0 0 0 5px rgba(42,38,34,.4); }
+.gr-tile.is-hear { z-index: 2; transform: scale(1.05); filter: brightness(1.14); box-shadow: 0 0 0 2px #fff, 0 0 14px rgba(255,255,255,.95), inset 0 0 0 2px var(--paper); transition: none; }
+.gr-grid.rm .gr-tile.is-hear { transform: none; }
+.gr-ghost-tile { box-sizing: border-box; display: flex; align-items: center; justify-content: center; border-radius: 6px; box-shadow: inset 0 0 0 3px var(--paper), inset 0 0 0 5px var(--ink); }
 .gr-grid.glow .gr-tile:not(.is-void) { box-shadow: inset 0 0 0 2px var(--paper), 0 0 9px rgba(255,255,255,.55); }
 .gr-grid.is-seamless { overflow: hidden; }
-.gr-grid.is-seamless .gr-tile { border-radius: 0; box-shadow: none; transform: none; }
+.gr-grid.is-seamless .gr-tile { border-radius: 0; box-shadow: none; transform: none; filter: none; }
 .gr-dot { box-sizing: border-box; width: 11px; height: 11px; border-radius: 50%; background: transparent; border: 2px solid var(--ink); box-shadow: 0 0 0 1.5px var(--paper); pointer-events: none; }
 .gr-grid.cb .gr-dot { position: absolute; top: 4px; left: 4px; width: 9px; height: 9px; border-width: 1.5px; box-shadow: 0 0 0 1.5px var(--paper); }
 .gr-num { font-size: min(15px, calc(var(--cell) * .4)); font-weight: 700; line-height: 1; pointer-events: none; font-variant-numeric: tabular-nums; }
 .gr-flash { position: absolute; inset: 0; background: rgba(255,255,255,.7); pointer-events: none; border-radius: inherit; animation: gr-flash 70ms linear both; }
 @keyframes gr-flash { from { opacity: 1; } to { opacity: 0; } }
-.gr-ring { animation: gr-ring 220ms var(--ease-out) both; }
-@keyframes gr-ring { 0% { transform: scale(1); } 40% { transform: scale(.94); } 100% { transform: scale(1); } }
 .gr-rise { position: absolute; left: 0; right: 0; top: 50%; display: flex; justify-content: center; gap: 12px; pointer-events: none; z-index: 6; }
 .gr-rise i { display: block; width: 46px; height: 46px; border-radius: 12px; box-shadow: 0 0 0 3px var(--paper), 0 4px 0 var(--shadow); animation: gr-rise 700ms var(--ease-out) both; }
 @keyframes gr-rise { 0% { opacity: 0; transform: translateY(22px) scale(.5); } 100% { opacity: 1; transform: translateY(-30px) scale(1); } }
-.gr-stampwrap { position: absolute; right: 6px; bottom: 6px; z-index: 6; pointer-events: none; padding: 3px; border-radius: 50%; background: rgba(247,244,236,.94); box-shadow: 0 3px 0 var(--shadow); animation: pz-stamp-in 260ms var(--ease-out) both; }
 .gr-tools { display: flex; gap: 10px; }
 .gr-tools .btn { flex: 1 1 0; min-height: 48px; }
 .gr-tools .btn { padding: 0 10px; font-size: 14px; white-space: nowrap; }
@@ -65,7 +69,7 @@ let C = null;
 let ROOT = null;
 const G = {
   visible: false, board: null, rank: [], sel: null, busy: false, celebrating: false, result: null,
-  timers: [], cb: false, moves: -1, drag: null, cell: 40, tiles: [], el: {}, params: {}, settling: false,
+  timers: [], cb: false, moves: -1, pressed: false, dragH: null, hearTimer: 0, cell: 40, tiles: [], el: {}, params: {}, settling: false,
   guide: null, offer: null, startTimer: 0,
   swapped: false, // she has swapped two tiles this visit (the guide's action step)
 };
@@ -210,7 +214,8 @@ function drawAll() {
   G.cb = !!(state.settings && state.settings.colorblind);
   const board = G.board;
   G.sel = null;
-  G.drag = null;
+  stopHear();
+  if (G.dragH && G.dragH.active) G.dragH.cancel();
   if (!board) {
     ROOT.innerHTML = String(emptyHtml());
     G.el = {};
@@ -226,7 +231,7 @@ function drawAll() {
   for (let p = 0; p < board.mask.length; p++) {
     if (!board.mask[p]) { tiles.push('<div class="gr-tile is-void" aria-hidden="true"></div>'); continue; }
     const anchor = board.anchors.includes(p);
-    tiles.push(`<button type="button" class="gr-tile${anchor ? ' is-anchor' : ''}" data-p="${p}">${anchor ? '<i class="gr-dot"></i>' : ''}${G.cb ? '<b class="gr-num"></b>' : ''}</button>`);
+    tiles.push(`<button type="button" class="gr-tile${anchor ? ' is-anchor' : ' fx-draggable'}" data-p="${p}">${anchor ? '<i class="gr-dot"></i>' : ''}${G.cb ? '<b class="gr-num"></b>' : ''}</button>`);
   }
   const tag = board.event
     ? h`<div class="gr-frametag"><span>${frameName(C, board.event, board.shape)}</span><span>${eventName(C, board.event)}</span></div>`
@@ -260,13 +265,24 @@ function drawAll() {
 
 const movable = (p) => !!G.board && C.puzzles.grading.isMovable(G.board, p);
 
+/** Drop whatever animations still hold a tile (a lift that fills forwards, a settle in flight). */
+function freeze(el) {
+  if (!el || typeof el.getAnimations !== 'function') return;
+  try { el.getAnimations().forEach((a) => a.cancel()); } catch (e) { /* ignore */ }
+}
+
 function setSel(p) {
-  if (G.sel !== null && G.tiles[G.sel]) {
-    G.tiles[G.sel].classList.remove('is-sel');
-    G.tiles[G.sel].removeAttribute('aria-pressed');
+  const prev = G.sel !== null ? G.tiles[G.sel] : null;
+  if (prev) {
+    // The selected tile is held at 106% by CSS; put it down with the shared settle (3% overshoot).
+    if (p === null || p !== G.sel) C.fx.settle(prev);
+    prev.classList.remove('is-sel');
+    prev.removeAttribute('aria-pressed');
   }
   G.sel = p;
   if (p !== null && G.tiles[p]) {
+    freeze(G.tiles[p]); // the press lift ends here; the selected look is CSS, so there is no dip
+    G.tiles[p].classList.remove('fx-lifted');
     G.tiles[p].classList.add('is-sel');
     G.tiles[p].setAttribute('aria-pressed', 'true');
   }
@@ -287,56 +303,59 @@ function tap(p) {
   }
 }
 
-function slide(el, dx, dy) {
-  if (!el || !el.animate) return;
-  if (reduced()) { C.fx.fade(el); return; }
+const SWAP_SPRING = { duration: 220 }; // spring firm, cut at the spec's ~200 ms swap
+
+/**
+ * Glide a tile into its cell from (dx, dy) away at 106%: spring firm, so it
+ * overshoots about 3% of the way and settles. Reduced motion fades instead.
+ */
+function glide(el, dx, dy) {
+  if (!el) return;
   el.classList.add('is-flying');
-  const a = el.animate([
-    { transform: `translate(${dx}px,${dy}px) scale(1.06)` },
-    { transform: `translate(${-dx * 0.03}px,${-dy * 0.03}px) scale(1.02)`, offset: 0.82 },
-    { transform: 'translate(0,0) scale(1)' },
-  ], { duration: 180, easing: 'ease-in-out' });
   const done = () => el.classList.remove('is-flying');
-  a.finished.then(done, done);
+  const p = C.fx.spring(el, {
+    from: { transform: `translate(${Math.round(dx * 10) / 10}px,${Math.round(dy * 10) / 10}px) scale(1.06)` },
+    to: { transform: 'translate(0px,0px) scale(1)' },
+    preset: SWAP_SPRING,
+  });
+  if (p && p.then) p.then(done, done); else done();
 }
 
+/** One-frame white flash on a tile (the shimmer of "tile lands in its right place"). */
+function flash(el) {
+  const f = document.createElement('i');
+  f.className = 'gr-flash';
+  el.appendChild(f);
+  setTimeout(() => f.remove(), 90);
+}
+
+/** A tile that landed right: tiny settle, one-frame shimmer, glass tink at its own note. */
 function land(p, k) {
   const b = G.board;
   const el = G.tiles[p];
   if (!el || !b) return;
   const L = b.L[b.order[p]];
-  C.audio.tink(L, 0.18 + k * 0.07, 0.3);
   later(() => {
-    if (!G.tiles[p]) return;
-    if (!reduced() && el.animate) {
-      el.animate([{ transform: 'scale(.94)' }, { transform: 'scale(1.02)', offset: 0.6 }, { transform: 'scale(1)' }], { duration: 120, easing: 'ease-out' });
-    }
-    const f = document.createElement('i');
-    f.className = 'gr-flash';
-    el.appendChild(f);
-    setTimeout(() => f.remove(), 90);
-  }, 180 + k * 70);
+    if (!G.tiles[p] || G.tiles[p] !== el) return;
+    C.audio.tink(L, 0, 0.3);
+    C.fx.settle(el);
+    flash(el);
+  }, SWAP_SPRING.duration + 10 + k * 70);
 }
 
-function snapBack(el) {
-  if (!el) return;
-  el.classList.remove('is-drag');
-  const t = el.style.transform;
-  el.style.transform = '';
-  if (t && el.animate && !reduced()) {
-    el.animate([{ transform: t }, { transform: 'none' }], { duration: 140, easing: 'ease-out' });
-  }
-}
+/** Where a tile's centre is, in grid layout px (unaffected by transforms). */
+const centreOf = (el) => ({ x: el.offsetLeft + el.offsetWidth / 2, y: el.offsetTop + el.offsetHeight / 2 });
 
-function doSwap(i, j, dragOff) {
+function doSwap(i, j, info) {
   const b = G.board;
   if (!b || G.busy) return;
   G.busy = true;
   const res = C.game.act(swapAct, { i, j });
   G.busy = false;
   setSel(null);
+  const ei = G.tiles[i]; const ej = G.tiles[j];
   if (!res || !res.ok) {
-    if (dragOff) snapBack(G.tiles[i]);
+    if (info) landFromGhost(i, info);
     C.audio.tick('blocked');
     return;
   }
@@ -344,13 +363,19 @@ function doSwap(i, j, dragOff) {
   G.swapped = true;
   paintTile(i);
   paintTile(j);
-  const cell = G.cell;
-  const ci = i % b.cols; const ri = Math.floor(i / b.cols);
-  const cj = j % b.cols; const rj = Math.floor(j / b.cols);
-  const ei = G.tiles[i]; const ej = G.tiles[j];
-  if (dragOff) { ei.classList.remove('is-drag'); ei.style.transform = ''; }
-  slide(ej, (ci - cj) * cell + (dragOff ? dragOff.dx : 0), (ri - rj) * cell + (dragOff ? dragOff.dy : 0));
-  slide(ei, (cj - ci) * cell, (rj - ri) * cell);
+  freeze(ei); freeze(ej);
+  ei.classList.remove('fx-lifted'); ej.classList.remove('fx-lifted');
+  const pi = centreOf(ei); const pj = centreOf(ej);
+  // The tile now at j came from i, or from under the ghost when it was dragged; the one at i came from j.
+  let jx = pi.x - pj.x; let jy = pi.y - pj.y;
+  if (info) {
+    const gr = G.el.grid.getBoundingClientRect();
+    const h2 = ej.offsetHeight / 2;
+    jx = (info.x - gr.left) - pj.x;
+    jy = (info.y - h2 - gr.top) - pj.y;
+  }
+  glide(ej, jx, jy);
+  glide(ei, pj.x - pi.x, pj.y - pi.y);
   C.audio.tick('deselect');
   C.haptics.light();
   res.placed.forEach((p, k) => land(p, k));
@@ -365,81 +390,95 @@ function doSwap(i, j, dragOff) {
       G.guide.stop();
       G.guide = null;
     }
-    later(() => celebrate(res.reward), 220);
+    later(() => celebrate(res.reward), 260);
   } else updateStatus();
 }
 
-function pointToPos(x, y) {
-  const b = G.board;
-  const r = G.el.grid.getBoundingClientRect();
-  const col = Math.floor((x - r.left) / G.cell);
-  const row = Math.floor((y - r.top) / G.cell);
-  if (col < 0 || row < 0 || col >= b.cols || row >= b.rows) return -1;
-  const p = row * b.cols + col;
-  return b.mask[p] ? p : -1;
+/** A drop that swaps nothing: the tile eases down from where the ghost let go. */
+function landFromGhost(from, info) {
+  const el = G.tiles[from];
+  if (!el || !info) return;
+  const gr = G.el.grid.getBoundingClientRect();
+  const c = centreOf(el);
+  glide(el, (info.x - gr.left) - c.x, (info.y - el.offsetHeight / 2 - gr.top) - c.y);
 }
 
 function clearTargets() {
-  G.el.grid.querySelectorAll('.is-target').forEach((n) => n.classList.remove('is-target'));
+  if (G.el.grid) G.el.grid.querySelectorAll('.is-target').forEach((n) => n.classList.remove('is-target'));
 }
 
-function onPointerDown(e) {
-  if (G.busy || G.result || !G.board || (e.button !== undefined && e.button > 0)) return;
-  const tile = e.target.closest('.gr-tile');
-  if (!tile || tile.classList.contains('is-void')) return;
-  G.drag = { p: Number(tile.dataset.p), id: e.pointerId, x: e.clientX, y: e.clientY, moving: false, el: tile };
+/** The ghost: a plain tile (not the button), tinted like the source, with its index number in colorblind mode. */
+function ghostFor(src) {
+  const g = document.createElement('div');
+  g.className = 'gr-ghost-tile';
+  g.style.display = 'flex';
+  g.style.background = src.style.background;
+  const n = src.querySelector('.gr-num');
+  if (n) g.appendChild(n.cloneNode(true));
+  return g;
 }
 
-function onPointerMove(e) {
-  const d = G.drag;
-  if (!d || e.pointerId !== d.id) return;
-  const dx = e.clientX - d.x;
-  const dy = e.clientY - d.y;
-  if (!d.moving) {
-    if (Math.hypot(dx, dy) < 8 || !movable(d.p)) return;
-    d.moving = true;
-    setSel(null);
-    d.el.classList.add('is-drag');
-    try { d.el.setPointerCapture(e.pointerId); } catch { /* capture is a nicety */ }
-    C.audio.tick('select');
+function onDragStart() {
+  setSel(null);
+  C.audio.tick('select');
+}
+
+function onDragMove(to, info) {
+  clearTargets();
+  if (to < 0 || to === info.from || !movable(to) || !G.tiles[to]) return;
+  G.tiles[to].classList.add('is-target');
+}
+
+function onDragDrop(to, info) {
+  clearTargets();
+  if (G.busy || G.celebrating || G.result || !G.board) return;
+  if (to >= 0 && to !== info.from && G.board.mask[to] && movable(to)) { doSwap(info.from, to, info); return; }
+  if (to >= 0) {
+    // Dropped on itself or on a fixed tile: it settles back, quietly.
+    landFromGhost(info.from, info);
+    if (to !== info.from) C.audio.tick('blocked');
   }
-  d.el.style.transform = `translate(${dx}px,${dy}px) scale(1.06)`;
-  clearTargets();
-  const tp = pointToPos(e.clientX, e.clientY);
-  if (tp >= 0 && tp !== d.p && movable(tp)) G.tiles[tp].classList.add('is-target');
+  // Dropped outside the board: fx.drag flies the ghost home itself.
 }
 
-function onPointerUp(e) {
-  const d = G.drag;
-  if (!d || e.pointerId !== d.id) return;
-  G.drag = null;
-  if (!d.moving) { if (e.type === 'pointerup') tap(d.p); return; }
+function onDragCancel() {
   clearTargets();
-  const tp = e.type === 'pointerup' ? pointToPos(e.clientX, e.clientY) : -1;
-  const off = { dx: e.clientX - d.x, dy: e.clientY - d.y };
-  if (tp >= 0 && tp !== d.p && movable(tp)) doSwap(d.p, tp, off);
-  else snapBack(d.el);
 }
 
 // ---------------------------------------------------------------------------
 // Hear the board, tier sheet
 // ---------------------------------------------------------------------------
 
+const HEAR_STEP = 90; // ms per tile: the note and the highlight walk together
+
+function stopHear() {
+  clearTimeout(G.hearTimer);
+  G.hearTimer = 0;
+  if (G.el && G.el.grid) G.el.grid.querySelectorAll('.is-hear').forEach((n) => n.classList.remove('is-hear'));
+}
+
+/** Play the tiles in reading order; each lights for 90 ms as its note sounds. Long boards are sampled (36 notes at most). */
 function hear() {
   const b = G.board;
-  if (!b) return;
+  if (!b || !G.el.grid) return;
+  stopHear();
+  G.el.grid.classList.toggle('rm', reduced());
   const spots = [];
   for (let p = 0; p < b.order.length; p++) if (b.mask[p]) spots.push(p);
-  const step = Math.max(1, Math.ceil(spots.length / 36)); // long boards are sampled: 36 notes at most
+  const step = Math.max(1, Math.ceil(spots.length / 36));
+  const seq = [];
+  for (let n = 0; n < spots.length; n += step) seq.push(spots[n]);
+  seq.forEach((p, k) => C.audio.note(b.L[b.order[p]], k * (HEAR_STEP / 1000), 0.2, 0.5));
   let k = 0;
-  for (let n = 0; n < spots.length; n += step) {
-    const p = spots[n];
-    C.audio.note(b.L[b.order[p]], k * 0.09, 0.2, 0.5);
-    if (!reduced()) {
-      later(() => { const el = G.tiles[p]; if (el && el.animate) el.animate([{ transform: 'scale(1)' }, { transform: 'scale(.94)' }, { transform: 'scale(1)' }], { duration: 180, easing: 'ease-out' }); }, k * 90);
-    }
-    k++;
-  }
+  let prev = null;
+  const walk = () => {
+    if (prev) prev.classList.remove('is-hear');
+    if (k >= seq.length || !G.visible || !G.el.grid) { G.hearTimer = 0; return; }
+    const el = G.tiles[seq[k++]];
+    if (el) { el.classList.add('is-hear'); prev = el; } else prev = null;
+    G.hearTimer = setTimeout(walk, HEAR_STEP);
+  };
+  walk();
 }
 
 async function tierSheet() {
@@ -477,13 +516,25 @@ async function tierSheet() {
 // Celebration and result
 // ---------------------------------------------------------------------------
 
+/** Clear what the celebration put on the board (skip, finalize, leaving). */
+function clearCelebration() {
+  const f = G.el && G.el.frame;
+  if (!f) return;
+  f.querySelectorAll('.gr-rise, .fx-stamp, .fx-shimmer').forEach((n) => n.remove());
+}
+
+/**
+ * The solve, about 1.3 s from the last swap: the shimmer sweeps the frame as the
+ * seams close and the arpeggio climbs dark to light, the tints rise out, and a
+ * Steady+ solve is stamped (fx.stamp: thunk and a medium haptic). Any tap skips.
+ */
 function celebrate(reward) {
   const b = G.board;
   if (!b || !G.el.frame || !G.celebrating) return;
   G.el.grid.classList.add('is-seamless');
   setSel(null);
   if (G.el.status) G.el.status.innerHTML = String(h`<div class="hl">Every tile is home</div><div class="dt">Listen to the whole gradient.</div>`);
-  C.fx.shimmerSweep(G.el.frame, { ms: 900 });
+  C.fx.shimmerSweep(G.el.frame, { ms: 800 });
   C.audio.arpeggio(C.puzzles.grading.boardMelody(b));
   C.haptics.success();
   if (reward.tints.length) {
@@ -493,20 +544,15 @@ function celebrate(reward) {
       rise.className = 'gr-rise';
       rise.innerHTML = reward.tints.map((hex, i) => `<i style="background:${hex};animation-delay:${i * 110}ms"></i>`).join('');
       G.el.frame.appendChild(rise);
-    }, 420);
+    }, 280);
   }
   if (reward.tier !== 'relaxed') {
     later(() => {
       if (!G.celebrating || !G.el.frame) return;
-      const w = document.createElement('div');
-      w.className = 'gr-stampwrap';
-      w.innerHTML = String(stampSvg(TIER_LABEL[reward.tier], { tone: STAMP_TONE[reward.tier], size: 84, double: reward.tier === 'master' }));
-      G.el.frame.appendChild(w);
-      C.audio.stamp();
-      C.haptics.medium();
-    }, 820);
+      C.fx.stamp(G.el.frame, TIER_LABEL[reward.tier], { keep: true, hex: STAMP_TONE[reward.tier] });
+    }, 420);
   }
-  later(finalize, 1200);
+  later(finalize, 1050);
 }
 
 function skip() {
@@ -558,10 +604,7 @@ function finalize() {
   G.celebrating = false;
   const found = C.game.act((s, _a, now) => flushTints(C, s, now)) || [];
   G.result = { reward, found };
-  const rise = G.el.frame && G.el.frame.querySelector('.gr-rise');
-  if (rise) rise.remove();
-  const board = G.el.frame && G.el.frame.querySelector('.gr-stampwrap');
-  if (board) board.remove(); // the stamp moves onto the result card
+  clearCelebration(); // the stamp moves onto the result card
   const mins = Math.round(reward.boostMinutes * 10) / 10;
   const stamp = reward.tier !== 'relaxed'
     ? stampSvg(TIER_LABEL[reward.tier], { tone: STAMP_TONE[reward.tier], size: 64, double: reward.tier === 'master' })
@@ -655,9 +698,13 @@ function onClick(e) {
     else if (act === 'done') { G.result = null; C.back(); }
     return;
   }
-  // Keyboard activation (Enter / Space) arrives as a click with detail 0; pointer taps are handled on pointerup.
+  // Pointer taps on movable tiles arrive through fx.drag's onTap (pointerup); a keyboard press arrives as a
+  // click with detail 0. A fixed tile never starts a drag, so its tap (and its keys) answer here.
   const tile = e.target.closest('.gr-tile');
-  if (tile && e.detail === 0 && !tile.classList.contains('is-void')) tap(Number(tile.dataset.p));
+  if (!tile || tile.classList.contains('is-void')) return;
+  const p = Number(tile.dataset.p);
+  if (!movable(p)) { if (!G.busy && !G.celebrating && !G.result) C.audio.tick('blocked'); return; }
+  if (e.detail === 0) tap(p);
 }
 
 export default {
@@ -670,13 +717,26 @@ export default {
     injectStyle('grading', CSS);
     root.addEventListener('click', onClick);
     root.addEventListener('pointerdown', (e) => {
-      if (G.celebrating) skip();
-      else if (e.target.closest('[data-grid]')) onPointerDown(e);
-    });
-    root.addEventListener('pointermove', onPointerMove);
-    root.addEventListener('pointerup', onPointerUp);
-    root.addEventListener('pointercancel', onPointerUp);
+      if (G.celebrating) { skip(); return; }
+      if (e.target.closest('.gr-tile')) G.pressed = true;
+    }, true);
+    const release = () => { G.pressed = false; };
+    window.addEventListener('pointerup', release, true);
+    window.addEventListener('pointercancel', release, true);
     root.addEventListener('contextmenu', (e) => { if (e.target.closest('[data-grid]')) e.preventDefault(); });
+    // Tiles are dragged by handle: one listener set on the section, board geometry measured per drag.
+    G.dragH = C.fx.drag(root, {
+      handle: '.gr-tile.fx-draggable',
+      source: (el) => Number(el.dataset.p),
+      board: () => (G.board && G.tiles.length ? C.fx.measureGrid(G.tiles, G.board.cols) : null),
+      canStart: () => !G.busy && !G.celebrating && !G.result && !!G.board,
+      ghost: ghostFor,
+      onStart: onDragStart,
+      onMove: onDragMove,
+      onDrop: onDragDrop,
+      onCancel: onDragCancel,
+      onTap: (info) => tap(info.from),
+    });
   },
 
   show(params = {}) {
@@ -712,12 +772,14 @@ export default {
       C.game.act((s, _a, now) => flushTints(C, s, now));
     }
     G.result = null;
-    G.drag = null;
+    G.pressed = false;
+    stopHear();
+    if (G.dragH && G.dragH.active) G.dragH.cancel();
   },
 
   render(state) {
     if (ROOT && G.visible && G.result) { refreshNames(); return; }
-    if (!ROOT || !G.visible || G.busy || G.celebrating || G.drag) return;
+    if (!ROOT || !G.visible || G.busy || G.celebrating || G.pressed || (G.dragH && G.dragH.active)) return;
     const b = activeOf(state).grading || null;
     const cb = !!(state.settings && state.settings.colorblind);
     if (b !== G.board || (b && b.moves !== G.moves) || cb !== G.cb) {

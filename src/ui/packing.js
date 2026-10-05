@@ -4,9 +4,11 @@
  * `navigate('packing', {vehicle, routeId, cargo})` (the shipping UI) starts it:
  * the chosen route's crate plus one or two other routes as decoys, and the cargo
  * expanded into jar units (24 at most). A conveyor shows the current jar and the
- * next two; tap a crate to drop it in (a bounce and a thunk). Missorts are
- * neutral: no red, no sound of failure, the crate just ships at base value. When
- * the last jar lands the lids close with a stamp, the shipment is dispatched
+ * next two; drag the jar onto a crate (fx.drag, single jar: it lifts, a ghost
+ * rides above the finger, the crate under it glows) or tap a crate to drop it in
+ * (a bounce, spring heavy, and a thunk). Missorts are neutral: no red, no sound
+ * of failure, a quiet settle, the crate just ships at base value. When
+ * the last jar lands the lids close (spring firm) and are stamped (fx.stamp), the shipment is dispatched
  * through sim.shipping.dispatch({vehicle, routeId, cargo, packed: result.clean})
  * (which already fires questEvent('crateShipped') and eventPoints('crate')), and
  * a result card says "Clean crate: +25%".
@@ -38,7 +40,8 @@ const CSS = `
 .pk-conveyor { flex-direction: row; align-items: center; gap: 16px; padding: 14px; position: relative; overflow: hidden; }
 .pk-conveyor.is-lanterns { background: linear-gradient(#FFF6DF, var(--paper) 55%); box-shadow: 0 0 0 2px #E2B04A, var(--cut); }
 .pk-conveyor.is-lanterns::before { content: ''; position: absolute; left: 10px; right: 10px; top: 4px; height: 10px; background: radial-gradient(circle at 9px 5px, #DE7A2E 0 4px, transparent 4.5px) 0 0 / 28px 10px repeat-x; opacity: .9; }
-.pk-jarwrap { flex: 0 0 auto; width: 66px; animation: pk-in 240ms var(--ease-out) both; }
+.pk-jarwrap { flex: 0 0 auto; width: 66px; animation: pk-in 240ms var(--ease-out) both; cursor: grab; }
+.pk-jarwrap.fx-draggable { touch-action: none; }
 @keyframes pk-in { from { opacity: 0; transform: translateX(28px); } to { opacity: 1; transform: none; } }
 .pk-now .lbl { font-size: 13px; color: var(--ink-soft); }
 .pk-now .nm { font-family: var(--font-display); font-size: 22px; line-height: 1.15; }
@@ -46,9 +49,10 @@ const CSS = `
 .pk-next { display: flex; gap: 6px; margin-top: 6px; align-items: center; font-size: 12px; color: var(--ink-soft); }
 .pk-next svg { display: block; }
 .pk-crates { display: flex; flex-direction: column; gap: 10px; }
-.pk-crate { position: relative; overflow: hidden; display: flex; flex-direction: column; gap: 8px; width: 100%; text-align: left; padding: 10px 12px; border-radius: 14px; background: #A87449; color: var(--paper); box-shadow: 0 4px 0 rgba(42,38,34,.3); min-height: 108px; transition: transform 120ms var(--ease-out), box-shadow 120ms var(--ease-out); }
+.pk-crate { touch-action: manipulation; -webkit-tap-highlight-color: transparent; position: relative; overflow: hidden; display: flex; flex-direction: column; gap: 8px; width: 100%; text-align: left; padding: 10px 12px; border-radius: 14px; background: #A87449; color: var(--paper); box-shadow: 0 4px 0 rgba(42,38,34,.3); min-height: 108px; transition: transform 120ms var(--ease-out), box-shadow 120ms var(--ease-out); }
 .pk-crate:active { transform: translateY(2px); box-shadow: 0 2px 0 rgba(42,38,34,.3); }
 .pk-crate:disabled { transform: none; }
+.pk-crate.is-over { box-shadow: 0 4px 0 rgba(42,38,34,.3), 0 0 0 3px var(--paper), 0 0 0 5px rgba(42,38,34,.45); }
 .pk-top { display: flex; align-items: center; gap: 8px; }
 .pk-name { background: var(--paper); color: var(--ink); border-radius: 6px; padding: 3px 9px; font-family: var(--font-display); font-size: 15px; }
 .pk-pal { display: flex; gap: 3px; align-items: center; }
@@ -57,13 +61,11 @@ const CSS = `
 .pk-slots { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; }
 .pk-slot { display: block; height: 30px; border-radius: 8px; background: #8A5E40; box-shadow: inset 0 2px 0 rgba(0,0,0,.25); }
 .pk-jar { display: block; width: 100%; height: 30px; filter: drop-shadow(0 2px 0 rgba(42,38,34,.3)); }
-.pk-jar.pk-drop { animation: pk-drop 260ms cubic-bezier(.3,1.5,.5,1) both; }
-@keyframes pk-drop { 0% { opacity: 0; transform: translateY(-46px); } 55% { opacity: 1; transform: translateY(2px); } 100% { opacity: 1; transform: none; } }
-.pk-lid { position: absolute; inset: 0; background: linear-gradient(#B98255, #9A6A44); border-radius: 14px; transform: translateY(-101%); display: flex; align-items: center; justify-content: center; gap: 10px; box-shadow: inset 0 -4px 0 rgba(42,38,34,.25); }
+.pk-lid { position: absolute; inset: 0; background: linear-gradient(#B98255, #9A6A44); border-radius: 14px; transform: translateY(-101%); display: flex; align-items: center; justify-content: flex-start; padding-left: 16px; gap: 10px; box-shadow: inset 0 -4px 0 rgba(42,38,34,.25); }
 .pk-lid .pk-lidname { font-family: var(--font-display); font-size: 16px; color: var(--paper); }
-.pk-crate.is-closed .pk-lid { transform: none; transition: transform 200ms var(--ease-in-out); }
-.pk-lid .pz-stamp { background: rgba(247,244,236,.92); border-radius: 50%; }
-.pk-lid .pk-stampin { animation: pz-stamp-in 240ms var(--ease-out) both; }
+.pk-crate.is-closed .pk-lid { transform: none; }
+.pk-lid .pz-stamp { background: rgba(247,244,236,.92); border-radius: 50%; position: absolute; right: 12px; top: 50%; margin-top: -27px; }
+.pk-lid .fx-stamp.is-kept { left: 78%; top: 50%; padding: 4px 10px 3px; border-width: 2px; font-size: 16px; background: rgba(247,244,236,.9); mix-blend-mode: normal; transform-origin: 50% 50%; }
 section[data-screen="packing"] .how-link { min-height: 24px; padding: 0 8px; line-height: 1; position: relative; }
 section[data-screen="packing"] .how-link::before { content: ''; position: absolute; inset: -10px -8px; }
 .pk-hint { font-size: 13px; color: var(--ink-soft); text-align: center; }
@@ -75,7 +77,7 @@ section[data-screen="packing"] .how-link::before { content: ''; position: absolu
 let C = null;
 let ROOT = null;
 const K = {
-  visible: false, entry: null, celebrating: false, result: null, timers: [], el: {}, last: null, cb: false, sig: '', from: 'workshop',
+  visible: false, entry: null, celebrating: false, result: null, timers: [], el: {}, last: null, cb: false, sig: '', from: 'workshop', dragH: null,
 };
 
 /** Where Back leads: the table when she came from there, else the workshop (the yard lives in it). */
@@ -206,9 +208,9 @@ function dropAct(s, args, now) {
 // Drawing
 // ---------------------------------------------------------------------------
 
-function chipSvg(hex, idx, cb, { cls = '' } = {}) {
+function chipSvg(hex, idx, cb) {
   const fill = safeHex(hex);
-  return `<svg class="pk-jar ${cls}" viewBox="0 0 40 30" aria-hidden="true" focusable="false"><rect x="11" y="1" width="18" height="6" rx="2.5" fill="#C9A277" stroke="#2A2622" stroke-width="1.4"/><rect x="2" y="5" width="36" height="24" rx="8" fill="${fill}" stroke="#2A2622" stroke-width="1.6"/>${cb ? `<rect x="2" y="5" width="36" height="24" rx="8" fill="${patternFill(idx)}"/>` : ''}<rect x="7" y="9" width="4" height="12" rx="2" fill="#fff" fill-opacity=".4"/></svg>`;
+  return `<svg class="pk-jar" viewBox="0 0 40 30" aria-hidden="true" focusable="false"><rect x="11" y="1" width="18" height="6" rx="2.5" fill="#C9A277" stroke="#2A2622" stroke-width="1.4"/><rect x="2" y="5" width="36" height="24" rx="8" fill="${fill}" stroke="#2A2622" stroke-width="1.6"/>${cb ? `<rect x="2" y="5" width="36" height="24" rx="8" fill="${patternFill(idx)}"/>` : ''}<rect x="7" y="9" width="4" height="12" rx="2" fill="#fff" fill-opacity=".4"/></svg>`;
 }
 
 function famIdx(f) {
@@ -224,16 +226,14 @@ function palChip(f, cb) {
 const fullAt = (puz) => (puz.conveyor.length >= 6 ? 3 : 2);
 const accepts = (route, family) => C.puzzles.packing.accepts(route, family);
 
-function crateHtml(route, puz, cb, justDropped) {
+function crateHtml(route, puz, cb) {
   const jars = puz.crates[route.id] || [];
   const nm = escapeHtml(route.name);
   const nSlots = Math.max(12, Math.ceil(jars.length / 6) * 6);
   const slots = [];
   for (let i = 0; i < nSlots; i++) {
     const j = jars[i];
-    slots.push(j
-      ? chipSvg(j.hex, famIdx(j.family), cb, { cls: justDropped === route.id && i === jars.length - 1 ? 'pk-drop' : '' })
-      : '<i class="pk-slot"></i>');
+    slots.push(j ? chipSvg(j.hex, famIdx(j.family), cb) : '<i class="pk-slot"></i>');
   }
   const pal = route.any
     ? '<span class="pk-palname">Takes any color</span>'
@@ -259,7 +259,7 @@ function conveyorHtml(e) {
     return h`<div class="card pk-conveyor${e.lanterns ? ' is-lanterns' : ''}" data-conveyor><div class="pk-now"><div class="lbl">Shipment ready</div><div class="nm">All packed</div></div></div>`;
   }
   return h`<div class="card pk-conveyor${e.lanterns ? ' is-lanterns' : ''}" data-conveyor>
-<div class="pk-jarwrap" data-jar>${containerSvg(2, cur.hex, { size: 66, label: jarName(cur.color) })}</div>
+<div class="pk-jarwrap fx-draggable" data-jar>${containerSvg(2, cur.hex, { size: 66, label: jarName(cur.color) })}</div>
 <div class="pk-now"><div class="lbl">${title ? 'Next lantern on the string' : 'Next on the conveyor'}</div><div class="nm">${jarName(cur.color)}</div>
 <span class="tag pk-fam" style="margin-left:0">${familyName(cur.family)}</span>
 ${next.length ? h`<div class="pk-next"><span>Then</span>${raw(next.map((j) => chipSvg(j.hex, famIdx(j.family), K.cb).replace('class="pk-jar ', 'width="30" height="22" class="pk-jar ')).join(''))}</div>` : ''}</div></div>`;
@@ -273,8 +273,8 @@ function leftLabel(e) {
     : `${left} ${left === 1 ? 'jar' : 'jars'} left to pack`;
 }
 
-function cratesHtml(e, justDropped) {
-  return e.puzzle.routes.map((r) => crateHtml(r, e.puzzle, K.cb, justDropped)).join('');
+function cratesHtml(e) {
+  return e.puzzle.routes.map((r) => crateHtml(r, e.puzzle, K.cb)).join('');
 }
 
 function emptyHtml() {
@@ -286,7 +286,7 @@ function emptyHtml() {
 <div class="screen-body pz-body"><div class="card pz-empty"><div class="h2">Crates are all shipped</div><div class="hint">Packing happens when you ship a crate: load a cart at the Loading Yard and pack it by hand.</div>${yard.open ? '' : yardTag(yard)}<div class="pk-empty-actions">${go}${button(backLabel(), { block: true, cls: 'is-quiet', attrs: { 'data-action': 'done' } })}</div></div></div>`;
 }
 
-function drawAll(justDropped) {
+function drawAll() {
   const st = C.game.state;
   K.cb = !!(st.settings && st.settings.colorblind);
   const e = K.entry;
@@ -297,7 +297,7 @@ function drawAll(justDropped) {
 <div class="titles"><div class="title">${title}</div><div class="subtitle" data-left>${leftLabel(e)}</div>${howThisWorksHtml('packing')}</div><div class="spacer"></div></div>
 <div class="screen-body pz-body">
 <div data-conveyor-wrap>${conveyorHtml(e)}</div>
-<div class="pk-crates" data-crates data-coach="packing-crates">${raw(cratesHtml(e, justDropped))}</div>
+<div class="pk-crates" data-crates data-coach="packing-crates">${raw(cratesHtml(e))}</div>
 <div class="pk-hint" data-hint>A clean crate ships at +25%. A mixed one still ships, at base value.</div>
 </div>`);
   K.el = {
@@ -316,6 +316,19 @@ function sigOf(e) {
 // Drop, finish, result
 // ---------------------------------------------------------------------------
 
+/** Drop a jar into a crate: the jar bounces in (spring heavy for a fit, soft for a miss) and the crate dips with the weight. */
+function bounce(routeId, clean) {
+  const crate = K.el.crates && K.el.crates.querySelector(`[data-crate="${routeId}"]`);
+  if (!crate) return;
+  const jars = crate.querySelectorAll('.pk-slots .pk-jar');
+  const jar = jars[jars.length - 1];
+  const preset = clean ? 'heavy' : 'soft';
+  if (jar) {
+    C.fx.spring(jar, { from: { transform: 'translateY(-46px)', opacity: 0 }, to: { transform: 'translateY(0px)', opacity: 1 }, preset, fill: 'backwards' });
+  }
+  C.fx.spring(crate, { from: { transform: `translateY(${clean ? 4 : 2}px)` }, to: { transform: 'translateY(0px)' }, preset, delay: 90 });
+}
+
 function drop(routeId) {
   const e = K.entry;
   if (!e) return;
@@ -325,14 +338,15 @@ function drop(routeId) {
   const res = C.game.act(dropAct, { routeId });
   if (!res || !res.ok) return;
   if (C.game.emit) C.game.emit('crateDrop', { routeId, clean: !!res.clean }); // ends the guide's first step
-  C.audio.thunk(0.8);
+  C.audio.thunk(res.clean ? 0.8 : 0.55);
   C.haptics.light();
   if (res.clean) C.audio.tink(lightnessOf(C, jar.hex), 0.07, 0.18); // a quiet glass note only for a fit; a miss is just a thunk
   K.last = routeId;
   K.sig = sigOf(e);
   K.el.left.textContent = leftLabel(e);
   K.el.conv.innerHTML = String(conveyorHtml(e));
-  K.el.crates.innerHTML = cratesHtml(e, routeId);
+  K.el.crates.innerHTML = cratesHtml(e);
+  bounce(routeId, res.clean);
   if (res.done) {
     K.celebrating = true;
     K.final = res.final;
@@ -340,6 +354,38 @@ function drop(routeId) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Dragging the jar onto a crate (fx.drag, handle mode on the section)
+// ---------------------------------------------------------------------------
+
+/** The crate under (x, y): by its box, gaps split at their midline, 12 px of slack around the stack; -1 elsewhere. */
+function crateAt(x, y) {
+  const list = K.el.crates ? [...K.el.crates.querySelectorAll('.pk-crate')] : [];
+  if (!list.length) return -1;
+  const rs = list.map((c) => c.getBoundingClientRect());
+  if (x < rs[0].left - 12 || x > rs[0].right + 12 || y < rs[0].top - 12 || y > rs[rs.length - 1].bottom + 12) return -1;
+  let best = 0;
+  let bestD = Infinity;
+  rs.forEach((r, i) => {
+    const d = y < r.top ? r.top - y : y > r.bottom ? y - r.bottom : 0;
+    if (d < bestD) { bestD = d; best = i; }
+  });
+  return best;
+}
+
+function setOver(i) {
+  if (!K.el.crates) return;
+  K.el.crates.querySelectorAll('.pk-crate.is-over').forEach((n) => n.classList.remove('is-over'));
+  if (i >= 0) {
+    const c = K.el.crates.querySelectorAll('.pk-crate')[i];
+    if (c) c.classList.add('is-over');
+  }
+}
+
+const STAMP_GREEN = '#3F7A5A';
+const lidHtml = (name) => `<span class="pk-lidname">${escapeHtml(name)}</span>`;
+
+/** Close every used crate's lid in turn (spring firm), stamping the clean ones (fx.stamp: thunk, medium haptic). */
 function closeLids() {
   if (!K.celebrating) return;
   const e = K.entry;
@@ -354,25 +400,24 @@ function closeLids() {
     if (!count) return;
     const clean = res.perCrate[id] && res.perCrate[id].clean;
     const lid = el.querySelector('[data-lid]');
-    const delay = reduced() ? 0 : k * 120;
+    const delay = reduced() ? 0 : k * 110;
     later(() => {
-      lid.innerHTML = `<span class="pk-lidname">${escapeHtml(route.name)}</span>${clean ? `<span class="pk-stampin">${stampSvg('Clean', { sub: 'CRATE', tone: '#3F7A5A', size: 54 })}</span>` : ''}`;
+      lid.innerHTML = lidHtml(route.name);
       el.classList.add('is-closed');
-      if (clean) C.audio.stamp(); else C.audio.thunk(0.5);
+      C.fx.spring(lid, { from: { transform: 'translateY(-101%)' }, to: { transform: 'translateY(0%)' }, preset: 'firm' });
+      if (clean) later(() => { if (K.celebrating) C.fx.stamp(lid, 'Clean', { keep: true, hex: STAMP_GREEN }); }, reduced() ? 0 : 200);
+      else C.audio.thunk(0.5);
     }, delay);
     k++;
   });
-  if (res.clean) {
-    later(() => C.audio.chord([0.35, 0.5, 0.65, 0.8], 1), 260);
-    later(() => C.haptics.success(), 260);
-  }
-  later(finalize, 520 + k * 120);
+  if (res.clean) later(() => C.audio.chord([0.35, 0.5, 0.65, 0.8], 1), 260);
+  later(finalize, 320 + Math.max(0, k - 1) * 110 + (reduced() ? 160 : 420));
 }
 
+/** Tap while the lids close: every lid down at once, the stamps already on, then the result. */
 function skip() {
   if (!K.celebrating) return;
   clearTimers();
-  // Show every lid closed, then the result.
   const e = K.entry;
   const res = K.final.result;
   K.el.crates.querySelectorAll('.pk-crate').forEach((el) => {
@@ -381,7 +426,9 @@ function skip() {
     el.setAttribute('aria-disabled', 'true');
     if (!(e.puzzle.crates[id] || []).length) return;
     const clean = res.perCrate[id] && res.perCrate[id].clean;
-    el.querySelector('[data-lid]').innerHTML = `<span class="pk-lidname">${escapeHtml(route.name)}</span>${clean ? stampSvg('Clean', { sub: 'CRATE', tone: '#3F7A5A', size: 54 }) : ''}`;
+    const lid = el.querySelector('[data-lid]');
+    lid.getAnimations().forEach((a) => a.cancel());
+    lid.innerHTML = lidHtml(route.name) + (clean ? stampSvg('Clean', { sub: 'CRATE', tone: STAMP_GREEN, size: 54 }) : '');
     el.classList.add('is-closed');
   });
   finalize();
@@ -404,7 +451,7 @@ function finalize() {
   }
   const lines = [];
   if (disp && disp.ok) {
-    lines.push(h`<li>${iconSvg('coin', { size: 18 })}<span>Worth about <b class="num">${coinsText(C, disp.value)}</b> coins on arrival</span></li>`);
+    lines.push(h`<li>${iconSvg('coin', { size: 18 })}<span>Worth about <b class="num" data-worth>${coinsText(C, disp.value)}</b> coins on arrival</span></li>`);
     const ms = Number.isFinite(disp.arrivesAt) ? Math.max(0, disp.arrivesAt - now) : 0;
     if (ms > 0) lines.push(h`<li>${iconSvg('check', { size: 18 })}<span>Back in about ${gentleDuration(ms)}</span></li>`);
   } else {
@@ -419,9 +466,32 @@ function finalize() {
   if (K.el.left) K.el.left.textContent = 'All packed';
   const top = ROOT.querySelector('.screen-body');
   if (top) top.scrollTop = 0;
+  playBonus(K.el.conv.querySelector('[data-result]'), result, disp);
   stopGuide();
   if (!isSeen(C.game.state, 'packing')) C.game.act(markGuideSeen, { id: 'packing' }); // the result card says it too
   firstResultCard();
+}
+
+/** The worth rolls up to the base value; a clean crate is stamped "+25%" and the bonus rolls on top. */
+function playBonus(card, result, disp) {
+  const worth = card && card.querySelector('[data-worth]');
+  if (!worth || !disp || !disp.ok) return;
+  const total = disp.value;
+  const fmt = (v) => coinsText(C, v);
+  const finish = () => { worth.textContent = fmt(total); };
+  if (!(total > 0)) return;
+  if (!result.clean) {
+    C.fx.rollNumber(worth, 0, total, { ms: 500, format: fmt });
+    later(finish, 560);
+    return;
+  }
+  const base = total / (1 + C.puzzles.packing.CLEAN_BONUS);
+  C.fx.rollNumber(worth, 0, base, { ms: 300, format: fmt });
+  later(() => {
+    C.fx.stamp(card, '+25% clean crate', { hex: STAMP_GREEN, hold: 450 });
+    later(() => C.fx.rollNumber(worth, base, total, { ms: 380, format: fmt }), reduced() ? 140 : 190);
+  }, reduced() ? 160 : 280);
+  later(finish, 1000);
 }
 
 // ---------------------------------------------------------------------------
@@ -533,6 +603,23 @@ export default {
     injectStyle('packing', CSS);
     ensureDefs();
     root.addEventListener('click', onClick);
+    root.addEventListener('pointerdown', () => { if (K.celebrating) skip(); }, true); // any tap skips the lids
+    root.addEventListener('contextmenu', (e) => { if (e.target.closest('[data-jar]')) e.preventDefault(); });
+    // The conveyor's jar is dragged by handle (the section outlives every redraw); crates are the targets.
+    K.dragH = C.fx.drag(root, {
+      handle: '[data-jar]',
+      source: () => 0,
+      cellAt: (x, y) => crateAt(x, y),
+      canStart: () => !K.celebrating && !K.result && !!K.entry && !!C.puzzles.packing.currentJar(K.entry.puzzle),
+      onMove: (to) => setOver(to),
+      onDrop: (to) => {
+        setOver(-1);
+        if (to < 0 || !K.entry || K.celebrating || K.result) return; // fx.drag sends the jar home
+        const route = K.entry.puzzle.routes[to];
+        if (route) drop(route.id);
+      },
+      onCancel: () => setOver(-1),
+    });
     registerGuide();
   },
 
@@ -551,6 +638,7 @@ export default {
 
   hide() {
     K.visible = false;
+    if (K.dragH && K.dragH.active) K.dragH.cancel();
     stopGuide();
     clearTimers();
     K.celebrating = false;
@@ -558,7 +646,7 @@ export default {
   },
 
   render(state) {
-    if (!ROOT || !K.visible || K.celebrating || K.result) return;
+    if (!ROOT || !K.visible || K.celebrating || K.result || (K.dragH && K.dragH.active)) return;
     const e = activeOf(state).packing || null;
     const cb = !!(state.settings && state.settings.colorblind);
     if (e !== K.entry || cb !== K.cb || (e && sigOf(e) !== K.sig)) {

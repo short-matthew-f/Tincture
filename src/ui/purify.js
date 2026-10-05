@@ -2,9 +2,11 @@
  * purify.js: the tube sort for muddy batches (overlay `purify`, fullscreen).
  *
  * Owns: tubes as tall glass SVGs with stacked layers (patterns in colorblind
- * mode), tap a tube to lift it then tap where to pour, the stream arc with a
- * wobbling landing, `audio.glug` per pour, the cork the moment a tube is full
- * and one color (`isCorked`), unlimited Undo, "Add a tube" (only where the tier
+ * mode), tap a tube to lift it (fx.lift: 106% and a grown shadow) then tap where
+ * to pour, the stream arc, the pouring tube tipping back upright (spring soft),
+ * layers landing with a wobble (spring soft on the layer group), `audio.glug`
+ * per pour pitched to the fill, the cork popping in (spring heavy, medium haptic)
+ * the moment a tube is full and one color (`isCorked`), unlimited Undo, "Add a tube" (only where the tier
  * allows it: Relaxed, once), the "Start this batch on ..." tier switch, and the
  * solve: every non-empty tube corked, then sim.factory.purifyBatch pays the
  * batch at the tier's purity plus the puzzle reward. Implements DESIGN.md
@@ -39,10 +41,9 @@ const CSS = `
 .pu-tube svg { display: block; overflow: visible; width: var(--tw); height: auto; transition: transform 140ms var(--ease-out); }
 .pu-tube.is-sel svg { transform: translateY(-16px); }
 .pu-tube:focus-visible { outline: 2px solid var(--paper); outline-offset: -2px; border-radius: 8px; }
-.pu-layer-new { transform-box: fill-box; transform-origin: 50% 100%; animation: pu-land 320ms var(--ease-out) var(--d, 150ms) backwards; }
-@keyframes pu-land { 0% { transform: scaleY(0); } 60% { transform: scaleY(1.07); } 100% { transform: scaleY(1); } }
-.pu-cork-new { transform-box: fill-box; transform-origin: 50% 100%; animation: pu-cork 340ms var(--ease-out) var(--cd, 330ms) backwards; }
-@keyframes pu-cork { 0% { transform: translateY(-22px); opacity: 0; } 55% { transform: translateY(2px) scale(1.08, .88); opacity: 1; } 100% { transform: none; opacity: 1; } }
+.pu-layer-new, .pu-cork-new { transform-box: fill-box; transform-origin: 50% 100%; }
+.pu-tube.fx-lifted { transform-origin: 50% 100%; }
+.pu-tube svg.is-tipping { transform-origin: 50% 25%; }
 .pu-stream { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; z-index: 5; }
 .pu-stream path { fill: none; stroke-linecap: round; filter: drop-shadow(0 1px 0 rgba(42,38,34,.35)); }
 .pu-head .titles { min-width: 0; }
@@ -59,7 +60,7 @@ const CSS = `
 .pu-empty-actions .btn.is-quiet, .pu-tools .btn.is-quiet { box-shadow: 0 3px 0 var(--shadow), inset 0 0 0 1.5px rgba(42,38,34,.2); }
 .pu-purity { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 14px; }
 .pu-result .coinline b { font-variant-numeric: tabular-nums; }
-@media (prefers-reduced-motion: reduce) { .pu-layer-new, .pu-cork-new { animation: none; } .pu-tube svg { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .pu-tube svg { transition: none; } }
 `;
 
 let C = null;
@@ -333,12 +334,20 @@ function redrawTube(i, opts) {
 function setSel(i) {
   if (P.sel !== null) {
     const o = tubeEl(P.sel);
-    if (o) { o.classList.remove('is-sel'); o.removeAttribute('aria-pressed'); }
+    if (o && o.classList.contains('is-sel')) {
+      o.classList.remove('is-sel');
+      o.removeAttribute('aria-pressed');
+      safe(() => C.fx.settle(o)); // put down with the shared 3% overshoot
+    }
   }
   P.sel = i;
   if (i !== null) {
     const n = tubeEl(i);
-    if (n) { n.classList.add('is-sel'); n.setAttribute('aria-pressed', 'true'); }
+    if (n) {
+      n.classList.add('is-sel');
+      n.setAttribute('aria-pressed', 'true');
+      safe(() => C.fx.lift(n)); // 106% and a grown shadow; the tube itself rises 16 px in CSS
+    }
   }
 }
 
@@ -428,6 +437,43 @@ const svgRect = (i) => {
   return s ? s.getBoundingClientRect() : null;
 };
 
+/** The pouring tube was held tipped toward its target: it settles back upright (spring soft). */
+function tipBack(el, ra, rb) {
+  const svg = el && el.querySelector('svg');
+  if (!svg || !ra || !rb || reduced()) return;
+  const dir = rb.left + rb.width / 2 >= ra.left + ra.width / 2 ? 1 : -1;
+  svg.classList.add('is-tipping');
+  const done = () => svg.classList.remove('is-tipping');
+  const p = C.fx.spring(svg, {
+    from: { transform: `translateY(-16px) rotate(${dir * 24}deg)` },
+    to: { transform: 'translateY(0px) rotate(0deg)' },
+    preset: 'soft',
+  });
+  if (p && p.then) p.then(done, done); else done();
+}
+
+/** New layers drop in with a wobble: spring soft on each layer group, staggered with the stream. */
+function landLayers(el) {
+  if (!el) return;
+  el.querySelectorAll('.pu-layer-new').forEach((g, k) => {
+    const d = Number.parseFloat(g.style.getPropertyValue('--d')) || 150 + k * 60;
+    C.fx.spring(g, { from: { transform: 'scaleY(0)' }, to: { transform: 'scaleY(1)' }, preset: 'soft', fill: 'backwards', delay: d });
+  });
+}
+
+/** The cork drops into the mouth and squashes on contact (spring heavy), as the pop sounds. */
+function corkPop(el, atMs) {
+  const g = el && el.querySelector('.pu-cork-new');
+  if (!g) return;
+  C.fx.spring(g, {
+    from: { transform: 'translateY(-24px) scale(1.1, 0.9)', opacity: 0 },
+    to: { transform: 'translateY(0px) scale(1, 1)', opacity: 1 },
+    preset: 'heavy',
+    fill: 'backwards',
+    delay: Math.max(120, atMs - 160),
+  });
+}
+
 function pour(from, to) {
   const e = P.entry;
   const puz = e.puzzle;
@@ -444,10 +490,12 @@ function pour(from, to) {
   const res = C.game.act(pourAct, { from, to });
   if (!res || !res.ok) { setSel(null); return; }
   setSel(null);
-  redrawTube(from);
-  redrawTube(to, { newN: res.moved, corkNew: res.completedTube });
+  const fromEl = redrawTube(from);
+  const toEl = redrawTube(to, { newN: res.moved, corkNew: res.completedTube });
   markCoach();
   safe(() => streamTo(ra, rb, puz.colors[colorIdx], before + res.moved, res.moved));
+  safe(() => tipBack(fromEl, ra, rb));
+  safe(() => landLayers(toEl));
   const hex = puz.colors[colorIdx];
   const Lc = lightnessOf(C, hex);
   const hz = clamp(C.color.noteHz(Lc), 247, 523);
@@ -456,6 +504,7 @@ function pour(from, to) {
   if (res.completedTube) {
     safe(() => C.audio.note(Lc, len + 0.02, 0.18, 0.8));
     safe(() => C.audio.cork(len + 0.14));
+    safe(() => corkPop(toEl, (len + 0.14) * 1000));
     later(() => safe(() => C.haptics.medium()), (len + 0.14) * 1000);
   }
   updateStatus();
@@ -466,7 +515,7 @@ function pour(from, to) {
     P.reward = res.reward;
     if (P.guide) { P.guide.stop(); P.guide = null; }
     C.game.act(markGuideSeen, { id: 'purify' }); // she has finished a batch: the coach is done
-    later(startCelebration, 480);
+    later(startCelebration, 440);
   }
 }
 
@@ -481,7 +530,7 @@ function startCelebration() {
   safe(() => C.fx.shimmerSweep(P.el.shelf, { ms: 800 }));
   safe(() => C.audio.arpeggio(colors));
   safe(() => C.haptics.success());
-  later(finalize, 780);
+  later(finalize, 700);
 }
 
 function skip() {
@@ -527,7 +576,7 @@ function finalize() {
   if (cardEl) playReward(cardEl, r);
 }
 
-/** The ink stamp lands, coins fan out to the total, which rolls up from zero. */
+/** The ink stamp lands (fx.stamp), coins fan out to the total as it thunks, and the total rolls up from zero. */
 function playReward(cardEl, r) {
   const roll = cardEl.querySelector('[data-roll]');
   const fmt = (v) => coinsText(C, v);
@@ -535,15 +584,15 @@ function playReward(cardEl, r) {
   if (!roll) return;
   if (!(r.coins > 0)) { finish(); return; }
   const go = () => {
+    if (P.result !== r) return;
     const from = cardEl.querySelector('.swatch') || cardEl;
     safe(() => C.fx.coinArc(from, roll, 8, { quiet: false }));
     safe(() => C.fx.rollNumber(roll, 0, r.coins, { ms: 600, format: fmt }));
     later(finish, 700); // exact total even if the roll was cut short
   };
-  if (reduced()) { go(); return; }
-  const stampP = safe(() => C.fx.stamp(cardEl, (PURITY_COPY[r.purity] || PURITY_COPY.pure).head, { hold: 500 }));
-  if (stampP && stampP.then) stampP.then(() => { if (P.result === r) later(go, 120); }, go);
-  else go();
+  // The stamp makes contact about 165 ms in; the coins leave right behind it. Reduced motion fades the stamp in.
+  safe(() => C.fx.stamp(cardEl, (PURITY_COPY[r.purity] || PURITY_COPY.pure).head, { hold: 450 }));
+  later(go, reduced() ? 140 : 190);
 }
 
 // ---------------------------------------------------------------------------
@@ -695,6 +744,7 @@ export default {
     injectStyle('purify', CSS);
     ensureDefs();
     root.addEventListener('click', onClick);
+    root.addEventListener('pointerdown', () => { if (P.celebrating) skip(); }, true); // any tap skips the celebration
     window.addEventListener('resize', relayout);
   },
 

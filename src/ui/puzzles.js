@@ -320,7 +320,9 @@ export const PZ_CSS = `
 .pz-hub .seg-control > button { min-height: 44px; }
 .pz-hub .btn.small, .pz-nudge .btn.small { min-height: 44px; }
 .pz-hub .btn.quiet { box-shadow: 0 3px 0 var(--shadow), inset 0 0 0 1.5px rgba(42,38,34,.2); }
-.pz-hub .tierdesc { min-height: 18px; }
+.pz-hub .tierdesc { min-height: 18px; position: relative; }
+.pz-hub .pz-xfade { position: absolute; left: 0; right: 0; top: 0; pointer-events: none; }
+.pz-hub .seg-control > button { touch-action: manipulation; }
 .pz-hub .seg-control > button.has-sub { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; padding: 4px 2px; line-height: 1.15; min-width: 0; }
 .pz-hub .seg-control > button.has-sub small { font-size: 11px; font-weight: 500; color: var(--ink-soft); white-space: nowrap; }
 .pz-hub .batches { display: flex; flex-direction: column; }
@@ -343,6 +345,7 @@ let ROOT = null;
 let SIG = '';
 let section = null;
 let confirmSell = false;
+let nudgeShown = false; // the Try Tricky nudge has lifted in on this visit
 
 function fmt(n) {
   return C.format && C.format.num ? C.format.num(n) : Math.round(n).toLocaleString();
@@ -495,6 +498,50 @@ function draw(state, force = false) {
   ROOT.innerHTML = build(state);
   const nb = ROOT.querySelector('.screen-body');
   if (nb) nb.scrollTop = top;
+  liftNudge();
+}
+
+const reducedMotion = () => !!(C.fx && C.fx.isReducedMotion && C.fx.isReducedMotion());
+
+/** The line under a tier control changed: the new words fade in as the old ones fade out (reduced motion: a short fade). */
+function crossfade(el, oldText) {
+  if (!el || !C.fx) return;
+  if (reducedMotion()) { C.fx.fade(el); return; }
+  const old = document.createElement('span');
+  old.className = 'pz-xfade';
+  old.textContent = oldText;
+  old.setAttribute('aria-hidden', 'true');
+  el.appendChild(old);
+  const gone = () => old.remove();
+  if (typeof el.animate !== 'function') { gone(); return; }
+  try {
+    el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 180, easing: 'ease-out' });
+    old.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 140, easing: 'ease-in', fill: 'forwards' }).finished.then(gone, gone);
+  } catch (e) { gone(); }
+}
+
+/** Run a tier change that redraws the table: the chosen segment squashes and the description crossfades. */
+function changeTier(cardId, tier, change) {
+  const old = ROOT.querySelector(`#${cardId} .tierdesc`);
+  const oldText = old ? old.textContent : '';
+  change();
+  draw(C.game.state, true);
+  const card = ROOT.querySelector(`#${cardId}`);
+  if (!card) return;
+  const seg = card.querySelector(`.seg-control [data-tier="${tier}"]`);
+  if (seg && C.fx) C.fx.squash(seg);
+  const desc = card.querySelector('.tierdesc');
+  if (desc && oldText && oldText !== desc.textContent) crossfade(desc, oldText);
+}
+
+/** The gentle "Try Tricky?" card lifts in once per visit (spring soft; reduced motion fades it). */
+function liftNudge() {
+  const btn = ROOT.querySelector('[data-action="try-tricky"]');
+  const card = btn && btn.closest('.pz-nudge');
+  if (!card) { nudgeShown = false; return; }
+  if (nudgeShown || !C.fx) return;
+  nudgeShown = true;
+  C.fx.spring(card, { from: { transform: 'translateY(14px)', opacity: 0 }, to: { transform: 'translateY(0px)', opacity: 1 }, preset: 'soft', fill: 'backwards' });
 }
 
 function startGrading(mode) {
@@ -511,30 +558,27 @@ function onClick(e) {
   if (act === 'tier') {
     const tier = t.dataset.tier;
     if (C.sim.unlocks && !C.sim.unlocks.tierRevealed(C.game.state, tier)) return;
-    C.game.act((s, a) => {
+    changeTier('pz-grading', tier, () => C.game.act((s, a) => {
       if (a.tier === 'tricky' || a.tier === 'master') { s.stats = s.stats || {}; s.stats.fastSolves = 0; }
       return C.sim.settings.setPuzzleTier(s, { puzzle: 'grading', tier: a.tier });
-    }, { tier });
-    draw(C.game.state, true);
+    }, { tier }));
   } else if (act === 'new-grading') {
     startGrading(t.dataset.mode);
   } else if (act === 'continue-grading') {
     C.navigate('grading', {});
   } else if (act === 'try-tricky') {
-    C.game.act((s) => {
+    changeTier('pz-grading', 'tricky', () => C.game.act((s) => {
       s.stats = s.stats || {};
       s.stats.fastSolves = 0;
       return C.sim.settings.setPuzzleTier(s, { puzzle: 'grading', tier: 'tricky' });
-    });
-    draw(C.game.state, true);
+    }));
   } else if (act === 'dismiss-nudge') {
     C.game.act((s) => { s.stats = s.stats || {}; s.stats.fastSolves = 0; });
     draw(C.game.state, true);
   } else if (act === 'purify-tier') {
     const tier = t.dataset.tier;
     if (C.sim.unlocks && !C.sim.unlocks.tierRevealed(C.game.state, tier)) return;
-    C.game.act((s, a) => C.sim.settings.setPuzzleTier(s, { puzzle: 'purify', tier: a.tier }), { tier });
-    draw(C.game.state, true);
+    changeTier('pz-purify', tier, () => C.game.act((s, a) => C.sim.settings.setPuzzleTier(s, { puzzle: 'purify', tier: a.tier }), { tier }));
   } else if (act === 'sort-one' || act === 'purify') {
     const st = C.game.state;
     const cur = activeOf(st).purify;
@@ -592,6 +636,7 @@ export default {
   show(params = {}) {
     section = params.puzzle || null;
     confirmSell = false;
+    nudgeShown = false;
     const st = C.game.state;
     if (activeOf(st).pendingTints && activeOf(st).pendingTints.length) {
       C.game.act((s, _a, now) => flushTints(C, s, now));
