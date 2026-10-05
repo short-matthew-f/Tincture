@@ -3,6 +3,164 @@
 Written 2026-10-04 from playtest notes (Matthew and his wife, builds 0.1.0–0.1.3).
 No code has changed yet. This is the work order for the next session.
 
+## Amendments after the UX handbook review (2026-10-05)
+
+Source: `docs/UX-GUIDELINES-REVIEW.md` (handbook under `ux_guidelines/`).
+These override the matching items below. Three of them touch Matthew's
+own directions and are marked **needs Matthew**.
+
+**Order of work changes.** Step 1 now also builds the two UI foundations
+everything else consumes, so the shelf drag and the onboarding are built
+once: `fx.js` motion vocabulary (spring, lift/settle, `drag` with
+board-local hit testing, ghost offset, hysteresis, magnet, coin arc, stamp)
+and the `guide()` coach mechanism with its hygiene rules. Theme F's
+per-screen feel pass then uses that vocabulary at step 6. A step 0
+(15 minutes of decisions) comes first. Full table in the review, §E.
+
+**Theme A (pacing and gating)**
+- Show the price from the start: the tag reads "Shelf: 8 colors · 400
+  coins, 3 more colors". Never hide a number she could plan toward.
+- Let her feel the need first: from 6 colors, spillover vials visibly stack
+  behind the closed shelf's glass ("6 vials waiting"); buying opens a
+  stocked shelf. Same pattern later for the map window (a knock, "Wren is
+  waiting").
+- Tapping a locked object opens a "What this opens" sheet (one looping
+  illustration, one sentence, the price). Every purchase plays a shared
+  1.5 s `unlockCeremony` in the scene that hands off to that subgame's
+  guide.
+- **Drop the Purify coin gate.** The first muddy batch is already a felt
+  need; charging between a problem and its fix is a toll, and it conflicts
+  with Theme C's tutorial-on-first-batch. *Needs Matthew: it narrows "pay
+  for every new game" to shelf, hunters, gallery, shipping, commissions.*
+- **Grading tiers stay free**, revealed by colors one segment at a time
+  (Steady at 10, Tricky at 25, Master at 45). Decision 4 already made
+  purify tiers free; two rules for one control is worse. *Needs Matthew.*
+- The third mixer (~60 coins) is the flow-meter suggestion right after
+  the tutorial: the first-session "new possibility".
+- Easel: greyed colors carry a paper tag "Set a mixer to make this" and
+  open the mixer picker as a sheet over the easel, never a navigation away.
+- Shop reserve: the default "keep 20 jars" does the work; the per-color
+  toggle lives in the vat's detail sheet.
+- Renovate lists which unlocks will close; after it, one batch re-buy
+  ("Reopen the shelf, map and gallery for 3.1K") instead of six.
+- Workshop split: ONE primary on the home screen. The flow-meter
+  suggestion and Theme D's Next strip become a single "Next" button;
+  Collect folds into the coin pill; Almost there moves to the bottom or the
+  Ledger. Show only segments with content (Shipping appears with the
+  Loading Yard). Remember the last segment; deep links scroll to the row
+  and flash it. Scene objects are shortcuts into their section. Rows show
+  before → after ("0.08 → 0.11 a second").
+- Rewrite DESIGN's First ten minutes and the e2e for the new gates (table
+  in the review §C): naming stays the high point, the third mixer is the
+  new possibility, the shelf becomes session two's landmark, at most 5
+  coach bubbles, no chain-merge target in minute ten.
+
+**Theme B (6×6 match shelf)**
+- Hit testing is board-local maths to the nearest cell (gaps and planks
+  count), bounds extended 12 px. Today's `elementFromPoint` drops nothing
+  on the planks and snaps back, which is the real drag bug.
+- Draw the dragged container fully above the finger (base at y − 12 px,
+  the color sits at the bottom of a vial) and resolve the drop where the
+  container is, not the finger. Hysteresis: target changes only 25% into
+  a neighbour. Magnet: within 24 px of a legal partner, snap; empties
+  second. No positional lag on the drag.
+- Pickup preview: exact-color partners ring; cells that would complete a
+  family line get a faint guide in the family color.
+- Family glyph on every cork and on the color chips (pairs match on exact
+  color, lines on family; two look-alike rules need a non-color cue). A
+  same-family different-color drop just moves, with a quiet name label.
+- Default chips to five different families; two in one family allowed.
+- **Line sequence trimmed to ~1.5 s** to respect DESIGN's 1.5 s cap and
+  "skippable": lean-ins 6 × 60 ms with notes and no per-step haptic (the
+  80 ms throttle would drop half), pop 280 ms + heavy haptic, glowing hold
+  350 ms (500 ms for her first line ever), tip + coin arc + roll + "Sold"
+  stamp 400 ms with a medium haptic, shimmer-clear 150 ms. A tap at any
+  point jumps to the end with coins credited; from the hold on, cells
+  outside the line accept a new drag. *Needs Matthew: you asked for a real
+  pause; this keeps the pause but shortens the whole to the doc's cap.*
+- **Diagonals stay in** (Matthew's direction) but are taught the first
+  time a diagonal has five, not upfront. Rows and columns are taught at
+  the first clear and first column-of-five.
+- Lines found in the same check resolve together as one "double line":
+  one sequence, two coin arcs that join, ×2 on the 1.5× bonus. Defined in
+  the sim before the UI.
+- Cascades: merge, 90 ms, then the line; a chain keeps its 90 ms steps and
+  the line waits for the last pop.
+- Judge the pause with local counters `stats.lines` / `stats.lineSkips`
+  in the debug panel and by watching her play; if she skips more than half
+  after her first ten, shorten the hold.
+- Seeded onboarding row goes on the bottom row (nearest the thumb); the
+  coach sits above the board, never over rows.
+- Tests: a perturbation harness (200 drops at random offsets up to half a
+  cell, including gap and plank midpoints, ≥ 99% land right), fit at
+  375×667 as well as 390×844, frame probe during a double line.
+- Header folds to one line above the chips; "The shelf is resting: make
+  room for new vials" while paused; migration shows one paper line
+  explaining the new rules.
+
+**Theme C (purify)**
+- Offline catch-up adds at most 3 batches (live play keeps 2–3 min, cap 10).
+- Muddy batches never block "All caught up"; the Ledger line reads "3
+  muddy batches to sort, if you like". Cut "Purify all later"; add "Sell
+  all as is" with a one-line total confirm.
+- Tier control lives on the Puzzle table's Purify card, same component
+  and position as grading; each tier shows an expected length ("about
+  1 / 2 / 3 / 5 min"); Relaxed by default for her first three batches;
+  mid-batch tier change restarts the batch with nothing lost.
+- The whole tube column is the tap target; gaps resolve to the nearest
+  tube; check 11 tubes at 375 wide. Teach the cork just in time (first
+  tube one layer from full).
+
+**Theme D (subgame onboarding)**
+- `guide()` hygiene, enforced in the mechanism: a step that can end on an
+  action ends on it ("Got it" only on information steps); at most 2 steps
+  before her first action; ≤ 15 words a step; the bubble never covers its
+  anchor or the next target and never shares the screen with a toast or
+  sheet; steps may wait for a trigger state; every subgame header gets a
+  "How this works" replay link.
+- The "what's next" card appears when she leaves a subgame or after her
+  first success, never mid-play; two equal choices ("One more" / "Next:
+  the catalog"); it never navigates by itself.
+- Scripts fire from each unlock's ceremony, so introduction order follows
+  unlock order; hop copy updated to the new gates. Where cheap, a character
+  speaks the script (first hunter for the Map, a visitor for the Gallery, a
+  customer for Commissions).
+- No separate Next strip (folded into Theme A's single "Next" button).
+
+**Theme E (gallery)**
+- Scrap confirm says what goes ("12 painted panes will be cleared; the
+  jars stay spent") as a second tap on the same button.
+- Selling a signed piece: a sheet with the thumbnail and price; a "Sold to
+  a collector" card with the thumbnail stays in the archive. "Take down"
+  gets a 44 px target.
+
+**Theme F (feel)**
+- No 40 ms drag lag; tilt from velocity, capped at 6°; hit testing, ghost
+  offset, hysteresis and magnet live in `fx.drag`, shared by shelf, board
+  and packing.
+- **Confirm the test phones first.** `haptics.js` uses `navigator.vibrate`,
+  which iOS Safari lacks: on an iPhone every haptic in the spec is silent
+  and the Playwright iPhone descriptor can't show it. Haptics are never
+  the only carrier of meaning.
+- Button press animation is cosmetic: the action fires on release at once.
+  Repeated buys collapse to one squash per frame. Test `pointercancel`
+  from the iOS edge swipe on the shelf and board. Run the frame probe on
+  a double line and a merge-then-line cascade.
+
+**New items (from review §D):** toast discipline (one at a time, never
+carried across screens) and tab highlight by home tab are still open from
+the audit and go in step 1; 375×667 joins the e2e screenshot set; before →
+after values on every Level up row; local-only counters (wrong drop,
+rejected drag, line skips, coach dismissed without acting) in the debug
+panel; a "What changed in 0.2" paper note for existing saves. Later: hold-
+to-repeat on Level up from level 10, separate effects/ambience volume,
+undo the last shelf move.
+
+**Decisions for step 0 (Matthew):** show prices from the start (yes, by
+default); drop the Purify coin gate; keep all difficulty tiers free; keep
+diagonals (yes, your call); line sequence 1.5 s with skip vs your 2.2 s;
+which phone(s) the playtest uses.
+
 ## What the playtest said, and what's actually behind it
 
 | # | Note | Root cause in the build |
