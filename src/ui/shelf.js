@@ -33,6 +33,12 @@
  * Local counters (through game.act): stats.wrongDrops (a drop that resolves
  * to -1), stats.rejectedDrags (a drag that was cancelled), stats.lineSkips
  * (sim.shelf.skipLine, a tap through a line sequence).
+ *
+ * Feel (Theme F): a container that lands in an empty cell settles (fx.settle, applied after the board's rebuild so
+ * it is the vial on screen that settles); containers with a merge partner breathe (fx.pulse, 2%), out of step with
+ * each other so the shelf ripples; on tall phones the room under the board goes to a second, quiet line under the
+ * info line (the rules in one sentence), and the side gutters are 12 px, so cells are a little larger. At 375 x 667
+ * the board still fills the screen exactly and nothing scrolls.
  */
 
 import { h, raw, backButton, button, iconSvg, containerSvg, CONTAINER_NAMES, safeHex } from './kit.js';
@@ -47,6 +53,7 @@ const N = COLS * ROWS;
 const GAP = 5;          // gap between cells (px)
 const BPAD = 8;         // board frame padding (px); also the drag bounds' frame
 const ROW_H = 44;       // the info line and the chip row
+const ROOMY_EXTRA = 34; // the info line grows by this much (a second, quiet line) when the board leaves room under it
 const MAX_CELL_W = 64;
 
 /** The line sequence's beats (ms). Total about 1.5 s; see playLines. */
@@ -93,10 +100,13 @@ const CSS = `
 #screen-shelf .how-link{min-height:24px;padding:0 8px;line-height:1;position:relative}
 #screen-shelf .how-link::before{content:'';position:absolute;inset:-10px -8px}
 #screen-shelf .sh-coins{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;gap:6px;min-width:76px;height:34px;padding:0 10px 0 8px;border-radius:999px;background:var(--paper);box-shadow:var(--cut-sm);font-weight:700;font-size:15px;font-variant-numeric:tabular-nums}
-#screen-shelf .screen-body{overflow:hidden;gap:6px;padding-top:4px;padding-bottom:8px}
+#screen-shelf .screen-body{overflow:hidden;gap:6px;padding:4px 12px 8px}
 #screen-shelf .sh-info{flex:0 0 auto;height:${ROW_H}px;display:flex;align-items:center;gap:8px}
 #screen-shelf .sh-line{flex:1 1 auto;min-width:0;font-size:14px;font-weight:600;line-height:1.2;color:var(--ink);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 #screen-shelf .sh-line.is-rest{color:var(--ink-soft)}
+#screen-shelf .sh-info.is-roomy{height:${ROW_H + ROOMY_EXTRA}px}
+#screen-shelf .sh-col{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:2px}
+#screen-shelf .sh-sub{font-size:12px;line-height:1.25;color:var(--ink-soft);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 #screen-shelf .sh-sel{display:flex;align-items:center;gap:8px;width:100%}
 #screen-shelf .sh-sel .grow{min-width:0;flex:1 1 auto;line-height:1.2}
 #screen-shelf .sh-sel .btn.small{min-height:44px;padding-left:14px;padding-right:14px}
@@ -176,6 +186,7 @@ const ui = {
   chipSig: '',
   sheet: null,
   lay: null,         // {cw, ch, vw, gap}
+  roomy: false,      // the info line has its second line (the screen is tall enough)
   coinLocks: 0,      // > 0: the coin pill shows ui.coinShown
   coinShown: 0,
   dragMoved: false,
@@ -310,8 +321,16 @@ function layout() {
     n++;
   }
   used += rowGapPx * n;
-  const H = body.clientHeight - used;
-  const lay = fitBoard(W, H);
+  const info = body.querySelector('.sh-info');
+  const infoH = info ? info.offsetHeight : ROW_H;
+  const baseInfoH = info && info.classList.contains('is-roomy') ? infoH - ROOMY_EXTRA : infoH;
+  const H0 = body.clientHeight - used + (infoH - baseInfoH);        // height for the board with the compact info line
+  const lay = fitBoard(W, H0);
+  // Spare room under the board (tall phones): the info line gets a second, quiet line. Never at the cost of a scroll.
+  const boardH = 2 * BPAD + ROWS * lay.ch + (ROWS - 1) * lay.rowGap;
+  const roomy = H0 - boardH >= ROOMY_EXTRA + 6;
+  if (info) info.classList.toggle('is-roomy', roomy);
+  if (roomy !== ui.roomy) { ui.roomy = roomy; ui.rowSig = ''; }
   ui.lay = lay;
   const board = q('[data-ref=board]');
   board.style.setProperty('--cw', `${lay.cw}px`);
@@ -362,6 +381,7 @@ function skeleton() {
 </div>
 <div class="sh-layer" data-ref="layer" data-action="close-sheet" hidden></div>`);
   ui.skeleton = true;
+  ui.roomy = false;
   ui.sig = '';
   ui.rowSig = '';
   ui.chipSig = '';
@@ -405,10 +425,12 @@ function updateInfo(st, now) {
   if (ui.sel !== null && !c) ui.sel = null;
   if (!c) {
     const { text, rest } = infoText(st, now);
-    const key = `t:${text}:${rest}`;
+    const key = `t:${text}:${rest}:${ui.roomy ? 1 : 0}`;
     if (ui.rowSig !== key) {
       ui.rowSig = key;
-      info.innerHTML = String(h`<div class="sh-line${rest ? ' is-rest' : ''}" aria-live="polite">${text}</div>`);
+      info.innerHTML = ui.roomy && !rest
+        ? String(h`<div class="sh-col"><div class="sh-line" aria-live="polite">${text}</div><div class="sh-sub">Same color merges up a size. A row, column or diagonal of one family clears.</div></div>`)
+        : String(h`<div class="sh-line${rest ? ' is-rest' : ''}" aria-live="polite">${text}</div>`);
     }
     return;
   }
@@ -475,7 +497,10 @@ function applyHints(st) {
   board.querySelectorAll('.sh-cell').forEach((cell) => {
     const i = +cell.dataset.cell;
     const v = cell.querySelector('.sh-vial');
-    if (v) fx.pulse(v, hints.has(i) && !(dragging && cell.classList.contains('is-drag-source')));
+    if (v) {
+      fx.pulse(v, hints.has(i) && !(dragging && cell.classList.contains('is-drag-source')));
+      v.style.animationDelay = `${-((i * 0.37) % 2.4).toFixed(2)}s`; // out of step, so the shelf ripples instead of nodding in unison
+    }
     cell.classList.toggle('is-sel', ui.sel === i);
     cell.classList.toggle('is-partner', !dragging && ui.sel !== null && ui.sel !== i && !!st.shelf.cells[i] && sim().shelf.canMerge(st.shelf.cells[ui.sel], st.shelf.cells[i]));
   });
@@ -1001,8 +1026,6 @@ function doMove(from, to) {
   setCell(to);
   audio.tick();
   haptics.light();
-  const tv = vialEl(to);
-  if (tv) fx.settle(tv);
   // A quiet name label when the two are the same family (or the same color, a different size).
   if (a && b) {
     const nameA = sim().displayName(st, a.color);
@@ -1017,6 +1040,10 @@ function doMove(from, to) {
     release();
     endHold();
   })();
+  // The container settles into its new cell (a small overshoot). After the IIFE: with no line to play it has
+  // already ended the hold and rebuilt the board, so the vial to settle is the one that is on screen now.
+  const tv = vialEl(to);
+  if (tv) fx.settle(tv);
 }
 
 function doSell(i) {

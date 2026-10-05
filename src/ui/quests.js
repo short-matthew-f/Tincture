@@ -19,6 +19,11 @@
  * `data-coach="quests-claim"` (the first Claim button, waits for a claimable quest, ends when a daily
  * is claimed). Once the intro step has been seen it is not repeated while the claim step still waits
  * ('questsIntro'). 'questsNext' is the one-time "what's next" card after her first claim.
+ *
+ * Feel (Theme F): Claim flies seal-red dots to the Seals chip, the big "Claimed" stamp lands about 500 ms in (the small
+ * mark waits for it), the number rolls when the dots land (about 1.3 s in all); a bar whose progress changed fills
+ * with a spring from where it was; an event step that becomes claimable springs (heavy, with a ring) as its glow
+ * starts, and claimable steps arrive softly when the page opens.
  */
 
 import { h, raw, backButton, button, progressBar, fadeStrip, iconSvg, swatch, safeHex, containerSvg } from './kit.js';
@@ -39,6 +44,7 @@ section[data-screen="quests"] .how-link::before { content:''; position:absolute;
 .qs-quest.is-done { box-shadow:0 0 0 2px var(--glow-ring), var(--cut); background:var(--glow); }
 .qs-quest.is-done .progress > span { background:var(--gold); }
 .qs-quest.is-claimed { opacity:.75; }
+.qs-stamp.is-await { visibility:hidden; }
 .qs-quest .qs-acts { display:flex; align-items:center; gap:10px; margin-left:auto; }
 .qs-stamp { display:inline-flex; align-items:center; gap:4px; padding:5px 11px; border-radius:6px; box-shadow:inset 0 0 0 1.5px var(--plaster-line);
   color:var(--ink-soft); font-size:12px; font-weight:600; transform:rotate(-2.5deg); }
@@ -91,6 +97,10 @@ let lastKey = '';
 let shownSeals = null;
 let holdSeals = false;
 let trackLeft = null; // null: open the event track on its current step
+const progMemo = new Map();      // quest id -> the bar's last width (%), so a changed bar springs from where it was
+const awaiting = new Set();      // claimed cards whose small "Claimed" mark waits for the big stamp to land
+let claimableSeen = null;        // event steps that were claimable at the last paint (null: first paint of a visit)
+const SEAL_HEX = '#9E4436';      // the wax seal's own red, for the dots that fly to the Seals chip
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many ?? one + 's'}`;
 const fin = (x, d = 0) => (Number.isFinite(x) ? x : d);
@@ -138,7 +148,7 @@ function questCard(q, state) {
   const reward = q.reward || {};
   const more = Math.max(0, q.target - q.progress);
   let action;
-  if (q.claimed) action = h`<span class="qs-stamp">${iconSvg('check', { size: 13 })} Claimed</span>`;
+  if (q.claimed) action = h`<span class="qs-stamp ${awaiting.has(q.id) ? 'is-await' : ''}">${iconSvg('check', { size: 13 })} Claimed</span>`;
   else if (q.done) action = button('Claim', { variant: 'primary', attrs: { 'data-action': 'claim', 'data-quest-id': q.id, 'data-coach': 'quests-claim' } });
   else if (!used) action = button('Try another', { attrs: { 'data-action': 'reroll', 'data-quest-id': q.id, 'aria-label': 'Try another quest in its place, free once a day' } });
   else action = '';
@@ -183,7 +193,7 @@ function weeklySection(state) {
         ${s.n > 1 && !s.done ? h`<span class="hint num nowrap">${Math.max(0, s.n - s.progress)} more</span>` : ''}
         <span class="sr-only">${s.done ? 'Done' : 'Not yet'}</span></div>`)}</div>
       <div class="qs-rare"><span aria-hidden="true">${sealIcon(22)}</span><div class="grow">Reward: <b>${fmt(fin(w.reward && w.reward.seals))} Seals</b> and <b>${rare}</b>.</div></div>
-      ${w.claimed ? h`<span class="qs-stamp" style="align-self:flex-start">${iconSvg('check', { size: 13 })} Claimed</span>`
+      ${w.claimed ? h`<span class="qs-stamp ${awaiting.has('weekly') ? 'is-await' : ''}" style="align-self:flex-start">${iconSvg('check', { size: 13 })} Claimed</span>`
         : w.done ? button('Claim reward', { variant: 'primary', block: true, attrs: { 'data-action': 'claim-weekly' } }) : ''}
     </div>`;
 }
@@ -275,6 +285,41 @@ function paint(state, force = false) {
   bodyEl.scrollTop = keep;
   placeTrack();
   syncSeals(state);
+  springBars();
+  springClaimable();
+}
+
+/** A bar whose progress changed fills with a spring from where it was (a new bar just appears). */
+function springBars() {
+  bodyEl.querySelectorAll('.qs-quest[data-quest]').forEach((card) => {
+    const id = card.getAttribute('data-quest');
+    const bar = card.querySelector('.progress > span');
+    if (!bar) { progMemo.delete(id); return; }
+    const now = parseFloat(bar.style.width) || 0;
+    const prev = progMemo.get(id);
+    progMemo.set(id, now);
+    if (!visible || prev === undefined || Math.abs(prev - now) < 0.5) return;
+    ctx.fx.spring(bar, { from: { width: `${prev}%` }, to: { width: `${now}%` }, preset: 'soft' });
+  });
+}
+
+/** An event step that becomes claimable glows (CSS) and springs: heavy with a ring when it happens in front of her, a soft arrival on opening. */
+function springClaimable() {
+  const nodes = [...bodyEl.querySelectorAll('.qs-step.is-claimable')];
+  const now = new Set(nodes.map((n) => n.getAttribute('data-step')));
+  const first = claimableSeen === null;
+  nodes.forEach((n, i) => {
+    const key = n.getAttribute('data-step');
+    if (!visible || (!first && claimableSeen.has(key))) return;
+    const node = n.querySelector('.qs-node');
+    if (!node) return;
+    if (first) ctx.fx.spring(node, { from: { transform: 'scale(0.82)', opacity: 0.4 }, to: { transform: 'scale(1)', opacity: 1 }, preset: 'soft', delay: i * 60, fill: 'backwards' });
+    else {
+      ctx.fx.spring(node, { from: { transform: 'scale(0.6)', opacity: 0.6 }, to: { transform: 'scale(1)', opacity: 1 }, preset: 'heavy' });
+      ctx.fx.ringBurst(node, '#E2B04A', { size: 64 });
+    }
+  });
+  claimableSeen = now;
 }
 
 // ---------------------------------------------------------------------------
@@ -285,15 +330,32 @@ function sealsTarget() {
   return root.querySelector('[data-seals-chip]');
 }
 
-/** Run a claim: dots fly to the Seals chip first, the number rolls when they land. */
-function withFly(btn, fn) {
+/**
+ * Run a claim: seal-red dots fly to the Seals chip first, the number rolls when they land, and (for a quest
+ * card) the big "Claimed" stamp lands about 500 ms in, just ahead of the first seal. About 1.3 s in all.
+ */
+function withFly(btn, fn, { stampId = null } = {}) {
   const target = sealsTarget();
+  const card = btn && btn.closest ? btn.closest('.qs-quest, [data-weekly]') : null;
   holdSeals = true;
-  const flight = btn && target ? ctx.fx.flyTo(btn, target, '#E2B04A', { count: 6 }) : Promise.resolve();
+  const flight = btn && target ? ctx.fx.flyTo(btn, target, SEAL_HEX, { count: 6 }) : Promise.resolve();
+  const at = card ? card.getBoundingClientRect() : null;
   let res;
   try { res = fn(); } finally { /* state already changed; render happens inside act */ }
+  if (res && res.ok && stampId && at) {
+    awaiting.add(stampId);
+    paint(ctx.game.state, true); // the small mark waits (hidden) for the stamp
+    setTimeout(() => landClaimStamp(stampId), 330);
+  }
   flight.then(() => { holdSeals = false; syncSeals(ctx.game.state); });
   return res;
+}
+
+function landClaimStamp(id) {
+  const card = id === 'weekly' ? bodyEl && bodyEl.querySelector('[data-weekly]') : bodyEl && bodyEl.querySelector(`.qs-quest[data-quest="${String(id).replace(/["\\]/g, '\\$&')}"]`);
+  const finish = () => { awaiting.delete(id); if (visible) paint(ctx.game.state, true); };
+  if (!card || !visible) { finish(); return; }
+  Promise.resolve(ctx.fx.stamp(card, 'Claimed', { hold: 500 })).then(finish, finish);
 }
 
 function onClick(e) {
@@ -302,7 +364,8 @@ function onClick(e) {
   const a = el.getAttribute('data-action');
   const S = ctx.sim;
   if (a === 'claim') {
-    const res = withFly(el, () => ctx.game.act(S.quests.claim, { questId: el.getAttribute('data-quest-id') }));
+    const qid = el.getAttribute('data-quest-id');
+    const res = withFly(el, () => ctx.game.act(S.quests.claim, { questId: qid }), { stampId: qid });
     if (res && res.ok) {
       ctx.audio.coins(6);
       const extra = res.bankSeals ? ` (+${fmt(res.bankSeals)} from missed days)` : '';
@@ -314,9 +377,8 @@ function onClick(e) {
     if (res && res.ok) ctx.toast('A fresh quest, just for you.');
     else ctx.toast('Today\'s free try-another is used. You get another tomorrow!');
   } else if (a === 'claim-weekly') {
-    const res = withFly(el, () => ctx.game.act(S.quests.claimWeekly, {}));
+    const res = withFly(el, () => ctx.game.act(S.quests.claimWeekly, {}), { stampId: 'weekly' });
     if (res && res.ok) {
-      ctx.audio.stamp();
       ctx.audio.coins(8);
       const r = res.rare || {};
       let what = '';
@@ -332,7 +394,7 @@ function onClick(e) {
     const res = withFly(el, () => ctx.game.act(S.events.claimStep, { step }));
     if (res && res.ok) {
       if (res.seals) ctx.audio.coins(5); else ctx.audio.stamp();
-      if (node) ctx.fx.ringBurst(node, '#E2B04A', { size: 70 });
+      if (node) { ctx.fx.ringBurst(node, '#E2B04A', { size: 70 }); }
       const bits = [];
       if (res.seals) bits.push(`+${fmt(res.seals)} Seals`);
       if (res.colorId) bits.push('a limited color');
@@ -421,6 +483,8 @@ const screen = {
     shownSeals = null;
     holdSeals = false;
     trackLeft = null;
+    claimableSeen = null;
+    awaiting.clear();
     paint(ctx.game.state, true);
     requestAnimationFrame(() => { if (visible) placeTrack(); });
     if (params.section && bodyEl) {

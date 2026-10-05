@@ -26,11 +26,18 @@
  * defaults to the 30-minute trip while that guide is unseen. 'mapNext' is the one-time "what's
  * next" card after the first hunter comes home (the hunterReturn event, or the next show with a
  * Backpack waiting).
+ *
+ * Feel (Theme F): Send springs the hunter's portrait chip from the sheet onto the region pin (spring firm), the pin
+ * squashes and a puff of dust says off they go (flyHunter); a return knocks on the window (existing) and the
+ * Backpack card drops in after it (spring heavy) with a thunk; a pin pulses (ring and 6%) while a scouting radio
+ * call waits. The page's no-op check ignores the portraits' unique clip ids, so a render that changes nothing no
+ * longer rebuilds the page (and cuts an animation off).
  */
 
 import { h, raw, button, tag, lockTag, swatch, iconSvg, safeHex, lighten, darken } from './kit.js';
 import { unlockTag, openUnlockSheet, ensureStyles as ensureWorkshopStyles } from './workshop.js';
 import { howThisWorksHtml, markGuideSeen, isSeen } from './guide.js';
+import { dust } from './feel.js';
 
 // ---------------------------------------------------------------------------
 // Shared constants
@@ -115,7 +122,8 @@ section[data-screen="map"] .screen-head .title { font-family:var(--font-ui); fon
 .mp-hire { flex-direction:row; align-items:center; gap:12px; }
 .mp-cost { display:inline-flex; align-items:center; gap:5px; font-weight:700; }
 .mp-backpack { background: var(--paper); }
-.mp-backpack.is-drop { animation: mp-drop 500ms var(--ease-out) both; }
+/* .is-drop is only a marker: paint() springs the card in (spring heavy) and plays the thunk. */
+.mp-pin.is-calling .mp-disc { animation: mp-call 1.8s ease-in-out infinite; }
 .mp-haul { display:flex; flex-direction:column; gap:6px; padding-top:8px; border-top:1px solid rgba(42,38,34,.1); }
 .mp-haul:first-of-type { border-top:0; padding-top:0; }
 .mp-haul-line { display:flex; flex-wrap:wrap; gap:6px; }
@@ -151,7 +159,7 @@ section[data-screen="map"] .how-link::before { content:''; position:absolute; in
 .mp-hl { animation: mp-flash 1.4s ease-out 1; }
 @keyframes mp-knock { 0%,100% { transform:none; } 18% { transform:translateY(2px) rotate(-.6deg); } 36% { transform:none; }
   54% { transform:translateY(2px) rotate(.5deg); } 72% { transform:none; } }
-@keyframes mp-drop { from { opacity:0; transform:translateY(-14px); } 60% { opacity:1; transform:translateY(2px); } to { transform:none; } }
+@keyframes mp-call { 0%,100% { transform:scale(1); box-shadow:0 3px 0 var(--shadow), inset 0 0 0 2px var(--ink), 0 0 0 0 rgba(226,176,74,0); } 50% { transform:scale(1.06); box-shadow:0 3px 0 var(--shadow), inset 0 0 0 2px var(--ink), 0 0 0 5px rgba(226,176,74,.55); } }
 @keyframes mp-flash { 0% { box-shadow:0 0 0 3px var(--glow-ring), var(--cut); } 100% { box-shadow:var(--cut); } }
 `;
 
@@ -755,13 +763,51 @@ function doSend(ctx) {
   const res = ctx.game.act(ctx.sim.hunters.send, { hunterId: s.hunterId, regionId: s.regionId, duration: s.duration });
   if (res && res.ok) {
     const ms = Math.max(0, res.returnsAt - ctx.game.now());
+    const chip = s.host.querySelector('[data-action="pick-hunter"][aria-pressed="true"] .mp-portrait') || s.host.querySelector('.mp-portrait') || s.host.querySelector('[data-action="send-go"]');
+    const from = chip ? chip.getBoundingClientRect() : null;
     closeSheet();
     ctx.audio.thunk(0.6);
+    flyHunter(ctx, s.hunterId, s.regionId, from);
     ctx.toast(`${hunter ? hunter.name : 'Your hunter'} sets off for the ${region.name}. Back in about ${roughTime(ms)}.`);
   } else {
     ctx.toast('That hunter is not free right now.');
     paintSheet(ctx);
   }
+}
+
+/**
+ * Send: the hunter's portrait chip springs from the sheet onto the region's pin (spring firm), the pin
+ * squashes as it lands and a small puff of dust says off they go. Nothing to fly to (the Send sheet was
+ * opened from the hunter page, or the map is not on screen): no flight. About 450 ms; reduced motion fades.
+ */
+function flyHunter(ctx, hunterId, regionId, from) {
+  if (!from || typeof document === 'undefined') return;
+  const disc = [...document.querySelectorAll(`.mp-pin[data-region-id="${String(regionId).replace(/["\\]/g, '\\$&')}"] .mp-disc`)].find((n) => n.getBoundingClientRect().width > 0);
+  const layer = document.getElementById('fx-layer');
+  if (!disc || !layer) return;
+  const hunter = ((ctx.game.state.hunters && ctx.game.state.hunters.roster) || []).find((x) => x.id === hunterId);
+  const size = 36;
+  const el = document.createElement('div');
+  el.style.cssText = `position:fixed;left:0;top:0;width:${size}px;height:${size}px;margin:${-size / 2}px 0 0 ${-size / 2}px;will-change:transform,opacity;filter:drop-shadow(0 3px 0 rgba(42,38,34,.3))`;
+  el.innerHTML = String(hunterPortrait(hunterId, { size, trait: hunter ? hunter.trait : null }));
+  layer.appendChild(el);
+  const to = disc.getBoundingClientRect();
+  const x0 = from.left + from.width / 2;
+  const y0 = from.top + from.height / 2;
+  const x1 = to.left + to.width / 2;
+  const y1 = to.top + to.height / 2;
+  const fx = ctx.fx;
+  fx.spring(el, {
+    from: { transform: `translate(${x0}px, ${y0}px) scale(0.8)`, opacity: 1 },
+    to: { transform: `translate(${x1}px, ${y1}px) scale(1)`, opacity: 1 },
+    preset: 'firm',
+    fill: 'forwards',
+  }).then(() => {
+    fx.squash(disc);
+    dust(fx, x1, y1 + to.height / 2 - 4);
+    const gone = el.animate ? el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 140, easing: 'ease-in', fill: 'forwards' }).finished : Promise.resolve();
+    return Promise.resolve(gone).catch(() => {});
+  }).then(() => el.remove(), () => el.remove());
 }
 
 /** openChoiceSheet(ctx, hunterId) — the scouting radio call: two options, then sim `choose`. */
@@ -806,7 +852,7 @@ function backpackItems(state, now) {
 function backpackHtml(state, items) {
   if (!items.length) return '';
   const latest = Math.max(...items.map((x) => x.lastHaul.at));
-  return h`<div class="card mp-backpack ${latest > droppedAt ? 'is-drop' : ''}" data-coach="backpack" data-latest="${latest}">
+  return h`<div class="card mp-backpack${latest > droppedAt ? ' is-drop' : ''}" data-coach="backpack" data-latest="${latest}">
     <div class="row between"><div class="row gap-2"><span class="mp-h">Backpack</span><span class="hint">${items.length === 1 ? '1 new return' : `${items.length} new returns`}</span></div>
       ${button('Got it', { attrs: { 'data-action': 'dismiss-backpack' } })}</div>
     ${items.map((x) => {
@@ -823,7 +869,7 @@ function backpackHtml(state, items) {
   </div>`;
 }
 
-function pinHtml(state, region, outByRegion, isEventPin) {
+function pinHtml(state, region, outByRegion, isEventPin, calling = false) {
   const open = regionOpen(ctx, state, region);
   const lock = regionLock(ctx, state, region);
   const x = Math.max(15, Math.min(85, region.mapPos.x));
@@ -835,19 +881,20 @@ function pinHtml(state, region, outByRegion, isEventPin) {
     : h`<span class="mp-disc">${open ? glyph(region.id) : iconSvg('lock', { size: 20 })}${out ? h`<span class="mp-badge" aria-label="${plural(out, 'hunter')} out here">${out}</span>` : ''}</span>`;
   // Locked pins show only the lock and the name; their paper tags sit in the legend below the map
   // so nothing overlaps or clips at the edge of the frame.
-  return h`<button type="button" class="mp-pin ${open ? '' : 'is-locked'} ${isEventPin ? 'is-event' : ''}" style="left:${x}%;top:${y}%"
-      data-action="region" data-region-id="${region.id}"${region.id === 'meadow' ? raw(' data-coach="map-meadow"') : ''} data-tap aria-label="${region.name}${open ? '' : ', ' + (lock ? lock.text : 'locked')}">
+  return h`<button type="button" class="mp-pin ${open ? '' : 'is-locked'} ${isEventPin ? 'is-event' : ''} ${calling ? 'is-calling' : ''}" style="left:${x}%;top:${y}%"
+      data-action="region" data-region-id="${region.id}"${region.id === 'meadow' ? raw(' data-coach="map-meadow"') : ''} data-tap aria-label="${region.name}${open ? '' : ', ' + (lock ? lock.text : 'locked')}${calling ? ', a radio call is waiting' : ''}">
       ${disc}<span class="mp-name">${region.name}</span>
       ${isEventPin ? h`<span class="tag">This week</span>` : ''}</button>`;
 }
 
-function mapHtml(state) {
+function mapHtml(state, trips = []) {
   const hOn = huntersOn(ctx, state);
   const outBy = {};
   for (const x of (state.hunters && state.hunters.roster) || []) if (x.state === 'out' && x.trip) outBy[x.trip.region] = (outBy[x.trip.region] || 0) + 1;
   const ev = eventRegion(ctx, state);
-  const pins = ctx.content.REGIONS.filter((r) => r.kind !== 'event').map((r) => pinHtml(state, r, outBy, false));
-  if (ev && hOn) pins.push(pinHtml(state, ev, outBy, true));
+  const calls = new Set(trips.filter((t) => t.state === 'out' && t.choicePending).map((t) => t.region)); // the pin pulses while a radio call waits
+  const pins = ctx.content.REGIONS.filter((r) => r.kind !== 'event').map((r) => pinHtml(state, r, outBy, false, calls.has(r.id)));
+  if (ev && hOn) pins.push(pinHtml(state, ev, outBy, true, calls.has(ev.id)));
   const sleepy = hOn ? '' : raw(' data-action="unlock-open" data-unlock="hunters" data-tap role="button" tabindex="0" aria-label="What the map window opens"');
   return h`<div class="mp-win ${hOn ? '' : 'is-sleepy'}"${sleepy} data-coach="map"><div class="mp-view ${hOn ? '' : 'is-sleepy'}">${raw(MAP_ART)}${pins}</div>
     ${hOn ? '' : h`<div class="mp-banner">${unlockTag(ctx, 'hunters')}<small>Tap the window to see what it opens.</small></div>`}</div>`;
@@ -931,7 +978,7 @@ function build(state) {
   const now = ctx.game.now();
   const trips = ctx.sim.hunters.tripsSummary(state, now);
   const items = backpackItems(state, now);
-  return h`${backpackHtml(state, items)}${mapHtml(state)}${legendHtml(state)}${eventLine(state)}${rosterHtml(state, trips)}${hireHtml(state)}`;
+  return h`${backpackHtml(state, items)}${mapHtml(state, trips)}${legendHtml(state)}${eventLine(state)}${rosterHtml(state, trips)}${hireHtml(state)}`;
 }
 
 function paint(state, force = false) {
@@ -940,13 +987,17 @@ function paint(state, force = false) {
   recordHauls(state);
   const html = String(build(state));
   // Countdown text changes every second; compare without it so we only rebuild on real changes.
-  const key = html.replace(' is-drop', '').replace(/(data-until="\d+" data-prefix="[^"]*">)[^<]*/g, '$1').replace(/(data-from="\d+" data-to="\d+"><span style="width:)[^"]*/g, '$1');
+  const key = html.replace(' is-drop', '').replace(/(mp[cp])\d+/g, '$1').replace(/(data-until="\d+" data-prefix="[^"]*">)[^<]*/g, '$1').replace(/(data-from="\d+" data-to="\d+"><span style="width:)[^"]*/g, '$1');
   if (!force && key === lastKey) { tickCountdowns(root, ctx); return; }
   lastKey = key;
   bodyEl.innerHTML = html;
   markSeenSoon(state);
   const bp = bodyEl.querySelector('.mp-backpack');
-  if (bp) droppedAt = Math.max(droppedAt, Number(bp.getAttribute('data-latest')) || 0);
+  if (bp) {
+    const drop = bp.classList.contains('is-drop') && visible;
+    droppedAt = Math.max(droppedAt, Number(bp.getAttribute('data-latest')) || 0);
+    if (drop) dropBackpack(bp);
+  }
   tickCountdowns(root, ctx);
   const sub = root.querySelector('.screen-head .subtitle');
   if (sub) sub.textContent = headSubtitle(state);
@@ -973,6 +1024,18 @@ function headSubtitle(state) {
   if (!huntersOn(ctx, state)) return 'The window opens soon';
   const out = roster.filter((x) => x.state === 'out').length;
   return out ? `${plural(out, 'hunter')} out exploring` : 'Everyone is home';
+}
+
+/** A new return: the Backpack card drops in with weight (spring heavy) after the knock, and lands with a thunk. */
+function dropBackpack(card) {
+  ctx.fx.spring(card, {
+    from: { transform: 'translate(0px, -34px) scale(1.03)', opacity: 0 },
+    to: { transform: 'translate(0px, 0px) scale(1)', opacity: 1 },
+    preset: 'heavy',
+    delay: 160,
+    fill: 'backwards',
+  });
+  setTimeout(() => { if (visible) ctx.audio.thunk(0.7); }, 160 + 150);
 }
 
 function knock() {

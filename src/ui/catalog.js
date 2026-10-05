@@ -19,6 +19,12 @@
  * milestone meter; the `catalog` guide uses "catalog-missing" (the first faint
  * cell on the page) and "catalog-pin" (the pin button in a missing color's
  * sheet).
+ *
+ * Feel (Theme F): swatches lift on press; a newly discovered swatch gets a shimmer sweep and a soft note at the
+ * color's own pitch (show({colorId}) or the 'discover' event while visible); pinning drops a tiny pin onto the
+ * swatch and its cell (spring firm) and the goal slides in; the newest Essence star of a color lands in its row
+ * with a spring (after the app's flight when she is watching, as the page opens when she was away; found swatches
+ * carry data-swatch for that flight); the quiet shimmer of the missing stays.
  */
 
 import { h, raw, button, tag, iconSvg, safeHex, progressBar } from './kit.js';
@@ -31,6 +37,7 @@ import { getRegion } from '../content/regions.js';
 import { isNameOk } from '../content/names.js';
 import { howThisWorksHtml, markGuideSeen } from './guide.js';
 import { offerWhatsNext } from './matching.js';
+import { wireLift, springIn } from './feel.js';
 
 const PAGE_NAMES = { wheel: 'Wheel', tints: 'Tints', shades: 'Shades', earths: 'Earths', wild: 'Wild' };
 const PAGE_NOTES = {
@@ -92,9 +99,12 @@ const CSS = `
 #screen-catalog .cat-goal .cat-sw{width:44px;flex:0 0 44px;aspect-ratio:1;background:var(--fam);opacity:.3}
 #screen-catalog .cat-layer{position:absolute;inset:0;z-index:20;background:rgba(42,38,34,.45);display:flex;align-items:flex-end;justify-content:center;animation:fade-in 160ms ease-out both}
 #screen-catalog .cat-layer[hidden]{display:none}
+#screen-catalog .cat-layer.no-anim,#screen-catalog .cat-layer.no-anim .sheet{animation:none}
 #screen-catalog .cat-sheet{width:100%;max-width:520px;max-height:92%}
 #screen-catalog .cat-big{height:96px;border-radius:14px;box-shadow:var(--cut);position:relative;overflow:hidden}
-#screen-catalog .cat-big.ghost{background:var(--fam);opacity:.35;box-shadow:none}
+#screen-catalog .cat-big.ghost{background:transparent;box-shadow:none}
+#screen-catalog .cat-big.ghost::before{content:'';position:absolute;inset:0;background:var(--fam);opacity:.35}
+#screen-catalog .cat-bigpin{position:absolute;right:16px;top:12px;color:var(--ink);z-index:2;filter:drop-shadow(0 2px 0 rgba(42,38,34,.25))}
 #screen-catalog .cat-big.ghost::after{content:'';position:absolute;inset:0;background:linear-gradient(105deg,transparent 30%,rgba(255,255,255,.95) 50%,transparent 70%);transform:translateX(-120%);animation:cat-shimmer 3.6s ease-in-out infinite}
 #screen-catalog .cat-kv{display:flex;justify-content:space-between;gap:12px;font-size:14px;padding:5px 0}
 #screen-catalog .cat-kv + .cat-kv{border-top:1px solid rgba(42,38,34,.08)}
@@ -126,6 +136,9 @@ const ui = {
   page: null,
   sig: '',
   fresh: null,
+  flashed: null,    // the discovery whose flash has played
+  starNew: new Set(), // colors whose newest Essence star has not landed yet
+  starDelay: 0,       // wait for the app's flight when she is watching
   freshTimer: 0,
   scrollTo: null,
   sheet: null,      // {id, rename, msg}
@@ -139,6 +152,9 @@ const state = () => ctx.game.state;
 const q = (sel) => root.querySelector(sel);
 const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : '');
 const isFound = (id) => !!state().catalog?.discovered?.[id];
+const fx = () => ctx.fx;
+const reduced = () => !!(ctx.fx && ctx.fx.isReducedMotion && ctx.fx.isReducedMotion());
+const cellOf = (id) => root.querySelector(`.cat-cell[data-color="${String(id).replace(/["\\]/g, '\\$&')}"]`);
 
 // ---------------------------------------------------------------------------
 // Pages and facts
@@ -213,7 +229,7 @@ function cellHtml(c, pos, st, coach = false) {
     const name = sim().displayName(st, c.id);
     const stars = Math.min(10, d.essence || 0);
     return h`<button type="button" class="cat-cell is-found${ui.fresh === c.id ? ' is-new' : ''}" data-tap data-action="cell" data-color="${c.id}" aria-label="${name}${stars ? `, ${stars} Essence ${stars === 1 ? 'star' : 'stars'}` : ''}">
-  <span class="cat-sw" style="background:${safeHex(c.hex)}"></span>
+  <span class="cat-sw" data-swatch="${c.id}" style="background:${safeHex(c.hex)}"></span>
   <span class="cat-name">${name}</span>
   <span class="cat-stars">${starsRow(stars)}</span>
 </button>`;
@@ -235,7 +251,7 @@ function goalsHtml(st) {
   <div class="row between"><div class="card-title">Pinned goals</div><div class="small muted">${pins.length >= MAX_PINS ? 'All goal spots in use' : `Room for ${MAX_PINS - pins.length} more`}</div></div>
   ${pins.map((c) => {
     const step = nextStep(c);
-    return h`<div class="cat-goal">
+    return h`<div class="cat-goal" data-goal="${c.id}">
       <span class="cat-sw" style="--fam:${FAMILY_HEX[famOf(c)] || '#9A9288'};border-radius:10px"></span>
       <div class="grow"><div class="semi small">${cap(c.hint || 'A missing color')}</div><div class="small muted">${step.text}</div></div>
       ${button('Go', { small: true, attrs: { 'data-action': 'go', 'data-color': c.id, 'aria-label': step.cta } })}
@@ -311,7 +327,55 @@ function build() {
     if (cell && cell.scrollIntoView) cell.scrollIntoView({ block: 'center' });
     ui.scrollTo = null;
   }
-  if (ui.sheet) renderSheet(); // the layer is rebuilt with the page; keep the open sheet
+  if (ui.sheet) { // the layer is rebuilt with the page; keep the open sheet, and do not slide it up again
+    const layer = q('[data-ref=layer]');
+    if (layer) layer.classList.add('no-anim');
+    renderSheet();
+  }
+  flashFresh();
+  playStarLandings();
+}
+
+/** The discovery flash: a shimmer sweeps the new swatch with a soft note at the color's own pitch. */
+function flashFresh() {
+  const id = ui.fresh;
+  if (!id || ui.flashed === id || !visible) return;
+  const cell = cellOf(id);
+  const sw = cell && cell.querySelector('.cat-sw');
+  if (!sw) return;
+  ui.flashed = id;
+  const c = getColor(id);
+  let L = 0.6;
+  try { L = ctx.color.hexToOklch(c.hex).L; } catch (e) { /* default pitch */ }
+  fx().shimmerSweep(sw, { ms: 900 });
+  if (ctx.audio) ctx.audio.note(L, 0.05, 0.16, 0.9);
+}
+
+/**
+ * Essence stars arrive with the bell (the app plays it and flies a star here): the newest star of that color
+ * lands in its row with a spring. A star earned while she was elsewhere lands as the page opens; one earned
+ * while she watches waits for the flight (about 1 s).
+ */
+function playStarLandings() {
+  if (!ui.starNew.size || !visible || !root) return;
+  const delay = ui.starDelay;
+  ui.starDelay = 0;
+  for (const id of [...ui.starNew]) {
+    const cell = cellOf(id);
+    const star = cell && cell.querySelector('.cat-stars svg:last-child');
+    if (!star) { ui.starNew.delete(id); continue; }
+    ui.starNew.delete(id);
+    star.style.opacity = '0';
+    setTimeout(() => {
+      const el = visible && root ? cellOf(id) : null;
+      const st = el && el.querySelector('.cat-stars svg:last-child');
+      if (!st) return;
+      st.style.opacity = '';
+      st.style.overflow = 'visible';
+      fx().spring(st, { from: { transform: 'translateY(-22px) scale(3) rotate(-35deg)', opacity: 0 }, to: { transform: 'translateY(0px) scale(1) rotate(0deg)', opacity: 1 }, preset: 'firm' });
+      if (!reduced()) fx().ringBurst(st, '#E2B04A', { size: 34, ms: 360 });
+    }, delay);
+  }
 }
 
 /** Bring the selected page tab into view (centered when it can be). */
@@ -355,7 +419,7 @@ function refresh(force = false) {
 function closeSheet() {
   ui.sheet = null;
   const layer = q('[data-ref=layer]');
-  if (layer) { layer.hidden = true; layer.innerHTML = ''; }
+  if (layer) { layer.hidden = true; layer.innerHTML = ''; layer.classList.remove('no-anim'); }
 }
 
 function renderSheet() {
@@ -419,7 +483,7 @@ function missingSheet(st, c) {
   // keeps clear of dialogs, and its bubble has to point inside this one.
   const role = ui.guide && ui.guide.active ? 'group' : 'dialog';
   return h`<div class="sheet cat-sheet" role="${role}" aria-label="A color waiting to be found">
-  <div class="cat-big ghost" style="--fam:${FAMILY_HEX[famOf(c)] || '#9A9288'}"></div>
+  <div class="cat-big ghost" style="--fam:${FAMILY_HEX[famOf(c)] || '#9A9288'}">${pinned ? h`<span class="cat-bigpin" aria-hidden="true">${iconSvg('pin', { size: 30 })}</span>` : ''}</div>
   <div class="center"><div class="h2">A ${FAMILY_WORD[famOf(c)] || 'special'} color is waiting</div>
     <div class="hint">${page ? `It belongs on the ${page.name} page` : ''}</div></div>
   <div>
@@ -485,6 +549,7 @@ function onClick(e) {
       } else ctx.toast(res && res.reason === 'full' ? `You already have ${MAX_PINS} goals pinned. Unpin one to make room.` : 'That color is already yours.');
       renderSheet();
       refresh(true);
+      if (res && res.ok) stampPin(id);
       break;
     }
     case 'unpin':
@@ -513,6 +578,21 @@ function onClick(e) {
     }
     default:
   }
+}
+
+/** Pinning stamps a tiny pin: it drops onto the swatch (spring firm) and onto its cell, and the goal slides in. */
+function stampPin(id) {
+  const f = fx();
+  const from = { transform: 'translateY(-16px) scale(2.4) rotate(-24deg)', opacity: 0 };
+  const to = { transform: 'translateY(0px) scale(1) rotate(0deg)', opacity: 1 };
+  const big = root.querySelector('.cat-bigpin');
+  if (big) f.spring(big, { from, to, preset: 'firm' });
+  const small = cellOf(id) && cellOf(id).querySelector('.cat-pin');
+  if (small) f.spring(small, { from, to, preset: 'firm', delay: 60, fill: 'backwards' });
+  const goal = root.querySelector(`.cat-goal[data-goal="${String(id).replace(/["\\]/g, '\\$&')}"]`);
+  if (goal) springIn(goal, f, { dy: -14, scale: 0.97, preset: 'soft', delay: 90 });
+  if (ctx.audio) ctx.audio.thunk(0.3);
+  if (ctx.haptics) ctx.haptics.light();
 }
 
 /** After her first pin: two equal ways on (docs/PLAN-v0.2 Theme D). */
@@ -577,8 +657,14 @@ const screen = {
     injectCss();
     root.addEventListener('click', onClick);
     root.addEventListener('keydown', onKey);
+    wireLift(root, '.cat-cell', ctx.fx); // swatches lift under her finger and settle on release
     root.addEventListener('scroll', (e) => { if (e.target && e.target.classList && e.target.classList.contains('cat-pages')) updateStripFade(); }, true);
     if (ctx.game && ctx.game.on) {
+      ctx.game.on('essence', (p, meta) => {
+        if (!p || !p.colorId || (meta && meta.catchUp)) return;
+        ui.starNew.add(p.colorId);
+        if (visible && !ui.sheet) { ui.starDelay = 1000; setTimeout(() => refresh(true), 0); }
+      });
       ctx.game.on('discover', (p) => {
         const id = p && (p.colorId || (p.payload && p.payload.colorId));
         if (!id) return;

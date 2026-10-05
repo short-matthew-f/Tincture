@@ -23,6 +23,12 @@
  * 'paintRegion' game event this screen emits), then `data-coach="paint-sign"` (a got-it step that waits
  * until every pane is painted). A piece that already has paint skips the first step. Signing a piece
  * marks the guide seen.
+ *
+ * Feel (Theme F): the pour floods from the fingertip over the old paint and the surface wobbles once (glug lower
+ * for bigger panes, soft haptic); the chip she presses lifts under her finger and settles (the chip row is not
+ * rebuilt on a pick); undo un-pours with a 160 ms fade; Sign rolls the value up, stamps her title onto the piece
+ * (fx.stamp) and lands the arpeggio, success haptic and flakes with it (about 1.2 s, a tap skips the roll);
+ * Hang sets paintIntent.hung and the Gallery springs the piece onto its wall (spring heavy).
  */
 
 import { h, raw, backButton, button, tag, safeHex, escapeHtml } from './kit.js';
@@ -32,11 +38,12 @@ import fxDefault from './fx.js';
 import audioDefault from './audio.js';
 import hapticsDefault from './haptics.js';
 import { howThisWorksHtml, markGuideSeen, isSeen } from './guide.js';
+import { wireLift } from './feel.js';
 
 export const PAPER_PANE = '#FBF8F1';
 
 /** One-shot hint for the Gallery after this screen closes ("Paint another" lands on its canvases). */
-export const paintIntent = { focus: null };
+export const paintIntent = { focus: null, hung: null };
 
 /** One representative hex per hue family (used for hints; never an exact catalog color). */
 export const FAMILY_HEX = Object.freeze({
@@ -162,7 +169,7 @@ const CSS = `
 #screen-paint .pt-fade::before{left:0;background:linear-gradient(to right,var(--paper),rgba(0,0,0,0))}
 #screen-paint .pt-fade::after{right:0;background:linear-gradient(to left,var(--paper),rgba(0,0,0,0))}
 #screen-paint .pt-fade.can-left::before,#screen-paint .pt-fade.can-right::after{opacity:1}
-#screen-paint .pt-chips{display:grid;grid-auto-flow:column dense;grid-template-rows:repeat(2,48px);grid-auto-columns:56px;gap:10px;overflow-x:auto;overflow-y:hidden;padding:8px 10px 10px;margin:0 -10px;scrollbar-width:none;scroll-snap-type:x proximity}
+#screen-paint .pt-chips{display:grid;grid-auto-flow:column dense;grid-template-rows:repeat(2,48px);grid-auto-columns:56px;gap:10px;overflow-x:auto;overflow-y:hidden;padding:8px 10px 10px;margin:0 -10px;scrollbar-width:none;scroll-snap-type:x proximity;scroll-padding:0 10px}
 #screen-paint .pt-chips.is-empty{display:block;overflow:visible;padding:4px 0}
 #screen-paint .pt-chips.one-row{grid-template-rows:48px}
 #screen-paint .pt-chips::-webkit-scrollbar{display:none}
@@ -357,7 +364,7 @@ function updateChips() {
   if (!ui.sel || !stockedAll.some((c) => c.id === ui.sel)) {
     ui.sel = ((list.find((c) => c.stocked) || stockedAll[0]) || {}).id || null;
   }
-  const sig = list.map((c) => c.id + (c.id === ui.sel ? '*' : '') + (c.stocked ? (c.jars < 3 ? 'L' : 's') : c.mixer >= 0 ? `m${c.mixer}` : c.canMix ? 'e' : 'x')).join('|') + '#' + (ui.family || '');
+  const sig = list.map((c) => c.id + (c.stocked ? (c.jars < 3 ? 'L' : 's') : c.mixer >= 0 ? `m${c.mixer}` : c.canMix ? 'e' : 'x')).join('|') + '#' + (ui.family || '');
   if (sig !== ui.chipSig) {
     ui.chipSig = sig;
     const units = list.reduce((a, c) => a + (c.stocked ? 1 : 3), 0);
@@ -375,6 +382,11 @@ function updateChips() {
       if (n) n.textContent = String(Math.floor(c.jars));
     }
   }
+  wrap.querySelectorAll('.pt-chip[data-action="pick"]').forEach((b) => {
+    const on = b.dataset.color === ui.sel;
+    b.classList.toggle('is-sel', on);
+    b.setAttribute('aria-pressed', String(on));
+  });
   const selEntry = stockedAll.find((c) => c.id === ui.sel);
   q('[data-ref=selname]').textContent = ui.sel ? sim().displayName(st, ui.sel) : 'Paint comes from your vats';
   q('[data-ref=jars]').textContent = selEntry ? `${Math.floor(selEntry.jars)} jars left` : '';
@@ -480,9 +492,17 @@ function onScrap() {
 
 function gently(text) { ctx.toast(text); }
 
-function flood(el, hexColor, ev, size) {
+/**
+ * The pour: fx.pourFill floods the fingertip's color outward from the touch
+ * point over the old paint (kept until the flood ends), then the new fill is
+ * committed under it and the surface wobbles once, the way a poured layer
+ * settles. This is fx.pour's recipe with the commit in the middle: fx.pour
+ * removes its flood before it wobbles, which would flash the old color on a
+ * pane whose fill is only set afterwards (report: fx.pour wants an onFlooded hook).
+ */
+function flood(el, hexColor, ev, size, commit) {
   const svg = q('.canvas-svg');
-  if (!svg) return Promise.resolve();
+  if (!svg) { commit(); return Promise.resolve(); }
   const clipPath = svg.querySelector('clipPath path');
   if (clipPath) clipPath.setAttribute('d', el.getAttribute('d'));
   const o = {};
@@ -493,10 +513,48 @@ function flood(el, hexColor, ev, size) {
     o.y = b.y + b.height / 2;
   }
   o.ms = 300 + size * 50;
+  o.keep = true;
   // start the flood inside a frame callback so fx's clock never runs ahead of rAF's
   return new Promise((resolve) => {
-    requestAnimationFrame(() => { Promise.resolve(fx.pourFill(svg, hexColor, o)).then(resolve, resolve); });
+    requestAnimationFrame(() => {
+      const layerEl = svg.querySelector('[data-fill-layer]');
+      const before = new Set(layerEl && layerEl.parentNode ? [...layerEl.parentNode.children] : []);
+      let overlay = null;
+      const p = Promise.resolve(fx.pourFill(svg, hexColor, o));
+      if (layerEl && layerEl.parentNode) overlay = [...layerEl.parentNode.children].find((n) => !before.has(n)) || null;
+      p.then(() => {
+        commit();
+        if (overlay) overlay.remove();
+        wobble(el);
+      }, () => { commit(); if (overlay) overlay.remove(); }).then(resolve);
+    });
   });
+}
+
+/** The poured surface settles: a small skew and squash that rings out in 260 ms (skipped when motion is reduced). */
+function wobble(el) {
+  if (!el || fx.isReducedMotion() || typeof el.animate !== 'function') return;
+  try {
+    el.style.transformBox = 'fill-box';
+    el.style.transformOrigin = '50% 100%';
+    el.animate([
+      { transform: 'none' },
+      { transform: 'skewX(1.4deg) scaleY(1.012)', offset: 0.3 },
+      { transform: 'skewX(-0.9deg) scaleY(0.993)', offset: 0.6 },
+      { transform: 'skewX(0.3deg) scaleY(1.003)', offset: 0.82 },
+      { transform: 'none' },
+    ], { duration: 260, easing: 'ease-out' });
+  } catch (e) { /* ignore */ }
+}
+
+/** Undo un-pours: the pane's old color fades back in over 160 ms, no flood. */
+function fadeFill(rid, hexColor) {
+  const el = root.querySelector(`.pane[data-region="${CSS_ESC(rid)}"]`);
+  if (!el) return;
+  const from = el.getAttribute('fill') || PAPER_PANE;
+  setFill(rid, hexColor);
+  if (typeof el.animate !== 'function' || from === (hexColor || PAPER_PANE)) return;
+  try { el.animate([{ fill: from }, { fill: hexColor || PAPER_PANE }], { duration: 160, easing: 'ease-out' }); } catch (e) { /* ignore */ }
 }
 
 function sound(size) {
@@ -534,20 +592,38 @@ function applyPaint(rid, colorId, ev, { fromUndo = false } = {}) {
   if (!fromUndo) ui.undo.push({ regionId: rid, prev });
   if (ctx.game.emit) ctx.game.emit('paintRegion', { pieceId: p.id, regionId: rid, colorId }); // ends the guide's first step
   const el = root.querySelector(`.pane[data-region="${CSS_ESC(rid)}"]`);
-  ui.pending.add(rid);
   const hx = hexOf(colorId);
+  if (fromUndo) {
+    // un-pour: a quick crossfade back, a paper tick and a soft touch
+    audio.tick();
+    haptics.soft();
+    fadeFill(rid, hx);
+    update();
+    return true;
+  }
+  ui.pending.add(rid);
   sound(region.size || 1);
-  const done = () => { ui.pending.delete(rid); setFill(rid, hx); update(); };
-  flood(el, hx, ev, region.size || 1).then(done, done);
+  const commit = () => { ui.pending.delete(rid); setFill(rid, hx); };
+  const done = () => { commit(); update(); };
+  flood(el, hx, ev, region.size || 1, commit).then(done, done);
   update();
   return true;
+}
+
+/** Choose a chip in place (no rebuild, so the chip she pressed keeps its lift and settles). */
+function pickChip(chip) {
+  const id = chip.dataset.color;
+  if (id !== ui.sel) {
+    ui.sel = id;
+    ui.lastCost = 0;
+    update();
+  }
 }
 
 function onUndo() {
   const p = piece();
   if (!p || p.signedAt || !ui.undo.length) return;
   const last = ui.undo[ui.undo.length - 1];
-  const el = root.querySelector(`.pane[data-region="${CSS_ESC(last.regionId)}"]`);
   if (last.prev) {
     const ok = applyPaint(last.regionId, last.prev, null, { fromUndo: true });
     if (ok) ui.undo.pop();
@@ -555,11 +631,9 @@ function onUndo() {
   } else {
     ctx.game.act(sim().gallery.clearRegion, { pieceId: p.id, regionId: last.regionId });
     ui.undo.pop();
-    ui.pending.add(last.regionId);
-    const region = canvas().regions.find((r) => r.id === last.regionId);
     audio.tick();
-    const done = () => { ui.pending.delete(last.regionId); setFill(last.regionId, null); update(); };
-    flood(el, PAPER_PANE, null, region?.size || 1).then(done, done);
+    haptics.soft();
+    fadeFill(last.regionId, null);
     gently('Pane cleared.');
   }
   update();
@@ -630,11 +704,30 @@ function onSignConfirm() {
   layer.querySelector('[data-ref=signedtitle]').textContent = np.title || cv.name;
   update();
   const valEl = layer.querySelector('[data-ref=value]');
-  fx.rollNumber(valEl, 0, res.value, { format: ctx.format.num, ms: 1100 });
-  audio.motif();
-  haptics.success();
+  const thumb = layer.querySelector('.pt-mini');
   const used = [...new Set(Object.values(np.regions).map(hexOf))].slice(0, 6);
-  fx.confetti(used, valEl);
+  // The value rolls up while the sheet rises; her title is stamped onto the piece as it settles, and the
+  // arpeggio, the success touch and the flakes land with the stamp. About 1.2 s in all; a tap anywhere skips.
+  fx.rollNumber(valEl, 0, res.value, { format: ctx.format.num, ms: 1000 });
+  let skipped = false;
+  const sheetEl = layer.querySelector('.pt-sheet');
+  if (sheetEl) {
+    sheetEl.addEventListener('pointerdown', (e) => {
+      if (skipped || (e.target.closest && e.target.closest('button, input'))) return;
+      skipped = true;
+      fx.rollNumber(valEl, res.value, res.value, { format: ctx.format.num });
+    }, { once: true, passive: true });
+  }
+  const stampText = String(np.title || cv.name);
+  setTimeout(() => {
+    if (ui.sheet !== 'reveal' || !layer.contains(thumb)) return;
+    fx.stamp(thumb, stampText.length > 16 ? stampText.slice(0, 15).trimEnd() + '…' : stampText, { hold: 450 }).then(() => {
+      if (ui.sheet !== 'reveal') return;
+      audio.motif();
+      haptics.success();
+      fx.confetti(used, valEl);
+    });
+  }, 220);
 }
 
 function afterReveal() {
@@ -646,8 +739,8 @@ function onHang() {
   const p = piece();
   const res = ctx.game.act(sim().gallery.hang, { pieceId: p.id });
   if (res && res.ok) {
-    audio.thunk();
     haptics.medium();
+    paintIntent.hung = p.id; // the Gallery springs the piece onto its wall (spring heavy) and plays the thunk as it lands
     ctx.toast('Hung on the wall. Visitors are on their way.');
   } else {
     ctx.toast('The walls are full. It is safe in your archive.');
@@ -677,7 +770,7 @@ function onClick(e) {
   if (!t || !root.contains(t)) return;
   const a = t.dataset.action;
   if (a === 'close-sheet') { if (e.target === t && ui.sheet === 'sign') closeSheet(); return; }
-  if (a === 'pick') { ui.sel = t.dataset.color; ui.lastCost = 0; ui.chipSig = ''; update(); return; }
+  if (a === 'pick') { pickChip(t); return; }
   if (a === 'make') {
     const colorId = t.dataset.color;
     const mi = (state().stations.mixers || []).findIndex((m) => m && m.recipe === colorId);
@@ -749,6 +842,7 @@ const screen = {
     injectCss();
     root.addEventListener('click', onClick);
     root.addEventListener('keydown', onKey);
+    wireLift(root, '.pt-chip[data-action="pick"]', fx); // the chosen chip lifts under her finger and settles on release
     root.addEventListener('scroll', (e) => { if (e.target && e.target.closest && e.target.closest('[data-fade]')) updateFades(); }, true);
   },
 

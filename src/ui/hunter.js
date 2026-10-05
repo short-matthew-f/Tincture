@@ -15,6 +15,8 @@
  *
  * First-open guide 'hunter' (the hunter on screen speaks): one got-it step on
  * `data-coach="hunter-trait"`, the trait chip. "How this works" sits under the title.
+ *
+ * Feel (Theme F): Send from this page (there is no pin to fly to) squashes the portrait plate and puffs dust.
  */
 
 import { h, backButton, button, progressBar, iconSvg, tag, lockTag } from './kit.js';
@@ -24,6 +26,7 @@ import {
 } from './map.js';
 import { postcardArt } from './album.js';
 import { howThisWorksHtml } from './guide.js';
+import { dust } from './feel.js';
 
 const CSS = `
 .hn-hero { align-items:center; text-align:center; gap:6px; padding-top:18px; }
@@ -191,7 +194,7 @@ function paint(state, force = false) {
   state = state || ctx.game.state;
   recordHauls(state);
   const html = String(build(state));
-  const key = html.replace(/(data-until="\d+" data-prefix="[^"]*">)[^<]*/g, '$1').replace(/(data-from="\d+" data-to="\d+"><span style="width:)[^"]*/g, '$1');
+  const key = html.replace(/(mp[cp]|alc)\d+/g, '$1').replace(/(data-until="\d+" data-prefix="[^"]*">)[^<]*/g, '$1').replace(/(data-from="\d+" data-to="\d+"><span style="width:)[^"]*/g, '$1');
   if (!force && key === lastKey) { tickCountdowns(root, ctx); return; }
   lastKey = key;
   const keep = bodyEl.scrollTop;
@@ -261,6 +264,20 @@ const screen = {
       <div class="screen-body" data-hunter-body></div>`);
     bodyEl = root.querySelector('[data-hunter-body]');
     root.addEventListener('click', onClick);
+    if (ctx.game && ctx.game.on) {
+      // Send from this page: there is no pin to fly to, so the portrait plate squashes and a small puff of dust
+      // says off they go (the map's own Send flies the portrait chip onto the region pin instead).
+      ctx.game.on('hunterSent', (p) => {
+        if (!visible || !p || p.hunterId !== hunterId) return;
+        setTimeout(() => {
+          const plate = root.querySelector('.hn-hero .hn-plate');
+          if (!plate || !visible) return;
+          const r = plate.getBoundingClientRect();
+          ctx.fx.squash(plate);
+          dust(ctx.fx, r.left + r.width / 2, r.bottom - 8, { n: 8 });
+        }, 40);
+      });
+    }
   },
 
   show(params = {}) {

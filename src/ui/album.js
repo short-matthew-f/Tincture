@@ -14,10 +14,15 @@
  * Opens with params `{regionId}` or `{cardId}` (selects that set and highlights the card).
  * Cards still to find are quiet, unlabeled hue silhouettes; an empty album points to the Map.
  * data-actions: tab, flip, go-map.
+ *
+ * Feel (Theme F): cards lift on press; the postmark lands on the postage stamp through fx.stamp (with its thunk and
+ * medium haptic) as the turn finishes; a new card slides into its slot (spring soft, once). The page re-keys after a
+ * flip, and the no-op check ignores each picture's unique clip id, so a render never rebuilds under a turning card.
  */
 
 import { h, raw, backButton, button, progressBar, fadeStrip, lockTag, iconSvg, safeHex, lighten, darken } from './kit.js';
 import { FAMILY_HEX } from './map.js';
+import { wireLift, springIn } from './feel.js';
 
 const INK = '#2A2622';
 const GOLD = '#C99A2E';
@@ -194,6 +199,7 @@ let tabId = null;
 let highlightId = null;
 const flipped = new Set();
 const seenNew = new Set();
+const slid = new Set();   // new cards that have slid into their slot
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many ?? one + 's'}`;
 const ownedCount = (state, id) => (state.album && state.album.cards[id] ? state.album.cards[id].count : 0);
@@ -321,13 +327,39 @@ function paint(state, force = false) {
   if (!bodyEl) return;
   state = state || ctx.game.state;
   const html = String(build(state));
-  if (!force && html === lastKey) return;
-  lastKey = html;
+  const key = html.replace(/alc\d+/g, 'alc'); // each picture draws with a fresh clip id: compare without it, or every render rebuilds
+  if (!force && key === lastKey) return;
+  lastKey = key;
   const keep = bodyEl.scrollTop;
   bodyEl.innerHTML = html;
   bodyEl.scrollTop = keep;
   const active = bodyEl.querySelector('.al-tabs .chip[aria-pressed="true"]');
   if (active && typeof active.scrollIntoView === 'function' && force) active.scrollIntoView({ block: 'nearest', inline: 'center' });
+  slideInNew();
+}
+
+/** A new card slides into its slot (spring soft, 70 ms apart), once. */
+function slideInNew() {
+  if (!visible || !bodyEl) return;
+  let k = 0;
+  bodyEl.querySelectorAll('.al-card.is-owned').forEach((el) => {
+    const id = el.getAttribute('data-card-id');
+    if (!el.querySelector('.al-new') || slid.has(id)) return;
+    slid.add(id);
+    springIn(el, ctx.fx, { dy: -30, scale: 0.9, preset: 'soft', delay: k * 70 });
+    k++;
+  });
+  if (k) ctx.audio.tick('select');
+}
+
+/** Where the postmark lands: over the postage stamp, in the top right of the card's back. */
+function postmark(cardEl, card) {
+  const el = (bodyEl && bodyEl.querySelector(`.al-card[data-card-id="${card.id}"]`)) || cardEl;
+  const r = el.getBoundingClientRect();
+  const at = { getBoundingClientRect: () => ({ left: r.right - 86, top: r.top + 46, width: 0, height: 0 }) };
+  const region = ctx.content.getRegion(card.region);
+  const word = card.rare ? 'Gold' : String((region && region.name) || 'Posted').split(' ')[0].slice(0, 9);
+  ctx.fx.stamp(at, word, { hold: 600, hex: card.rare ? '#8C6512' : null });
 }
 
 function flip(el) {
@@ -341,11 +373,16 @@ function flip(el) {
   el.setAttribute('aria-label', `${card.title}. Tap to ${to ? 'turn it back' : 'read it'}`);
   if (to) flipped.add(id); else flipped.delete(id);
   setTimeout(() => ctx.audio.tick('select'), 90);
-  if (to) setTimeout(() => { if (el.classList.contains('is-flipped')) { ctx.audio.stamp(); if (ctx.haptics && ctx.haptics.light) ctx.haptics.light(); } }, 560);
+  // The postmark lands as the card finishes turning (it contacts 165 ms into the stamp, the flip ends at 600):
+  // fx.stamp brings the thunk and the medium touch itself.
+  if (to) setTimeout(() => { if (el.classList.contains('is-flipped')) postmark(el, card); }, rm ? 120 : 400);
   const tagEl = el.querySelector('.al-new');
   if (tagEl) { seenNew.add(id); tagEl.remove(); }
   el.classList.remove('al-hl');
   if (highlightId === id) highlightId = null;
+  // The DOM already shows this change. Re-key, or the next render sees different markup (flipped, no "new" tag),
+  // rebuilds the page, and cuts the turn and the stamp off mid-air.
+  lastKey = String(build(ctx.game.state)).replace(/alc\d+/g, 'alc');
 }
 
 function onClick(e) {
@@ -369,6 +406,7 @@ const screen = {
       <div class="screen-body" data-album-body></div>`);
     bodyEl = root.querySelector('[data-album-body]');
     root.addEventListener('click', onClick);
+    wireLift(bodyEl, '.al-card.is-owned', ctx.fx); // cards lift under her finger; the flip does the rest
     root.addEventListener('keydown', (e) => {
       if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[role="button"][data-action]')) { e.preventDefault(); e.target.click(); }
     });

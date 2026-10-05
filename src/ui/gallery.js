@@ -20,6 +20,12 @@
  * "Start painting"; the step ends when paint opens (this screen emits 'galleryStart' just before it
  * navigates). 'galleryNext' is the one-time "what's next" card after her first hang (a Hang here, or a
  * hung piece when the paint screen closes back to this one).
+ *
+ * Feel (Theme F): tiles lift on press (wireLift); hanging and taking down slide the tile (FLIP, spring soft; the
+ * moved tile glides from where she saw it with a lift, a hung piece out of sight is scrolled to first); a piece hung
+ * from the paint screen drops onto its wall (spring heavy, thunk as it lands); the collector's card slides in once
+ * per offer and Accept sends coins (fx.coinArc) to the pill; selling stamps "Sold" (lands in about 300 ms), THEN the
+ * coins arc (about 600 ms), as the thumbnail fades back.
  */
 
 import { h, raw, backButton, button, tag, safeHex, progressBar } from './kit.js';
@@ -29,6 +35,7 @@ import fxDefault from './fx.js';
 import audioDefault from './audio.js';
 import hapticsDefault from './haptics.js';
 import { howThisWorksHtml, markGuideSeen, isSeen } from './guide.js';
+import { wireLift, springIn } from './feel.js';
 
 const PLURAL = Object.freeze({
   red: 'reds', orange: 'oranges', yellow: 'yellows', green: 'greens', teal: 'teals',
@@ -50,6 +57,9 @@ const CSS = `
 #screen-gallery .gl-tile{display:flex;flex-direction:column;gap:4px;align-items:stretch;text-align:left;min-width:0}
 #screen-gallery .gl-frame{border-radius:6px;background:#D3D8D0;padding:6px 4px 2px;box-shadow:inset 0 0 0 1px rgba(42,38,34,.08)}
 #screen-gallery .gl-frame svg{width:100%;height:auto;display:block}
+#screen-gallery .gl-tile.fx-lifted,#screen-gallery .gl-empty.fx-lifted{filter:none}
+#screen-gallery .gl-tile.fx-lifted .gl-frame{box-shadow:inset 0 0 0 1px rgba(42,38,34,.08),0 6px 0 rgba(42,38,34,.26)}
+#screen-gallery .gl-empty.fx-lifted{box-shadow:inset 0 3px 8px rgba(42,38,34,.12),0 6px 0 rgba(42,38,34,.22)}
 #screen-gallery .gl-t{font-family:var(--font-display);font-size:13px;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #screen-gallery .gl-r{font-size:12px;color:var(--ink-soft);font-variant-numeric:tabular-nums}
 #screen-gallery .gl-empty{min-height:130px;border-radius:10px;background:rgba(247,244,236,.7);box-shadow:inset 0 3px 8px rgba(42,38,34,.12),0 2px 0 rgba(42,38,34,.12);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:var(--ink-soft);font-size:12px;text-align:center;padding:8px}
@@ -96,7 +106,7 @@ let fx = fxDefault;
 let audio = audioDefault;
 let haptics = hapticsDefault;
 
-const ui = { sig: '', comments: {}, commentsKey: '', commentsAt: 0, sheet: null, guide: null, guideTimer: 0, nextTimer: 0, hungBefore: 0, startShown: false };
+const ui = { offerSeen: '', sig: '', comments: {}, commentsKey: '', commentsAt: 0, sheet: null, guide: null, guideTimer: 0, nextTimer: 0, hungBefore: 0, startShown: false };
 
 const sim = () => ctx.sim;
 const state = () => ctx.game.state;
@@ -168,7 +178,7 @@ function offerView(st) {
   const p = pieceById(o.pieceId);
   if (!p) return '';
   return h`
-<div class="card" style="background:#FFF6DF;box-shadow:0 0 0 2px #B9831C,0 3px 0 rgba(42,38,34,.25)">
+<div class="card" data-offer="${o.pieceId}:${Math.round(o.pay)}" style="background:#FFF6DF;box-shadow:0 0 0 2px #B9831C,0 3px 0 rgba(42,38,34,.25)">
   <div class="row top"><div class="shrink0" style="width:44px">${mini(p)}</div>
     <div class="grow"><div class="card-title">A collector is visiting</div>
     <div class="small">offers <b class="num">${ctx.format.num(o.pay)}</b> Coins for a print of "${p.title || 'your piece'}". You keep the original on the wall.</div></div></div>
@@ -186,7 +196,7 @@ function wallsView(st, now) {
   for (let i = 0; i < walls; i++) {
     const p = hung[i];
     if (p) {
-      tiles.push(h`<div class="gl-cell">
+      tiles.push(h`<div class="gl-cell" data-cell-piece="${p.id}">
   <button type="button" class="gl-tile" data-tap data-action="piece" data-piece="${p.id}" aria-label="${p.title || 'Painting'}, ${ctx.format.rate(pieceRate(p, now))}">
     <span class="gl-frame">${mini(p)}</span>
     <span class="gl-t">${p.title || canvasOf(p)?.name || 'Untitled'}</span>
@@ -313,7 +323,7 @@ function archiveView(st) {
   const free = Math.max(0, (g.walls || 0) - (g.hung || []).length);
   return h`
 <div class="gl-sec"><div class="h2">Archive</div><div class="small muted">${list.length ? `${list.length} resting` : 'Nothing resting'}${sold.length ? ` · ${(g.sold || []).length} sold` : ''}</div></div>
-${list.length ? h`<div class="gl-walls">${list.map((p) => h`<div class="gl-cell">
+${list.length ? h`<div class="gl-walls">${list.map((p) => h`<div class="gl-cell" data-cell-piece="${p.id}">
   <button type="button" class="gl-tile" data-tap data-action="piece" data-piece="${p.id}" aria-label="${p.title || 'Painting'}">
     <span class="gl-frame">${mini(p)}</span>
     <span class="gl-t">${p.title || 'Untitled'}</span>
@@ -368,8 +378,92 @@ function build(st, now) {
   const body = q('.screen-body');
   if (body && scroll) body.scrollTop = scroll;
   if (ui.sheet) closeSheet();
+  const offer = q('[data-offer]');
+  if (offer && offer.dataset.offer !== ui.offerSeen) {
+    ui.offerSeen = offer.dataset.offer;
+    springIn(offer, fx, { dy: -32, scale: 0.97, preset: 'soft' }); // the collector's card slides in
+  }
   // The door just opened (the 'unlocked' hand-off starts the guide): bring the first canvas into view once.
   if (!ui.startShown && ui.guide && ui.guide.active && q('[data-coach="gallery-start"]')) showStart();
+}
+
+// ---------------------------------------------------------------------------
+// Movement: hanging and taking down slide the tile (FLIP with spring soft)
+// ---------------------------------------------------------------------------
+
+const cssId = (id) => String(id).replace(/["\\]/g, '\\$&');
+
+function cellRects() {
+  const m = new Map();
+  root.querySelectorAll('.gl-cell[data-cell-piece]').forEach((n) => m.set(n.dataset.cellPiece, n.getBoundingClientRect()));
+  const body = q('.screen-body');
+  m.scroll = body ? body.scrollTop : 0;
+  return m;
+}
+
+function inView(r) {
+  const body = q('.screen-body');
+  if (!body || !r) return true;
+  const b = body.getBoundingClientRect();
+  return r.bottom > b.top + 8 && r.top < b.bottom - 8;
+}
+
+/**
+ * FLIP: `before` was measured before the rebuild. The moved piece's tile glides from where it was to where it
+ * is now with a lift (scale 106%) that settles; the rest of the tiles that shifted glide softly too. A hung
+ * piece whose wall slot is out of sight is scrolled to first; a taken-down piece's empty wall slot just
+ * springs open (the archive can be a long way down, and the page keeps her place).
+ */
+function flipFrom(before, movedId, { hang = false } = {}) {
+  if (!root || fx.isReducedMotion()) return;
+  let moved = movedId ? q(`.gl-cell[data-cell-piece="${cssId(movedId)}"]`) : null;
+  if (moved && hang && !inView(moved.getBoundingClientRect())) moved.scrollIntoView({ block: 'center' });
+  const after = cellRects();
+  for (const [id, r1] of after) {
+    const r0 = before.get(id);
+    if (!r0) continue;
+    const isMoved = id === movedId;
+    // The moved tile glides from where she saw it (screen coordinates); the others only for a real change of
+    // layout, so a scroll to the wall (content coordinates) does not make them swim.
+    const dx = r0.left - r1.left;
+    const dy = isMoved ? r0.top - r1.top : (r0.top + before.scroll) - (r1.top + after.scroll);
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) continue;
+    const el = q(`.gl-cell[data-cell-piece="${cssId(id)}"]`);
+    if (!el) continue;
+    if (isMoved) el.style.zIndex = '3';
+    fx.spring(el, {
+      from: { transform: `translate(${dx}px, ${dy}px) scale(${isMoved ? 1.06 : 1})` },
+      to: { transform: 'translate(0px, 0px) scale(1)' },
+      preset: 'soft',
+    }).then(() => { if (isMoved) el.style.zIndex = ''; });
+  }
+  if (!hang && movedId) {
+    // the freed wall: its empty slot springs open where the tile was
+    const slots = [...root.querySelectorAll('.gl-walls[data-coach] .gl-empty')];
+    const first = slots[0];
+    if (first) springIn(first, fx, { dy: 0, scale: 0.9, preset: 'soft' });
+  }
+}
+
+function consumeHung() {
+  const id = paintIntent.hung;
+  if (!id) return;
+  paintIntent.hung = null;
+  requestAnimationFrame(() => landOnWall(id));
+}
+
+/** A newly hung piece (from the paint screen) drops onto its wall: spring heavy, with the wooden thunk as it lands. */
+function landOnWall(id) {
+  const cell = q(`.gl-cell[data-cell-piece="${cssId(id)}"]`);
+  if (!cell) return;
+  if (!inView(cell.getBoundingClientRect())) cell.scrollIntoView({ block: 'center' });
+  cell.style.zIndex = '3';
+  fx.spring(cell, {
+    from: { transform: 'translate(0px, -44px) scale(1.18)', opacity: 0 },
+    to: { transform: 'translate(0px, 0px) scale(1)', opacity: 1 },
+    preset: 'heavy',
+  }).then(() => { cell.style.zIndex = ''; });
+  setTimeout(() => { audio.thunk(0.8); }, 120);
 }
 
 // ---------------------------------------------------------------------------
@@ -456,8 +550,9 @@ async function sellPiece(id) {
   }
   for (const b of root.querySelectorAll('.gl-sheet .btn')) b.disabled = true;
   try {
-    await fx.stamp(thumb, 'Sold', { hold: 600 });
-    await fx.coinArc(thumb, coinPillTarget(), 10);
+    await fx.stamp(thumb, 'Sold', { hold: 600 }); // the stamp lands first (about 300 ms)...
+    if (thumb) fx.spring(thumb, { from: { transform: 'scale(1)', opacity: 1 }, to: { transform: 'scale(0.94)', opacity: 0.45 }, preset: 'soft', fill: 'forwards' });
+    await fx.coinArc(thumb, coinPillTarget(), 10); // ...then the coins leave it (about 600 ms)
   } catch (e) { /* the sale is done; effects are a bonus */ }
   ui.selling = false;
   ctx.toast(`Sold "${title}" for ${ctx.format.num(res.coins)} Coins.`);
@@ -504,26 +599,35 @@ function onClick(e) {
   if (a === 'sell-confirm') { sellPiece(id); return; }
   if (a === 'continue') { closeSheet(); ctx.navigate('paint', { pieceId: id }); return; }
   if (a === 'hang') {
+    const before = cellRects();
     const res = act(sim().gallery.hang, { pieceId: id });
-    if (res && res.ok) { audio.thunk(); haptics.medium(); ctx.toast('Hung. Visitors will find it.'); firstHangCard(); }
-    else ctx.toast('Every wall is in use. Take one down to rotate this in.');
     closeSheet();
     refresh(true);
+    if (res && res.ok) {
+      haptics.medium();
+      setTimeout(() => audio.thunk(0.8), 180); // as the tile lands
+      flipFrom(before, id, { hang: true });
+      ctx.toast('Hung. Visitors will find it.');
+      firstHangCard();
+    } else ctx.toast('Every wall is in use. Take one down to rotate this in.');
     return;
   }
   if (a === 'unhang') {
+    const before = cellRects();
     act(sim().gallery.unhang, { pieceId: id });
     audio.tick();
-    ctx.toast('Taken down and safe in the archive.');
+    haptics.light();
     closeSheet();
     refresh(true);
+    flipFrom(before, id, { hang: false });
+    ctx.toast('Taken down and safe in the archive.');
     return;
   }
   if (a === 'accept-offer') {
+    const card = q('[data-offer]');
     const res = act(sim().gallery.acceptCollector, {});
     if (res && res.ok) {
-      audio.coins(8);
-      haptics.ripple(3);
+      fx.coinArc(card, coinPillTarget(), 8); // brings its own patter and ripple
       ctx.toast(`+${ctx.format.num(res.coins)} Coins. The original stays on your wall.`);
     } else ctx.toast('The collector has moved on, but another will visit.');
     refresh(true);
@@ -635,6 +739,7 @@ const screen = {
     haptics = ctx.haptics || hapticsDefault;
     injectCss();
     root.addEventListener('click', onClick);
+    wireLift(root, '.gl-tile, .gl-empty', fx); // tiles lift under her finger and settle on release
     root.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('[data-guide-replay="gallery"]')) showStart(); });
   },
 
@@ -643,6 +748,7 @@ const screen = {
     refresh(true);
     ui.hungBefore = (gal().hung || []).length;
     ui.startShown = false;
+    consumeHung();
     startGuide();
   },
 
@@ -666,6 +772,7 @@ const screen = {
     const hung = (gal().hung || []).length;
     if (hung > ui.hungBefore) firstHangCard();
     ui.hungBefore = hung;
+    consumeHung();
     if (!ui.guide || !ui.guide.active) startGuide();
     if (paintIntent.focus === 'canvases') {
       paintIntent.focus = null;

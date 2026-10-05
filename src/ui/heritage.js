@@ -11,6 +11,10 @@
  * data-actions: renovate-ask, renovate-cancel, renovate-go, buy.
  *
  * First-open guide 'heritage': one got-it step on `data-coach="heritage-stays"`, the "Stays with you" list.
+ *
+ * Feel (Theme F): the second tap on "Renovate now" dims the room (fx.dim) and drops a wooden shutter (about 420 ms,
+ * thunk), THEN runs the sim, so the app's phase-beat arrives under it; a tap skips the drop, and one confirm commits
+ * once. Buying a node squashes its card, pops the new pip and counts the balance down.
  */
 
 import { h, raw, backButton, button, tag, iconSvg } from './kit.js';
@@ -78,7 +82,7 @@ let fx = fxDefault;
 let audio = audioDefault;
 let haptics = hapticsDefault;
 
-const ui = { confirm: false, sig: '' };
+const ui = { confirm: false, sig: '', renovating: false };
 
 const sim = () => ctx.sim;
 const state = () => ctx.game.state;
@@ -235,6 +239,59 @@ function refresh(force = false) {
   build();
 }
 
+// ---------------------------------------------------------------------------
+// Renovate: the shutter
+// ---------------------------------------------------------------------------
+
+let closeShutter = null;   // lets a tap during the drop skip straight to the renovation
+let shutterEl = null;
+
+/**
+ * The second tap on "Renovate now": the room dims (fx.dim) and a wooden shutter rolls down over the screen (about
+ * 420 ms, thunk as it lands), THEN the sim runs and the app's phase-beat arrives under it. A tap skips the drop.
+ * Reduced motion: the dim and a short fade, no moving shutter.
+ */
+function lowerShutter(then) {
+  fx.dim(true);
+  const layer = document.getElementById('fx-layer');
+  let fired = false;
+  const go = () => { if (fired) return; fired = true; closeShutter = null; then(); };
+  if (!layer) { go(); return; }
+  const el = document.createElement('div');
+  el.setAttribute('aria-hidden', 'true');
+  el.style.cssText = 'position:fixed;inset:0;background:repeating-linear-gradient(180deg,#8A5F3F 0,#8A5F3F 26px,#6E4A31 26px,#6E4A31 30px);box-shadow:inset 0 -16px 0 #3A2A20,0 6px 0 rgba(42,38,34,.35);will-change:transform,opacity';
+  layer.appendChild(el);
+  shutterEl = el;
+  closeShutter = go;
+  if (fx.isReducedMotion() || typeof el.animate !== 'function') {
+    if (el.animate) el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 120, fill: 'both' });
+    audio.thunk(0.9);
+    haptics.medium();
+    setTimeout(go, 140);
+    return;
+  }
+  const a = el.animate([
+    { transform: 'translateY(-100%)', offset: 0, easing: 'cubic-bezier(0.5, 0, 0.9, 0.6)' },
+    { transform: 'translateY(0%)', offset: 0.8 },
+    { transform: 'translateY(-1.6%)', offset: 0.9, easing: 'ease-in' },
+    { transform: 'translateY(0%)', offset: 1 },
+  ], { duration: 420, fill: 'both' });
+  setTimeout(() => { audio.thunk(1); haptics.medium(); }, 330); // lands about 80% through
+  a.finished.then(go, go);
+}
+
+function raiseShutter() {
+  const el = shutterEl;
+  shutterEl = null;
+  if (!el) { fx.dim(false); return; }
+  const done = () => { el.remove(); fx.dim(false); };
+  if (typeof el.animate !== 'function') { done(); return; }
+  // hold a beat so the phase-beat's first frame is under it, then fade away
+  setTimeout(() => {
+    el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 260, easing: 'ease-in', fill: 'forwards' }).finished.then(done, done);
+  }, 160);
+}
+
 function onClick(e) {
   const t = e.target.closest('[data-action]');
   if (!t || !root.contains(t)) return;
@@ -242,15 +299,23 @@ function onClick(e) {
   if (a === 'renovate-ask') { ui.confirm = true; refresh(true); return; }
   if (a === 'renovate-cancel') { ui.confirm = false; refresh(true); return; }
   if (a === 'renovate-go') {
-    ui.confirm = false;
-    const res = ctx.game.act(sim().prestige.renovate, {});
-    if (!res || !res.ok) ctx.toast(`${renovateGoal(state())}.`);
-    refresh(true);
+    if (ui.renovating) return; // one commit per confirm, never double-fired
+    ui.renovating = true;
+    closeShutter = null;
+    lowerShutter(() => {
+      ui.confirm = false;
+      let res = null;
+      try { res = ctx.game.act(sim().prestige.renovate, {}); } finally { ui.renovating = false; }
+      if (!res || !res.ok) ctx.toast(`${renovateGoal(state())}.`);
+      refresh(true);
+      raiseShutter(); // the app's phase-beat arrives under it; the shutter lets go once it is up
+    });
     return;
   }
   if (a === 'buy') {
     const id = t.dataset.node;
     const node = HERITAGE_TREE.find((n) => n.id === id);
+    const availBefore = sim().prestige.heritageAvailable(state());
     const res = ctx.game.act(sim().prestige.buyHeritageNode, { id });
     if (res && res.ok) {
       audio.clink(3);
@@ -258,7 +323,14 @@ function onClick(e) {
       ctx.toast(`${node ? node.name : 'Upgrade'} is now level ${res.level}.`);
       refresh(true);
       const card = q(`[data-node="${id}"]`);
-      if (card) fx.squash(card);
+      if (card) {
+        fx.squash(card); // 94% -> 104% -> 100%
+        const pips = card.querySelectorAll('.hr-pip.on');
+        const pip = pips[pips.length - 1];
+        if (pip) fx.spring(pip, { from: { transform: 'scale(2.2)', opacity: 0.3 }, to: { transform: 'scale(1)', opacity: 1 }, preset: 'firm' }); // the new pip lights with a pop
+      }
+      const num = q('.hr-big .num');
+      if (num) fx.rollNumber(num, availBefore, sim().prestige.heritageAvailable(state()), { ms: 500 }); // the balance counts down
     } else if (res && res.reason === 'heritage') {
       const need = res.cost - sim().prestige.heritageAvailable(state());
       ctx.toast(`${need} more Heritage and this one is yours.`);
@@ -298,6 +370,7 @@ const screen = {
     haptics = ctx.haptics || hapticsDefault;
     injectCss();
     root.addEventListener('click', onClick);
+    document.addEventListener('pointerdown', () => { if (closeShutter) closeShutter(); }, { passive: true, capture: true });
   },
 
   show() {
@@ -308,6 +381,7 @@ const screen = {
 
   hide() {
     ui.confirm = false;
+    closeShutter = null; // raiseShutter() always clears its own shutter, even after this screen has hidden
     stopGuide();
   },
 
