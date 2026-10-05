@@ -18,6 +18,11 @@
  * Params: show({pieceId}); with no piece on the easel it closes, opens the
  * Gallery and toasts "Pick a canvas to start painting". data-actions: sign, sign-confirm, sign-cancel,
  * hang, archive, undo, scrap (unsigned only; two taps), export, share, pick, make, family, close-sheet.
+ *
+ * First-open guide 'paint': `data-coach="paint-palette"` (ends on her first pane, announced by the
+ * 'paintRegion' game event this screen emits), then `data-coach="paint-sign"` (a got-it step that waits
+ * until every pane is painted). A piece that already has paint skips the first step. Signing a piece
+ * marks the guide seen.
  */
 
 import { h, raw, backButton, button, tag, safeHex, escapeHtml } from './kit.js';
@@ -26,6 +31,7 @@ import { openRecipeSheet, ensureStyles as ensureWorkshopStyles } from './worksho
 import fxDefault from './fx.js';
 import audioDefault from './audio.js';
 import hapticsDefault from './haptics.js';
+import { howThisWorksHtml, markGuideSeen, isSeen } from './guide.js';
 
 export const PAPER_PANE = '#FBF8F1';
 
@@ -291,16 +297,17 @@ function buildAll() {
 <div class="screen-head">
   ${backButton('Back to the Gallery')}
   <div class="titles"><div class="title" data-ref="title"></div><div class="subtitle" data-ref="progress"></div></div>
-  <span data-ref="signslot"></span>
+  <span data-ref="signslot" data-coach="paint-sign"></span>
 </div>
 <div class="pt-stage" data-ref="stage" data-coach="paint">${raw(canvasSvgMarkup(cv, fillsOf(p), { interactive: !signed, label: cv.name }))}</div>
 <div class="pt-tools">
   ${button('Undo', { small: true, attrs: { 'data-action': 'undo', 'data-ref': 'undo' }, disabled: true })}
+  ${howThisWorksHtml('paint')}
   <span class="grow"></span>
   ${button('Save image', { small: true, attrs: { 'data-action': 'export' } })}
   <span data-ref="shareslot"></span>
 </div>
-<div class="card pt-palette" data-ref="palette" ${signed ? 'hidden' : ''}>
+<div class="card pt-palette" data-ref="palette" data-coach="paint-palette" ${signed ? 'hidden' : ''}>
   <div class="row between"><div class="serif" style="font-size:17px" data-ref="selname"></div><div class="small muted" data-ref="jars"></div></div>
   ${fam.length ? h`<div class="pt-fade" data-fade><div class="pt-suggest" data-ref="suggest"><span class="small muted nowrap">Suggested</span>${fam.map((f) => h`<button type="button" class="pt-fam" data-tap data-action="family" data-family="${f}" aria-pressed="false"><i style="background:${FAMILY_HEX[f] || '#9A9288'}"></i>${FAMILY_NAME[f] || f}</button>`)}</div></div>` : ''}
   <div class="pt-fade" data-fade><div class="pt-chips" data-ref="chips"></div></div>
@@ -525,6 +532,7 @@ function applyPaint(rid, colorId, ev, { fromUndo = false } = {}) {
     return false;
   }
   if (!fromUndo) ui.undo.push({ regionId: rid, prev });
+  if (ctx.game.emit) ctx.game.emit('paintRegion', { pieceId: p.id, regionId: rid, colorId }); // ends the guide's first step
   const el = root.querySelector(`.pane[data-region="${CSS_ESC(rid)}"]`);
   ui.pending.add(rid);
   const hx = hexOf(colorId);
@@ -593,6 +601,7 @@ function onSignConfirm() {
     return;
   }
   ui.undo = [];
+  if (!isSeen(state(), 'paint')) ctx.game.act(markGuideSeen, { id: 'paint' }); // she has found her way around
   const np = piece();
   const cv = canvas();
   const now = ctx.game.now();
@@ -697,6 +706,36 @@ function onKey(e) {
   applyPaint(pane.dataset.region, ui.sel, null);
 }
 
+// ---- first-open guide ------------------------------------------------------
+
+let guide = null;
+let guideTimer = 0;
+
+function stopGuide() {
+  clearTimeout(guideTimer);
+  guideTimer = 0;
+  if (guide) { try { guide.stop(); } catch (e) { /* ignore */ } guide = null; }
+}
+
+function allPainted() {
+  const p = piece();
+  const cv = canvas();
+  return !!(p && cv && !p.signedAt && paintedCount(p, cv) >= cv.regions.length);
+}
+
+function startGuide() {
+  stopGuide();
+  if (typeof ctx.guide !== 'function') return;
+  const p = piece();
+  const cv = canvas();
+  if (!p || !cv || p.signedAt) return;
+  const first = { anchor: '[data-coach="paint-palette"]', text: 'Pick a color, then tap a pane.', endsOn: 'action', event: 'paintRegion' };
+  const sign = { anchor: '[data-coach="paint-sign"]', text: 'Sign it when every pane is filled.', endsOn: 'got-it', side: 'below', when: allPainted };
+  guide = ctx.guide('paint', paintedCount(p, cv) > 0 ? [sign] : [first, sign], { screen: 'paint' });
+  const g = guide;
+  guideTimer = setTimeout(() => { guideTimer = 0; if (g === guide) g.start(); }, 300);
+}
+
 const screen = {
   id: 'paint',
   fullscreen: true, // the router hides the tab bar
@@ -734,9 +773,11 @@ const screen = {
       return;
     }
     buildAll();
+    startGuide();
   },
 
   hide() {
+    stopGuide();
     closeSheet();
     disarmScrap();
     ui.pending.clear();

@@ -12,6 +12,9 @@
  * ("Joins at 25 colors: 9 more" / "Hire for 400 coins") and a Hire button once it is affordable.
  *
  * data-actions: send, hire, answer-choice, open-card, open-album, go-map.
+ *
+ * First-open guide 'hunter' (the hunter on screen speaks): one got-it step on
+ * `data-coach="hunter-trait"`, the trait chip. "How this works" sits under the title.
  */
 
 import { h, backButton, button, progressBar, iconSvg, tag, lockTag } from './kit.js';
@@ -20,6 +23,7 @@ import {
   haulChips, recentCardsFor, recordHauls, refreshSheet, hireInfo, TRAIT_HEX,
 } from './map.js';
 import { postcardArt } from './album.js';
+import { howThisWorksHtml } from './guide.js';
 
 const CSS = `
 .hn-hero { align-items:center; text-align:center; gap:6px; padding-top:18px; }
@@ -37,6 +41,8 @@ const CSS = `
 .hn-perk.is-locked { opacity:.85; }
 .hn-cards { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
 .hn-cards button { display:flex; flex-direction:column; gap:4px; padding:5px; border-radius:8px; background:var(--paper); box-shadow:var(--cut-sm); text-align:left; }
+section[data-screen="hunter"] .how-link { min-height:24px; padding:0 8px; line-height:1; position:relative; }
+section[data-screen="hunter"] .how-link::before { content:''; position:absolute; inset:-10px -8px; }
 .hn-cards .al-art { width:100%; height:auto; }
 .hn-cards span { font-family:var(--font-display); font-size:12px; line-height:1.15; padding:0 1px 2px; }
 `;
@@ -108,7 +114,7 @@ function unhiredHtml(state) {
   return h`<div class="card hn-hero">
       <div class="hn-plate">${hunterPortrait(def.id, { size: 148, trait: def.trait, label: def.name })}</div>
       <div class="hn-name">${def.name}</div>
-      <div class="hn-chips"><span class="chip hn-chip" style="background:${TRAIT_HEX[def.trait] || '#ccc'}33">${trait ? trait.name : def.trait}</span>
+      <div class="hn-chips"><span class="chip hn-chip" data-coach="hunter-trait" style="background:${TRAIT_HEX[def.trait] || '#ccc'}33">${trait ? trait.name : def.trait}</span>
         <span class="chip hn-chip">${def.voice[0].toUpperCase() + def.voice.slice(1)} voice</span></div>
       <p class="hint" style="max-width:300px">${def.blurb}</p>
     </div>
@@ -140,7 +146,7 @@ function build(state) {
   return h`<div class="card hn-hero">
       <div class="hn-plate">${hunterPortrait(hu.id, { size: 148, trait: hu.trait, label: hu.name })}</div>
       <div class="hn-name">${hu.name}</div>
-      <div class="hn-chips"><span class="chip hn-chip" style="background:${TRAIT_HEX[hu.trait] || '#ccc'}33">${trait ? trait.name : hu.trait}</span>${trait2 ? h`<span class="chip hn-chip">${trait2.name}</span>` : ''}<span class="chip hn-chip">Level ${hu.level}</span>
+      <div class="hn-chips"><span class="chip hn-chip" data-coach="hunter-trait" style="background:${TRAIT_HEX[hu.trait] || '#ccc'}33">${trait ? trait.name : hu.trait}</span>${trait2 ? h`<span class="chip hn-chip">${trait2.name}</span>` : ''}<span class="chip hn-chip">Level ${hu.level}</span>
         ${def ? h`<span class="chip hn-chip">${def.voice[0].toUpperCase() + def.voice.slice(1)} voice</span>` : ''}</div>
       ${def ? h`<p class="hint" style="max-width:300px">${def.blurb}</p>` : ''}
     </div>
@@ -221,6 +227,28 @@ function onClick(e) {
   }
 }
 
+let guideTimer = 0;
+let hunterGuide = null;
+
+function stopGuide() {
+  clearTimeout(guideTimer);
+  guideTimer = 0;
+  if (hunterGuide) { try { hunterGuide.stop(); } catch (e) { /* ignore */ } hunterGuide = null; }
+}
+
+/** One information step; the hunter on screen says it, with their own portrait. */
+function startGuide() {
+  stopGuide();
+  if (typeof ctx.guide !== 'function' || !hunterId) return;
+  const def = ctx.content.getHunter(hunterId);
+  hunterGuide = ctx.guide('hunter', [
+    { anchor: '[data-coach="hunter-trait"]', text: 'Each hunter has one trait; it shapes their hauls.', endsOn: 'got-it',
+      kicker: def ? def.name : '', portrait: String(hunterPortrait(hunterId, { size: 32, label: def ? def.name : 'Hunter' })) },
+  ], { screen: 'hunter' });
+  const g = hunterGuide;
+  guideTimer = setTimeout(() => { guideTimer = 0; if (visible && g === hunterGuide) g.start(); }, 300);
+}
+
 const screen = {
   id: 'hunter',
 
@@ -229,7 +257,7 @@ const screen = {
     ctx = context;
     injectStyle();
     root.innerHTML = String(h`<div class="screen-head">${backButton('Back to the map')}
-      <div class="titles"><div class="title">Your hunters</div><div class="subtitle"></div></div><span class="spacer"></span></div>
+      <div class="titles"><div class="title">Your hunters</div><div class="subtitle"></div>${howThisWorksHtml('hunter')}</div><span class="spacer"></span></div>
       <div class="screen-body" data-hunter-body></div>`);
     bodyEl = root.querySelector('[data-hunter-body]');
     root.addEventListener('click', onClick);
@@ -246,12 +274,14 @@ const screen = {
     if (bodyEl) bodyEl.scrollTop = 0;
     clearInterval(timer);
     timer = setInterval(() => tickCountdowns(root, ctx), 1000);
+    startGuide();
   },
 
   hide() {
     visible = false;
     clearInterval(timer);
     timer = 0;
+    stopGuide();
   },
 
   render(state) {

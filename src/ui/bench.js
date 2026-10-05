@@ -11,11 +11,13 @@
  *
  * data-action names: `drop` (data-drop = pigment id), `undo`, `reset`, `mix`,
  * `sell` (data-color, data-jars = number | 'all'), `sell-more`.
- * Coach target: data-coach="bench" on the jar card.
+ * Coach targets: data-coach="bench" on the jar card, "bench-drops" on the drop
+ * chips, "bench-hint" on the shimmer hint card (the `bench` guide).
  */
 
 import { h, iconSvg, button, backButton, safeHex } from './kit.js';
-import { Mixer, chipsHtml, injectStyles, coinsWord, SHARED_CSS, MIX_CSS } from './matching.js';
+import { Mixer, chipsHtml, injectStyles, coinsWord, offerWhatsNext, SHARED_CSS, MIX_CSS } from './matching.js';
+import { howThisWorksHtml, markGuideSeen } from './guide.js';
 
 const PAGE_LABEL = Object.freeze({ wheel: 'Wheel', tints: 'Tints', shades: 'Shades', earths: 'Earths', wild: 'Wild' });
 const NEAR_DE = 4;
@@ -58,6 +60,9 @@ const S = {
   down: false,
   dirty: false,
   timers: [],
+  guide: null,
+  offer: null,
+  near: false, // a hidden color is within reach of the current blend (the guide's second step)
 };
 
 const stateOf = () => S.ctx.game.state;
@@ -65,7 +70,7 @@ const later = (fn, ms) => { S.timers.push(setTimeout(fn, ms)); };
 
 function build() {
   const { ctx, root } = S;
-  root.innerHTML = String(h`<div class="screen-head">${backButton('Back')}<div class="titles"><div class="title">Mixing bench</div></div><span class="spacer"></span></div>
+  root.innerHTML = String(h`<div class="screen-head oq-head">${backButton('Back')}<div class="titles"><div class="title">Mixing bench</div>${howThisWorksHtml('bench')}</div><span class="spacer"></span></div>
 <div class="screen-body">
 <div class="card" data-coach="bench">
 <div class="small muted">Drop pigments together and see what they make. Nothing is spent here, so experiment freely.</div>
@@ -75,8 +80,8 @@ function build() {
 </div>
 <div class="bn-recipe" data-recipe></div>
 </div>
-${chipsHtml()}
-<div class="card" data-hints hidden></div>
+${chipsHtml('bench-drops')}
+<div class="card" data-hints data-coach="bench-hint" hidden></div>
 <div class="card" data-sell></div>
 </div>
 <div class="mx-actions">
@@ -89,8 +94,27 @@ ${button('Mix it', { variant: 'primary', cls: 'grow', attrs: { 'data-action': 'm
   S.mixer.setPigments(ctx.sim.discovery.availablePigments(stateOf()));
   S.sellSig = '';
   S.known = ctx.sim.discoveredCount(stateOf());
+  S.near = false;
   update();
   renderSell(true);
+  startGuide();
+}
+
+/** First-open guide: drops, then the shimmer card once something is within reach (Theme D). */
+function startGuide() {
+  stopGuide();
+  const { ctx } = S;
+  if (typeof ctx.guide !== 'function') return;
+  S.guide = ctx.guide('bench', [
+    { anchor: '[data-coach="bench-drops"]', text: 'Mix anything. Nearby colors shimmer', endsOn: 'action', done: () => !!S.mixer && S.mixer.size > 0, side: 'below' },
+    { anchor: '[data-coach="bench-hint"]', text: 'Within reach: tap Mix it to discover', endsOn: 'got-it', when: () => S.near && !!S.mixer && S.mixer.size > 0, side: 'below' },
+  ], { screen: 'bench' });
+  later(() => { if (S.guide) S.guide.start(); }, 300);
+}
+
+function stopGuide() {
+  if (S.guide) { try { S.guide.stop(); } catch (e) { /* ignore */ } S.guide = null; }
+  if (S.offer) { S.offer.stop(); S.offer = null; }
 }
 
 // ---------------------------------------------------------------------------
@@ -139,6 +163,12 @@ function update() {
   // Shimmer hints: up to three faint ghosts of colors that are close by, with the page they live on.
   const hintsBox = root.querySelector('[data-hints]');
   const hints = hex ? ctx.sim.discovery.shimmerHints(state, hex) : [];
+  const wasNear = S.near;
+  S.near = hints.some((g) => g.de <= NEAR_DE);
+  // On a short phone the hint card sits below the fold: bring it up for the guide's second step.
+  if (S.near && !wasNear && S.guide && S.guide.active && S.guide.step === 1) {
+    later(() => { try { hintsBox.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) { /* ignore */ } }, 80);
+  }
   if (hints.length) {
     hintsBox.hidden = false;
     hintsBox.innerHTML = String(h`<div class="bn-hint-h">Something is shimmering nearby</div><div class="bn-ghosts">${hints.map((g) => {
@@ -178,6 +208,20 @@ function mixIt() {
     ctx.haptics.success();
     ctx.fx.ringBurst(swatchEl, res.hex);
     later(() => { mixer.reset(); }, 400);
+    // She has found one: the coach is done, and two ways on wait until the naming is over.
+    if (!stateOf().onboarding?.seen?.bench) ctx.game.act(markGuideSeen, { id: 'bench' });
+    if (S.offer) S.offer.stop();
+    const found = res.discovered.colorId;
+    S.offer = offerWhatsNext(ctx, {
+      screen: 'bench',
+      id: 'benchNext',
+      delay: 1200,
+      tries: 400,
+      title: 'A new color is yours',
+      body: 'Your bench found it. It is already in the catalog.',
+      more: 'Mix another',
+      next: { label: 'Name it in your catalog', run: () => ctx.navigate('catalog', found ? { colorId: found } : {}) },
+    });
   } else {
     ctx.haptics.light();
     ctx.fx.pulse(swatchEl, true);
@@ -299,6 +343,7 @@ export default {
   hide() {
     S.timers.forEach(clearTimeout);
     S.timers = [];
+    stopGuide();
   },
 
   render(state) {

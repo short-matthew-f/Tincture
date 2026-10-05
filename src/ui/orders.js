@@ -14,13 +14,16 @@
  * `pick-color` (data-order, data-color), `offer-any` (data-order),
  * `deliver-container` (data-order, data-cell), `go-shelf`, `commissions`,
  * `bench`.
- * Coach target: data-coach="first-order" on the first order card.
+ * Coach targets: data-coach="first-order" on the first order card (the
+ * first-ten-minutes script), data-coach="first-match" on the first match
+ * order when it is not the first card (the `orders` guide).
  */
 
 import { h, raw, iconSvg, button, swatch, safeHex, containerSvg, CONTAINER_NAMES } from './kit.js';
 import {
-  injectStyles, payBase, coinsWord, wishWords, customerName, aboutMinutes, repChip, commissionLock, SHARED_CSS,
+  injectStyles, payBase, coinsWord, wishWords, customerName, aboutMinutes, repChip, commissionLock, orderVeteran, SHARED_CSS,
 } from './matching.js';
+import { howThisWorksHtml, markGuideSeen } from './guide.js';
 
 const CSS = `
 .or-chips { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
@@ -60,6 +63,9 @@ const S = {
   bonusAt: -Infinity,
   bonus: 1,
   delivered: null, // {text, hex, coins}: the last any/container delivery, thanked inline
+  guide: null,
+  startTimer: 0,
+  opened: false,   // she tapped an order this visit (ends the guide's action step)
 };
 
 const stateOf = () => S.ctx.game.state;
@@ -107,11 +113,11 @@ function payUpTo(base, mult = 1.5) {
   return h`<span class="or-pay">${iconSvg('coin', { size: 14 })}<span>Up to ${coinsWord(ctx, base * mult)}</span></span>`;
 }
 
-function matchCard(o, coach) {
+function matchCard(o, coach, firstMatch) {
   const { ctx } = S;
   const base = payBase(ctx, o);
   const who = customerName(ctx, o);
-  return h`<div class="card or-card is-tap" data-action="open-match" data-order="${o.id}" data-tap role="button" tabindex="0"${coach ? h` data-coach="first-order"` : ''} aria-label="Order from ${who}, would like ${wishWords(ctx, o.target)}">
+  return h`<div class="card or-card is-tap" data-action="open-match" data-order="${o.id}" data-tap role="button" tabindex="0"${coach ? h` data-coach="first-order"` : firstMatch ? h` data-coach="first-match"` : ''} aria-label="Order from ${who}, would like ${wishWords(ctx, o.target)}">
 <div class="or-main">
 <span class="or-sw" style="background:${safeHex(o.target)}" aria-hidden="true"></span>
 <div class="grow stack stack-sm"><div class="or-name ellipsis">${who}</div><div class="small muted">Would like ${wishWords(ctx, o.target)}</div>${payUpTo(base)}</div>
@@ -181,6 +187,7 @@ function boardHtml(state) {
   const commCount = state.commissions?.open?.length ?? 0;
   const lock = commissionLock(ctx, state);
   const th = S.delivered;
+  const firstMatch = open.findIndex((o) => o.kind !== 'any' && !(o.kind === 'container' && o.container));
   return h`<div class="or-chips">${rep >= 1 ? repChip(rep) : h`<span class="small muted">Earn a reputation star with a Perfect match</span>`}</div>
 <div class="small muted" data-countdown></div>
 ${th ? h`<div class="card or-thanks" data-thanks>${swatch(th.hex, 44)}<div class="grow"><div class="semi">${th.text}</div><div class="small muted">${th.coins}</div></div></div>` : ''}
@@ -191,7 +198,7 @@ ${button('Mixing bench', { attrs: { 'data-action': 'bench' } })}
 </div>
 ${lock ? h`<div class="oq-lockrow" data-lock>${lock.tag}${lock.more ? h`<span class="more">${lock.more}</span>` : ''}</div>` : ''}
 ${open.length
-    ? open.map((o, i) => (o.kind === 'any' ? anyCard(o, i === 0) : o.kind === 'container' && o.container ? containerCard(o, i === 0) : matchCard(o, i === 0)))
+    ? open.map((o, i) => (o.kind === 'any' ? anyCard(o, i === 0) : o.kind === 'container' && o.container ? containerCard(o, i === 0) : matchCard(o, i === 0, i === firstMatch)))
     : h`<div class="card or-empty"><div class="oq-h">Every order is filled</div><p class="muted">New orders arrive over time. Meanwhile, the bench is free.</p></div>`}
 ${state.apprentices?.orderClerk ? h`<div class="card tight"><div class="small"><span class="semi">Order Clerk:</span> fills simple orders from your stock at ${Math.round(ctx.sim.orders.CLERK_PAYOUT * 100)}% pay.</div></div>` : ''}`;
 }
@@ -265,6 +272,24 @@ function deliverContainer(orderId, cell, fromEl) {
   if (S.body) S.body.scrollTop = 0;
 }
 
+/** First-open guide: tap the first match order (docs/PLAN-v0.2 Theme D). */
+function startGuide() {
+  stopGuide();
+  const { ctx } = S;
+  if (typeof ctx.guide !== 'function') return;
+  const seen = stateOf().onboarding?.seen || {};
+  if (!seen.orders && orderVeteran(stateOf())) { ctx.game.act(markGuideSeen, { id: 'orders' }); return; }
+  S.guide = ctx.guide('orders', [
+    { anchor: '[data-coach="first-match"], [data-coach="first-order"][data-action="open-match"]', text: 'Tap an order to mix its color', endsOn: 'action', done: () => S.opened, side: 'below' },
+  ], { screen: 'orders' });
+  S.startTimer = setTimeout(() => { if (S.guide) S.guide.start(); }, 300);
+}
+
+function stopGuide() {
+  clearTimeout(S.startTimer);
+  if (S.guide) { try { S.guide.stop(); } catch (e) { /* ignore */ } S.guide = null; }
+}
+
 export default {
   id: 'orders',
 
@@ -273,7 +298,7 @@ export default {
     S.root = root;
     injectStyles('oq-shared', SHARED_CSS);
     injectStyles('orders', CSS);
-    root.innerHTML = String(h`<div class="screen-head is-left"><div class="titles"><div class="title">Orders</div><div class="subtitle">Customers wait as long as it takes</div></div></div><div class="screen-body pad-bottom-tab" data-body></div>`);
+    root.innerHTML = String(h`<div class="screen-head is-left oq-head"><div class="titles"><div class="title">Orders</div><div class="subtitle">Customers wait as long as it takes</div>${howThisWorksHtml('orders')}</div></div><div class="screen-body pad-bottom-tab" data-body></div>`);
     S.body = root.querySelector('[data-body]');
     const release = () => {
       if (!S.down) return;
@@ -284,11 +309,16 @@ export default {
     root.addEventListener('pointerup', release, { passive: true });
     root.addEventListener('pointercancel', release, { passive: true });
     root.addEventListener('click', (e) => {
+      if (e.target.closest('[data-guide-replay]')) S.opened = false; // "How this works" starts the guide over
       const t = e.target.closest('[data-action]');
       if (!t || !root.contains(t) || t.disabled) return;
       const order = t.getAttribute('data-order');
       switch (t.getAttribute('data-action')) {
-        case 'open-match': ctx.navigate('matching', { orderId: order }); break;
+        case 'open-match':
+          S.opened = true; // she has done what the guide asks; it ends before the screen hides
+          if (!stateOf().onboarding?.seen?.orders) ctx.game.act(markGuideSeen, { id: 'orders' });
+          ctx.navigate('matching', { orderId: order });
+          break;
         case 'toggle-any': S.anyOpen = S.anyOpen === order ? null : order; paint(true); break;
         case 'pick-color': S.pick[order] = t.getAttribute('data-color'); paint(true); break;
         case 'offer-any': offerAny(order, t.closest('.card') || t); break;
@@ -308,6 +338,7 @@ export default {
   },
 
   show() {
+    S.opened = false;
     S.down = false;
     S.dirty = false;
     S.bonusAt = -Infinity;
@@ -315,11 +346,13 @@ export default {
     paint(true);
     clearInterval(S.timer);
     S.timer = setInterval(tickCountdown, 15000);
+    startGuide();
   },
 
   hide() {
     clearInterval(S.timer);
     S.timer = 0;
+    stopGuide();
   },
 
   render() {

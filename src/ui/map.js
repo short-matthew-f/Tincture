@@ -19,10 +19,18 @@
  * The Send sheet lives in its own host appended to <body> (data-actions:
  * close-sheet, pick-region, pick-hunter, pick-duration, send-go), so it works
  * from any screen. `data-coach="map"` sits on the map window.
+ *
+ * First-open guide 'map' (Wren speaks): `data-coach="map-meadow"` (the Meadow pin) ends when the
+ * Send sheet opens, `data-coach="map-send"` (the Send button) ends on the send ('hunterSent'). The
+ * sheet host is mounted inside the top screen (not <body>) so guide.js can anchor to it, and it
+ * defaults to the 30-minute trip while that guide is unseen. 'mapNext' is the one-time "what's
+ * next" card after the first hunter comes home (the hunterReturn event, or the next show with a
+ * Backpack waiting).
  */
 
 import { h, raw, button, tag, lockTag, swatch, iconSvg, safeHex, lighten, darken } from './kit.js';
 import { unlockTag, openUnlockSheet, ensureStyles as ensureWorkshopStyles } from './workshop.js';
+import { howThisWorksHtml, markGuideSeen, isSeen } from './guide.js';
 
 // ---------------------------------------------------------------------------
 // Shared constants
@@ -120,6 +128,10 @@ button.mp-find { min-height:44px; padding:4px 12px 4px 8px; font-size:12px; }
 .mp-sheet-host { position:absolute; inset:0; z-index:55; display:flex; align-items:flex-end; justify-content:center;
   background:rgba(42,38,34,.45); animation: fade-in 160ms ease-out both; }
 .mp-sheet { min-height:0; }
+section[data-screen="map"] .how-link { min-height:24px; padding:0 8px 0 0; line-height:1; position:relative; }
+section[data-screen="map"] .how-link::before { content:''; position:absolute; inset:-10px -8px; }
+.mp-cta { position:sticky; bottom:calc(-18px - var(--safe-bottom)); z-index:2; margin:0 -18px calc(-18px - var(--safe-bottom)); padding:10px 18px calc(18px + var(--safe-bottom));
+  background:var(--paper); box-shadow:0 -2px 0 rgba(42,38,34,.08); }
 .mp-sheet .mp-x { position:absolute; right:12px; top:10px; }
 .mp-sheet .chip { min-height:44px; }
 .mp-sheet-title { font-family:var(--font-ui); font-weight:600; font-size:16px; line-height:1.15; color:var(--ink-soft); }
@@ -587,6 +599,11 @@ export function haulChips(ctx, state, haul) {
 
 let sheet = null; // {ctx, host, regionId, hunterId, duration, onKey}
 
+/** True while the Send sheet is open (the map guide waits on it). */
+export function sendSheetOpen() {
+  return !!sheet;
+}
+
 export function closeSheet() {
   if (!sheet) return;
   const s = sheet;
@@ -663,7 +680,7 @@ function sheetHtml(ctx, state) {
   let cta;
   if (!open) cta = h`<div class="row center" style="justify-content:center">${lockTag(lock ? lock.text : 'Opens soon')}</div>`;
   else if (!hunter) cta = '';
-  else cta = button(`Send ${hunter.name}`, { block: true, variant: 'primary', attrs: { 'data-action': 'send-go' } });
+  else cta = h`<div class="mp-cta">${button(`Send ${hunter.name}`, { block: true, variant: 'primary', attrs: { 'data-action': 'send-go', 'data-coach': 'map-send' } })}</div>`;
 
   return h`<button type="button" class="btn-back mp-x" data-action="close-sheet" data-tap aria-label="Close">${iconSvg('close', { size: 20 })}</button>
     <div class="stack stack-sm"><div class="mp-sheet-title">${open ? 'Send to the' : 'On the map'}<span class="mp-rname">${region.name}</span></div>
@@ -702,12 +719,13 @@ export function openSendSheet(ctx, { hunterId = null, regionId = null } = {}) {
   const pick = home.find((x) => x.id === hunterId) || home[0] || null;
   const host = document.createElement('div');
   host.className = 'mp-sheet-host';
-  host.setAttribute('role', 'dialog');
-  host.setAttribute('aria-modal', 'true');
+  // role="group", not "dialog": guide.js pauses for a dialog inside the top screen, and the "Half an
+  // hour and I'm back" step has to point at this sheet's Send button.
+  host.setAttribute('role', 'group');
   host.setAttribute('aria-label', `Send a hunter to the ${region.name}`);
   host.innerHTML = '<div class="sheet mp-sheet" style="position:relative"></div>';
   const onKey = (e) => { if (e.key === 'Escape') closeSheet(); };
-  sheet = { ctx, host, regionId: region.id, hunterId: pick ? pick.id : null, duration: 'long', onKey };
+  sheet = { ctx, host, regionId: region.id, hunterId: pick ? pick.id : null, duration: isSeen(state, 'map') ? 'long' : 'short', onKey };
   document.addEventListener('keydown', onKey);
   host.addEventListener('click', (e) => {
     if (e.target === host) { closeSheet(); return; }
@@ -720,7 +738,7 @@ export function openSendSheet(ctx, { hunterId = null, regionId = null } = {}) {
     else if (a === 'pick-duration') { sheet.duration = el.getAttribute('data-duration'); paintSheet(ctx); }
     else if (a === 'send-go') doSend(ctx);
   });
-  document.body.appendChild(host);
+  (document.querySelector('#app > .screen.is-top:not([hidden])') || document.body).appendChild(host);
   paintSheet(ctx);
   const panel = host.querySelector('.mp-sheet');
   panel.setAttribute('tabindex', '-1');
@@ -818,7 +836,7 @@ function pinHtml(state, region, outByRegion, isEventPin) {
   // Locked pins show only the lock and the name; their paper tags sit in the legend below the map
   // so nothing overlaps or clips at the edge of the frame.
   return h`<button type="button" class="mp-pin ${open ? '' : 'is-locked'} ${isEventPin ? 'is-event' : ''}" style="left:${x}%;top:${y}%"
-      data-action="region" data-region-id="${region.id}" data-tap aria-label="${region.name}${open ? '' : ', ' + (lock ? lock.text : 'locked')}">
+      data-action="region" data-region-id="${region.id}"${region.id === 'meadow' ? raw(' data-coach="map-meadow"') : ''} data-tap aria-label="${region.name}${open ? '' : ', ' + (lock ? lock.text : 'locked')}">
       ${disc}<span class="mp-name">${region.name}</span>
       ${isEventPin ? h`<span class="tag">This week</span>` : ''}</button>`;
 }
@@ -998,6 +1016,56 @@ function onClick(e) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// First-open guide (Wren speaks) and the "what's next" card after her first return
+// ---------------------------------------------------------------------------
+
+let mapGuide = null;
+let guideTimer = 0;
+let nextTimer = 0;
+
+function stopGuide() {
+  clearTimeout(guideTimer);
+  guideTimer = 0;
+  if (mapGuide) { try { mapGuide.stop(); } catch (e) { /* ignore */ } mapGuide = null; }
+}
+
+/** Started in show() ~300 ms after render; show() also covers the 'unlocked' hunters hand-off. */
+function startGuide() {
+  stopGuide();
+  if (typeof ctx.guide !== 'function') return;
+  const wren = { kicker: 'Wren', portrait: String(hunterPortrait('wren', { size: 32, label: 'Wren' })) };
+  mapGuide = ctx.guide('map', [
+    { anchor: '[data-coach="map-meadow"]', text: 'Send me somewhere. The Meadow is close.', endsOn: 'action', ...wren,
+      when: (st) => huntersOn(ctx, st), done: () => sendSheetOpen() },
+    { anchor: '[data-coach="map-send"]', text: 'Half an hour and I\'m back.', endsOn: 'action', ...wren,
+      when: () => sendSheetOpen(), event: 'hunterSent' },
+  ], { screen: 'map' });
+  const g = mapGuide;
+  guideTimer = setTimeout(() => { guideTimer = 0; if (visible && g === mapGuide) g.start(); }, 300);
+}
+
+/** After the first hunter is home (never mid-play, never over the guide or the Send sheet). */
+function maybeNext() {
+  if (!visible || sheet || !ctx || typeof ctx.guide !== 'function') return;
+  const st = ctx.game.state;
+  if (!isSeen(st, 'map') || isSeen(st, 'mapNext') || (ctx.guide.isUp && ctx.guide.isUp())) return;
+  const items = backpackItems(st, ctx.game.now());
+  const x = items[0];
+  if (!x) return;
+  ctx.game.act(markGuideSeen, { id: 'mapNext' });
+  const hasCard = items.some((it) => it.lastHaul && Array.isArray(it.lastHaul.postcards) && it.lastHaul.postcards.length > 0);
+  const region = ctx.content.getRegion(x.lastHaul.region);
+  const again = x.state !== 'out' && region && regionOpen(ctx, st, region) ? region.id : null;
+  ctx.guide.whatsNext({
+    title: `${x.name} is home`,
+    more: { label: 'Send again', run: () => { if (visible) openSendSheet(ctx, { hunterId: x.id, regionId: again }); } },
+    next: hasCard
+      ? { label: `${x.name}'s postcard is in the album`, run: () => ctx.navigate('album') }
+      : { label: 'Back to the workshop', run: () => ctx.navigate('workshop') },
+  });
+}
+
 const screen = {
   id: 'map',
 
@@ -1006,7 +1074,7 @@ const screen = {
     ctx = context;
     injectStyle();
     root.innerHTML = String(h`<div class="screen-head is-left">
-        <div class="titles"><div class="title">Map</div><div class="subtitle"></div></div>
+        <div class="titles"><div class="title">Map</div><div class="subtitle"></div>${howThisWorksHtml('map')}</div>
         <div class="mp-headslot" data-map-headslot></div>
       </div><div class="screen-body" data-map-body></div>`);
     bodyEl = root.querySelector('[data-map-body]');
@@ -1015,7 +1083,12 @@ const screen = {
       if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('[role="button"][data-action]')) { e.preventDefault(); e.target.click(); }
     });
     if (ctx.game.on) {
-      ctx.game.on('hunterReturn', () => { if (visible) knock(); });
+      ctx.game.on('hunterReturn', () => {
+        if (!visible) return;
+        knock();
+        clearTimeout(nextTimer);
+        nextTimer = setTimeout(maybeNext, 1400);
+      });
     }
     paint(ctx.game.state, true);
   },
@@ -1032,12 +1105,18 @@ const screen = {
       });
     }
     if (params.regionId) openSendSheet(ctx, { regionId: params.regionId, hunterId: params.sendHunterId || null });
+    startGuide();
+    clearTimeout(nextTimer);
+    nextTimer = setTimeout(maybeNext, 900);
   },
 
   hide() {
     visible = false;
     clearInterval(timer);
     timer = 0;
+    clearTimeout(nextTimer);
+    nextTimer = 0;
+    stopGuide();
     closeSheet();
   },
 

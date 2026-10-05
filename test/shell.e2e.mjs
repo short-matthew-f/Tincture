@@ -149,6 +149,10 @@ try {
   if (await page.locator('[data-action="welcome-skip"]').isVisible().catch(() => false)) {
     await page.click('[data-action="welcome-skip"]');
   }
+  // Each screen's first-open guide has its own walk; keep them out of the toast and guide checks below.
+  await page.evaluate((ids) => {
+    window.tincture.game.act((st) => { st.onboarding.seen = st.onboarding.seen || {}; for (const id of ids) st.onboarding.seen[id] = true; return {}; }, {});
+  }, [...SCREENS, 'hunters', 'shipping', 'yard', 'commissions', 'shelfCols', 'shelfDiags']);
   await page.evaluate(() => window.tincture.ctx.navigate('workshop'));
   await page.waitForTimeout(300);
 

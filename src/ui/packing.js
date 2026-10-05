@@ -16,6 +16,12 @@
  * Festival of Lanterns twist (rules.packingLanterns) only changes the title and
  * frame. The live puzzle is saved in state.activePuzzles.packing
  * ({vehicle, routeId, picks, loadPicks, puzzle, lanterns}).
+ *
+ * First-open guide 'packing': `data-coach="packing-crates"` (ends on her first drop, announced by the
+ * 'crateDrop' game event this screen emits), then `data-coach="packing-crate-full"` (a got-it step
+ * on the first crate that is clean and holding a few jars). The result card says the same thing, so
+ * finishing a shipment marks the guide seen. 'packingNext' is the one-time "what's next" card after her
+ * first result.
  */
 
 import { h, raw, backButton, button, iconSvg, containerSvg, safeHex, escapeHtml } from './kit.js';
@@ -24,6 +30,7 @@ import {
   injectStyle, PZ_CSS, ensureActive, activeOf, FAMILY_HEX, FAMILY_ORDER, familyName, patternFill,
   ensureDefs, lightnessOf, stampSvg, yardStatus, yardTag, gentleDuration, coinsText,
 } from './puzzles.js';
+import { howThisWorksHtml, markGuideSeen, isSeen } from './guide.js';
 
 const MAX_JARS = 24;
 
@@ -57,6 +64,8 @@ const CSS = `
 .pk-crate.is-closed .pk-lid { transform: none; transition: transform 200ms var(--ease-in-out); }
 .pk-lid .pz-stamp { background: rgba(247,244,236,.92); border-radius: 50%; }
 .pk-lid .pk-stampin { animation: pz-stamp-in 240ms var(--ease-out) both; }
+section[data-screen="packing"] .how-link { min-height: 24px; padding: 0 8px; line-height: 1; position: relative; }
+section[data-screen="packing"] .how-link::before { content: ''; position: absolute; inset: -10px -8px; }
 .pk-hint { font-size: 13px; color: var(--ink-soft); text-align: center; }
 .pk-empty-actions { display: flex; flex-direction: column; gap: 8px; align-items: stretch; width: 100%; max-width: 260px; }
 .pk-empty-actions .btn.is-quiet { box-shadow: 0 3px 0 var(--shadow), inset 0 0 0 1.5px rgba(42,38,34,.2); }
@@ -211,6 +220,10 @@ function palChip(f, cb) {
   return `<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" focusable="false"><rect x=".75" y=".75" width="12.5" height="12.5" rx="3" fill="${FAMILY_HEX[f] || '#8A8580'}" stroke="#F7F4EC" stroke-width="1.5"/>${cb ? `<rect x=".75" y=".75" width="12.5" height="12.5" rx="3" fill="${patternFill(famIdx(f))}"/>` : ''}</svg>`;
 }
 
+/** How many jars make a crate worth a word about clean crates (a short shipment needs fewer). */
+const fullAt = (puz) => (puz.conveyor.length >= 6 ? 3 : 2);
+const accepts = (route, family) => C.puzzles.packing.accepts(route, family);
+
 function crateHtml(route, puz, cb, justDropped) {
   const jars = puz.crates[route.id] || [];
   const nm = escapeHtml(route.name);
@@ -226,7 +239,8 @@ function crateHtml(route, puz, cb, justDropped) {
     ? '<span class="pk-palname">Takes any color</span>'
     : `<span class="pk-pal">${route.palette.map((f) => palChip(f, cb)).join('')}</span>`;
   const names = route.any ? '' : `<div class="pk-palname">${route.palette.map(familyName).join(', ')}</div>`;
-  return `<button type="button" class="pk-crate" data-crate="${route.id}" data-tap aria-label="Pack into the ${nm} crate. ${jars.length} ${jars.length === 1 ? 'jar' : 'jars'} so far.">
+  const ready = jars.length >= fullAt(puz) && jars.every((j) => accepts(route, j.family));
+  return `<button type="button" class="pk-crate" data-crate="${route.id}"${ready ? ' data-coach="packing-crate-full"' : ''} data-tap aria-label="Pack into the ${nm} crate. ${jars.length} ${jars.length === 1 ? 'jar' : 'jars'} so far.">
 <div class="pk-top"><span class="pk-name">${nm}</span>${pal}<span class="pk-count">${jars.length} ${jars.length === 1 ? 'jar' : 'jars'}</span></div>${names}
 <div class="pk-slots">${slots.join('')}</div>
 <div class="pk-lid" data-lid></div></button>`;
@@ -280,10 +294,10 @@ function drawAll(justDropped) {
   K.sig = sigOf(e);
   const title = e.lanterns ? 'Stringing lanterns' : 'Packing';
   ROOT.innerHTML = String(h`<div class="screen-head">${backButton(backLabel())}
-<div class="titles"><div class="title">${title}</div><div class="subtitle" data-left>${leftLabel(e)}</div></div><div class="spacer"></div></div>
+<div class="titles"><div class="title">${title}</div><div class="subtitle" data-left>${leftLabel(e)}</div>${howThisWorksHtml('packing')}</div><div class="spacer"></div></div>
 <div class="screen-body pz-body">
 <div data-conveyor-wrap>${conveyorHtml(e)}</div>
-<div class="pk-crates" data-crates>${raw(cratesHtml(e, justDropped))}</div>
+<div class="pk-crates" data-crates data-coach="packing-crates">${raw(cratesHtml(e, justDropped))}</div>
 <div class="pk-hint" data-hint>A clean crate ships at +25%. A mixed one still ships, at base value.</div>
 </div>`);
   K.el = {
@@ -310,6 +324,7 @@ function drop(routeId) {
   if (!jar) return;
   const res = C.game.act(dropAct, { routeId });
   if (!res || !res.ok) return;
+  if (C.game.emit) C.game.emit('crateDrop', { routeId, clean: !!res.clean }); // ends the guide's first step
   C.audio.thunk(0.8);
   C.haptics.light();
   if (res.clean) C.audio.tink(lightnessOf(C, jar.hex), 0.07, 0.18); // a quiet glass note only for a fit; a miss is just a thunk
@@ -404,6 +419,9 @@ function finalize() {
   if (K.el.left) K.el.left.textContent = 'All packed';
   const top = ROOT.querySelector('.screen-body');
   if (top) top.scrollTop = 0;
+  stopGuide();
+  if (!isSeen(C.game.state, 'packing')) C.game.act(markGuideSeen, { id: 'packing' }); // the result card says it too
+  firstResultCard();
 }
 
 // ---------------------------------------------------------------------------
@@ -430,6 +448,59 @@ function onClick(e) {
     K.result = null;
     C.navigate('workshop', { sheet: 'yard' });
   }
+}
+
+// ---------------------------------------------------------------------------
+// First-open guide and the "what's next" card after her first result
+// ---------------------------------------------------------------------------
+
+let guide = null;
+let guideTimer = 0;
+
+function stopGuide() {
+  clearTimeout(guideTimer);
+  guideTimer = 0;
+  if (guide) { try { guide.stop(); } catch (e) { /* ignore */ } guide = null; }
+}
+
+function startGuide() {
+  stopGuide();
+  const e = K.entry;
+  if (typeof C.guide !== 'function' || !e || K.result || e.puzzle.done) return;
+  const first = { anchor: '[data-coach="packing-crates"]', text: 'Drop each jar in the crate that wants its family.', endsOn: 'action', event: 'crateDrop',
+    side: 'below', next: '[data-conveyor]' };
+  const clean = { anchor: '[data-coach="packing-crate-full"]', text: 'A clean crate ships for +25%.', endsOn: 'got-it', side: 'below',
+    when: () => !!ROOT.querySelector('[data-coach="packing-crate-full"]') };
+  guide = C.guide('packing', e.puzzle.index > 0 ? [clean] : [first, clean], { screen: 'packing' });
+  const g = guide;
+  guideTimer = setTimeout(() => { guideTimer = 0; if (g === guide && K.visible) g.start(); }, 300);
+}
+
+/** The index of a loaded cart that still waits at the yard (null when none). */
+function waitingVehicle(st) {
+  const fleet = (st.stations && st.stations.fleet) || [];
+  const i = fleet.findIndex((v) => v && C.sim.shipping.isIdle(v) && v.route && Array.isArray(v.cargo) && v.cargo.length > 0);
+  return i >= 0 ? i : null;
+}
+
+function firstResultCard() {
+  if (typeof C.guide !== 'function' || isSeen(C.game.state, 'packingNext')) return;
+  C.game.act(markGuideSeen, { id: 'packingNext' });
+  later(() => {
+    if (!K.visible || !K.result) return;
+    const st = C.game.state;
+    const vi = waitingVehicle(st);
+    const more = vi === null
+      ? { label: 'Stay here' }
+      : { label: 'Pack the next crate', run: () => {
+        if (!K.visible) return;
+        const v = (C.game.state.stations.fleet || [])[vi];
+        K.result = null;
+        K.entry = adopt({ vehicle: vi, routeId: v ? v.route : undefined });
+        drawAll();
+      } };
+    C.guide.whatsNext({ title: 'Shipment on its way', more, next: { label: 'Back to the workshop', run: () => C.navigate('workshop', {}) } });
+  }, 900);
 }
 
 function adopt(params) {
@@ -464,10 +535,12 @@ export default {
     K.celebrating = false;
     K.entry = adopt(params);
     drawAll();
+    startGuide();
   },
 
   hide() {
     K.visible = false;
+    stopGuide();
     clearTimers();
     K.celebrating = false;
     K.result = null;

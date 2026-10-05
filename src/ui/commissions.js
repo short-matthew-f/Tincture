@@ -14,10 +14,14 @@
  * (data-commission), `sheet-color` (data-color), `qty-dec`, `qty-inc`,
  * `qty-ten`, `qty-max`, `sheet-go`, `sheet-close`, `cele-close`,
  * `era-advance`.
+ * Coach targets (the `commissions` guide): data-coach="commission-step" on the
+ * first step row of the first open commission, "commission-deliver" on the
+ * Deliver button of its first unfinished step.
  */
 
 import { h, raw, iconSvg, button, backButton, tag, swatch, progressBar, safeHex, CONTAINER_NAMES } from './kit.js';
-import { injectStyles, coinsWord, SHARED_CSS } from './matching.js';
+import { injectStyles, coinsWord, offerWhatsNext, SHARED_CSS } from './matching.js';
+import { howThisWorksHtml, markGuideSeen } from './guide.js';
 import { unlockTag, openUnlockSheet, ensureStyles as ensureWorkshopStyles } from './workshop.js';
 
 const FAMILY_PLURAL = Object.freeze({
@@ -89,6 +93,8 @@ const S = {
   down: false,
   dirty: false,
   timers: [],
+  guide: null,
+  offer: null,
 };
 
 const stateOf = () => S.ctx.game.state;
@@ -187,7 +193,7 @@ ${def.reward.trophy ? h`<span class="it">${TROPHY}${titleCase(def.reward.trophy)
 
 const req = (text, icon = null) => h`<span class="cm-req">${icon ? iconSvg(icon, { size: 12 }) : ''}${text}</span>`;
 
-function stepHtml(def, rec, i, { preview = false } = {}) {
+function stepHtml(def, rec, i, { preview = false, coach = null } = {}) {
   const step = def.steps[i];
   const prog = rec?.steps[i] ?? { delivered: 0, colors: {}, done: false };
   const distinctDone = Object.keys(prog.colors || {}).filter((k) => prog.colors[k] > 0).length;
@@ -199,24 +205,25 @@ function stepHtml(def, rec, i, { preview = false } = {}) {
   const moreColors = Math.max(0, (step.distinct ?? 1) - distinctDone);
   if ((step.distinct ?? 1) > 1 && !prog.done && moreColors > 0) reqs.push(req(`${moreColors} more different ${moreColors === 1 ? 'color' : 'colors'}`));
   const ratio = step.jars > 0 ? (prog.delivered ?? 0) / step.jars : 0;
-  return h`<div class="cm-step">
+  return h`<div class="cm-step"${coach && coach.row ? h` data-coach="commission-step"` : ''}>
 <div class="top"><div class="lbl${prog.done ? ' done' : ''}">${stepLabel(step, prog)}</div>
 ${preview ? '' : prog.done
     ? h`<span class="cm-ok">${iconSvg('check', { size: 16 })}Done</span>`
-    : button('Deliver', { attrs: { 'data-action': 'deliver', 'data-commission': rec.id, 'data-step': i, 'aria-label': `Deliver to ${stepLabel(step, prog)}` } })}</div>
+    : button('Deliver', { attrs: { 'data-action': 'deliver', 'data-commission': rec.id, 'data-step': i, 'data-coach': coach && coach.deliver ? 'commission-deliver' : false, 'aria-label': `Deliver to ${stepLabel(step, prog)}` } })}</div>
 ${reqs.length ? h`<div class="badges">${reqs}</div>` : ''}
 ${preview ? '' : progressBar(prog.done ? 1 : ratio, { label: stepLabel(step, prog) })}
 </div>`;
 }
 
-function commissionHtml(state, rec) {
+function commissionHtml(state, rec, first = false) {
   const def = defOf(rec.id);
   if (!def) return '';
   const allDone = rec.steps.length > 0 && rec.steps.every((s) => s.done);
+  const firstOpen = rec.steps.findIndex((s) => !s.done);
   return h`<div class="card cm-card" data-commission="${def.id}">
 <div class="row between"><div class="cm-name">${def.name}</div>${def.capstone ? h`<span class="cm-cap">Grand finale</span>` : ''}</div>
 <div class="small muted">${def.blurb}</div>
-${def.steps.map((_, i) => stepHtml(def, rec, i))}
+${def.steps.map((_, i) => stepHtml(def, rec, i, { coach: first ? { row: i === 0, deliver: i === firstOpen } : null }))}
 ${rewardRow(state, def)}
 ${allDone ? button('Complete commission', { variant: 'primary', block: true, attrs: { 'data-action': 'complete', 'data-commission': rec.id } }) : ''}
 </div>`;
@@ -328,7 +335,7 @@ ${previewHtml(state)}`;
 ${noteHtml(state)}
 ${ready ? h`<div class="card cm-card"><div class="cm-name">The workshop has come a long way</div><div class="small muted">Your capstone is complete. The next era is waiting.</div>${button('Advance era', { variant: 'primary', block: true, attrs: { 'data-action': 'era-advance' } })}</div>` : ''}
 ${open.length
-    ? open.map((r) => commissionHtml(state, r))
+    ? open.map((r, i) => commissionHtml(state, r, i === 0))
     : h`<div class="card cm-empty"><div class="oq-h">Every commission is delivered</div><p class="muted">${nextHint(state) || 'New ones appear as your catalog grows.'}</p>${button('Back to orders', { attrs: { 'data-action': 'cele-orders' } })}</div>`}
 ${capstoneTeaser(state)}
 ${doneHtml(state)}`;
@@ -495,7 +502,50 @@ function celebrate(res) {
     ctx.fx.confetti(colors, card, { count: 24 });
     ctx.fx.rollNumber(card.querySelector('[data-cele-paid]'), 0, Math.max(1, Math.round(res.coins)), { ms: 800, format: ctx.format.num });
   }, 200);
-  void state;
+  // After the first finished commission: two equal ways on (only when there is a next one to start).
+  const next = (state.commissions?.open ?? [])[0] ?? null;
+  if (S.offer) S.offer.stop();
+  if (next) {
+    S.offer = offerWhatsNext(ctx, {
+      screen: 'commissions',
+      id: 'commissionNext',
+      delay: 2400,
+      ok: () => !!S.cele,
+      title: 'A commission, delivered',
+      body: 'The whole town is talking about it.',
+      more: { label: 'Start the next commission', run: () => startNext(next.id) },
+      next: { label: 'Back to orders', run: () => { S.cele = null; ctx.navigate('orders'); } },
+    });
+  }
+}
+
+/** The finished commission's page gives way to the next open one. */
+function startNext(commissionId) {
+  S.cele = null;
+  paint(true);
+  const card = S.body && S.body.querySelector(`[data-commission="${commissionId}"]`);
+  if (card) { card.scrollIntoView({ block: 'start', behavior: 'smooth' }); }
+}
+
+/** First-open guide: step by step, then deliver what you have (docs/PLAN-v0.2 Theme D). */
+function startGuide() {
+  stopGuide();
+  const { ctx } = S;
+  if (typeof ctx.guide !== 'function') return;
+  const state = stateOf();
+  const open = state.commissions?.open ?? [];
+  const veteran = (state.commissions?.done?.length ?? 0) > 0 || open.some((r) => r.steps.some((p) => p.done || p.delivered > 0));
+  if (veteran && !state.onboarding?.seen?.commissions) { ctx.game.act(markGuideSeen, { id: 'commissions' }); return; }
+  S.guide = ctx.guide('commissions', [
+    { anchor: '[data-coach="commission-step"]', text: 'Deliver jars step by step; nothing expires', endsOn: 'got-it', side: 'above' },
+    { anchor: '[data-coach="commission-deliver"]', text: 'Deliver what you have now', endsOn: 'action', side: 'above' },
+  ], { screen: 'commissions' });
+  later(() => { if (S.guide) S.guide.start(); }, 300);
+}
+
+function stopGuide() {
+  if (S.guide) { try { S.guide.stop(); } catch (e) { /* ignore */ } S.guide = null; }
+  if (S.offer) { S.offer.stop(); S.offer = null; }
 }
 
 export default {
@@ -506,7 +556,7 @@ export default {
     S.root = root;
     injectStyles('oq-shared', SHARED_CSS);
     injectStyles('commissions', CSS);
-    root.innerHTML = String(h`<div class="screen-head">${backButton('Back')}<div class="titles"><div class="title">Commissions</div></div><span class="spacer"></span></div><div class="screen-body" data-body></div><div class="cm-layer" data-layer hidden></div>`);
+    root.innerHTML = String(h`<div class="screen-head oq-head">${backButton('Back')}<div class="titles"><div class="title">Commissions</div>${howThisWorksHtml('commissions')}</div><span class="spacer"></span></div><div class="screen-body" data-body></div><div class="cm-layer" data-layer hidden></div>`);
     S.body = root.querySelector('[data-body]');
     S.layer = root.querySelector('[data-layer]');
     const release = () => {
@@ -543,13 +593,7 @@ export default {
         case 'sheet-close': closeLayer(); break;
         case 'cele-close': S.cele = null; paint(true); break;
         case 'cele-orders': S.cele = null; ctx.navigate('orders'); break;
-        case 'next-commission': {
-          S.cele = null;
-          paint(true);
-          const card = S.body.querySelector(`[data-commission="${t.getAttribute('data-commission')}"]`);
-          if (card) { card.scrollIntoView({ block: 'start', behavior: 'smooth' }); }
-          break;
-        }
+        case 'next-commission': startNext(t.getAttribute('data-commission')); break;
         case 'era-advance': ctx.game.act(ctx.sim.commissions.eraAdvance); break;
         default: break;
       }
@@ -564,11 +608,13 @@ export default {
     S.celeRolled = false;
     closeLayer();
     paint(true);
+    startGuide();
   },
 
   hide() {
     S.timers.forEach(clearTimeout);
     S.timers = [];
+    stopGuide();
     S.note = null;
     S.cele = null;
     closeLayer();

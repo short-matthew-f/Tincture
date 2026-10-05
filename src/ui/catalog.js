@@ -16,7 +16,9 @@
  * Params: show({page?, colorId?}) switches to that page and flashes the cell.
  * data-actions: page, later, cell, pin, unpin, rename, rename-save,
  * rename-cancel, assign, go, close-sheet. data-coach="catalog" is on the
- * milestone meter.
+ * milestone meter; the `catalog` guide uses "catalog-missing" (the first faint
+ * cell on the page) and "catalog-pin" (the pin button in a missing color's
+ * sheet).
  */
 
 import { h, raw, button, tag, iconSvg, safeHex, progressBar } from './kit.js';
@@ -27,6 +29,8 @@ import { ERAS } from '../content/eras.js';
 import { getPigment } from '../content/pigments.js';
 import { getRegion } from '../content/regions.js';
 import { isNameOk } from '../content/names.js';
+import { howThisWorksHtml, markGuideSeen } from './guide.js';
+import { offerWhatsNext } from './matching.js';
 
 const PAGE_NAMES = { wheel: 'Wheel', tints: 'Tints', shades: 'Shades', earths: 'Earths', wild: 'Wild' };
 const PAGE_NOTES = {
@@ -99,6 +103,8 @@ const CSS = `
 #screen-catalog .cat-input{flex:1 1 auto;min-width:0;min-height:48px;border-radius:12px;border:0;padding:0 14px;background:#fff;box-shadow:inset 0 0 0 2px rgba(42,38,34,.18);font-family:var(--font-display);font-size:18px;user-select:text;-webkit-user-select:text}
 #screen-catalog .cat-input:focus{outline:none;box-shadow:inset 0 0 0 2px #2A2622}
 #screen-catalog .cat-ess{display:flex;gap:2px;justify-content:center}
+#screen-catalog .how-link{display:inline-block;position:relative;margin-top:2px;padding:0;min-height:20px;border:0;background:none;font:inherit;font-size:12px;font-weight:600;color:var(--ink-soft);text-decoration:underline;text-underline-offset:2px;text-align:left}
+#screen-catalog .how-link::before{content:'';position:absolute;inset:-12px -10px}
 @media (prefers-reduced-motion:reduce){#screen-catalog .cat-cell.is-missing .cat-sw::after,#screen-catalog .cat-big.ghost::after{animation:none}}
 @keyframes cat-shimmer{0%,55%{transform:translateX(-120%)}100%{transform:translateX(120%)}}
 @keyframes cat-in{from{opacity:0;transform:translateY(-14px) scale(.9)}to{opacity:1;transform:none}}
@@ -123,6 +129,9 @@ const ui = {
   freshTimer: 0,
   scrollTo: null,
   sheet: null,      // {id, rename, msg}
+  guide: null,
+  offer: null,
+  startTimer: 0,
 };
 
 const sim = () => ctx.sim;
@@ -198,7 +207,7 @@ function starsRow(n) {
   return raw(STAR.repeat(k));
 }
 
-function cellHtml(c, pos, st) {
+function cellHtml(c, pos, st, coach = false) {
   const d = st.catalog?.discovered?.[c.id];
   if (d) {
     const name = sim().displayName(st, c.id);
@@ -213,7 +222,7 @@ function cellHtml(c, pos, st) {
   const famId = famOf(c);
   const fam = FAMILY_HEX[famId] || '#9A9288';
   // A quiet hue-family silhouette: no number, no label. The detail sheet has the hint.
-  return h`<button type="button" class="cat-cell is-missing" data-tap data-action="cell" data-color="${c.id}" aria-label="A ${FAMILY_WORD[famId] || 'special'} color waiting to be found${pinned ? ', pinned goal' : ''}">
+  return h`<button type="button" class="cat-cell is-missing" data-tap data-action="cell"${coach ? h` data-coach="catalog-missing"` : ''} data-color="${c.id}" aria-label="A ${FAMILY_WORD[famId] || 'special'} color waiting to be found${pinned ? ', pinned goal' : ''}">
   ${pinned ? h`<span class="cat-pin">${iconSvg('pin', { size: 14 })}</span>` : ''}
   <span class="cat-sw" style="--fam:${fam};--d:${(pos % 7) * 0.45}s"></span>
 </button>`;
@@ -246,6 +255,7 @@ function build() {
   const have = page.colors.filter((c) => isFound(c.id)).length;
   const left = page.colors.length - have;
   const complete = left === 0 && page.colors.length > 0;
+  const firstMissing = page.colors.findIndex((c) => !isFound(c.id));
   const toNext = 10 - (count % 10);
   const nextCanvas = (Math.floor(count / 20) + 1) * 20;
   const bonus = Math.floor(count / 10) * 2;
@@ -257,7 +267,7 @@ function build() {
 
   root.innerHTML = String(h`
 <div class="screen-head is-left">
-  <div class="titles"><div class="title">Catalog</div><div class="subtitle">${count} ${count === 1 ? 'color' : 'colors'} in your swatch book</div></div>
+  <div class="titles"><div class="title">Catalog</div><div class="subtitle">${count} ${count === 1 ? 'color' : 'colors'} in your swatch book</div>${howThisWorksHtml('catalog')}</div>
 </div>
 <div class="screen-body pad-bottom-tab">
   <div class="card" data-coach="catalog" aria-label="Catalog milestone">
@@ -281,7 +291,7 @@ function build() {
     <div class="hint">${complete ? 'You earned a golden border for this page.' : (PAGE_NOTES[page.id] || '')}</div>
   </div>
   <div class="cat-book${complete ? ' is-complete' : ''}" style="--bd:${PAGE_BORDER[page.id] || PAGE_BORDER.event}">
-    <div class="cat-grid">${page.colors.map((c, i) => cellHtml(c, i + 1, st))}</div>
+    <div class="cat-grid">${page.colors.map((c, i) => cellHtml(c, i + 1, st, i === firstMissing))}</div>
   </div>
   <div class="cat-eras">
     ${ERAS.filter((e) => e.id > 1).map((e) => tag(`Era ${e.id} ${e.name}: coming in a later update`))}
@@ -405,7 +415,10 @@ function missingSheet(st, c) {
     : roomLeft > 0
       ? `Pin up to ${MAX_PINS} missing colors as goals. Room for ${roomLeft} more.`
       : `All ${MAX_PINS} goal spots are in use. Unpin one to make room.`;
-  return h`<div class="sheet cat-sheet" role="dialog" aria-label="A color waiting to be found">
+  // While the first-open guide runs its pin step, this sheet is a labeled group: the guide
+  // keeps clear of dialogs, and its bubble has to point inside this one.
+  const role = ui.guide && ui.guide.active ? 'group' : 'dialog';
+  return h`<div class="sheet cat-sheet" role="${role}" aria-label="A color waiting to be found">
   <div class="cat-big ghost" style="--fam:${FAMILY_HEX[famOf(c)] || '#9A9288'}"></div>
   <div class="center"><div class="h2">A ${FAMILY_WORD[famOf(c)] || 'special'} color is waiting</div>
     <div class="hint">${page ? `It belongs on the ${page.name} page` : ''}</div></div>
@@ -415,7 +428,7 @@ function missingSheet(st, c) {
   </div>
   <div class="small muted center">${pinNote}</div>
   <div class="row">
-    ${button(pinned ? 'Unpin goal' : 'Pin as a goal', { variant: pinned ? 'paper' : 'primary', block: true, cls: 'grow', attrs: { 'data-action': pinned ? 'unpin' : 'pin', 'data-color': c.id } })}
+    ${button(pinned ? 'Unpin goal' : 'Pin as a goal', { variant: pinned ? 'paper' : 'primary', block: true, cls: 'grow', attrs: { 'data-action': pinned ? 'unpin' : 'pin', 'data-color': c.id, 'data-coach': pinned ? false : 'catalog-pin' } })}
     ${button(step.cta, { block: true, cls: 'grow', attrs: { 'data-action': 'go', 'data-color': c.id } })}
   </div>
   ${button('Close', { block: true, attrs: { 'data-action': 'close-sheet' } })}
@@ -466,8 +479,10 @@ function onClick(e) {
       break;
     case 'pin': {
       const res = ctx.game.act(sim().pinColor, { colorId: id });
-      if (res && res.ok) ctx.toast('Pinned as a goal.');
-      else ctx.toast(res && res.reason === 'full' ? `You already have ${MAX_PINS} goals pinned. Unpin one to make room.` : 'That color is already yours.');
+      if (res && res.ok) {
+        ctx.toast('Pinned as a goal.');
+        offerPinNext();
+      } else ctx.toast(res && res.reason === 'full' ? `You already have ${MAX_PINS} goals pinned. Unpin one to make room.` : 'That color is already yours.');
       renderSheet();
       refresh(true);
       break;
@@ -498,6 +513,43 @@ function onClick(e) {
     }
     default:
   }
+}
+
+/** After her first pin: two equal ways on (docs/PLAN-v0.2 Theme D). */
+function offerPinNext() {
+  if (ui.offer) ui.offer.stop();
+  ui.offer = offerWhatsNext(ctx, {
+    screen: 'catalog',
+    id: 'catalogNext',
+    delay: 1600,
+    title: 'A goal to chase',
+    body: 'It waits at the top of your catalog, and in the Morning Ledger.',
+    more: { label: 'Pin another', run: () => closeSheet() },
+    next: { label: 'Back to the workshop', run: () => ctx.navigate('workshop') },
+  });
+}
+
+/** First-open guide: faint cells, then the pin control in a sheet. */
+function startGuide() {
+  stopGuide();
+  if (typeof ctx.guide !== 'function') return;
+  const st = state();
+  const pinned = () => (state().catalog?.pinned || []).length > 0;
+  if (pinned() && !st.onboarding?.seen?.catalog) { // an old hand: she knows pinning
+    ctx.game.act(markGuideSeen, { id: 'catalog' });
+    ctx.game.act(markGuideSeen, { id: 'catalogNext' });
+    return;
+  }
+  ui.guide = ctx.guide('catalog', [
+    { anchor: '[data-coach="catalog-missing"]', text: 'Faint cells are colors still to find', endsOn: 'got-it', side: 'above', when: () => !ui.sheet },
+    { anchor: '[data-coach="catalog-pin"]', text: 'Pin one to chase it', endsOn: 'action', done: pinned, side: 'above', when: () => !!ui.sheet && !isFound(ui.sheet.id) && !pinned() },
+  ], { screen: 'catalog' });
+  ui.startTimer = setTimeout(() => { if (ui.guide) ui.guide.start(); }, 300);
+}
+
+function stopGuide() {
+  clearTimeout(ui.startTimer);
+  if (ui.guide) { try { ui.guide.stop(); } catch (e) { /* ignore */ } ui.guide = null; }
 }
 
 function onKey(e) {
@@ -552,11 +604,14 @@ const screen = {
     if (params.page && pagesOf(st).some((p) => p.id === params.page)) ui.page = params.page;
     closeSheet();
     refresh(true);
+    startGuide();
   },
 
   hide() {
     visible = false;
     closeSheet();
+    stopGuide();
+    if (ui.offer) { ui.offer.stop(); ui.offer = null; }
   },
 
   render() {

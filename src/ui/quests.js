@@ -14,10 +14,16 @@
  *
  * data-actions: claim, reroll, claim-weekly, claim-step, go-map, go-workshop.
  * Opens with params `{section: 'daily' | 'weekly' | 'event'}` (optional scroll target).
+ *
+ * First-open guide 'quests': `data-coach="quests-daily"` (the Daily heading, a got-it step), then
+ * `data-coach="quests-claim"` (the first Claim button, waits for a claimable quest, ends when a daily
+ * is claimed). Once the intro step has been seen it is not repeated while the claim step still waits
+ * ('questsIntro'). 'questsNext' is the one-time "what's next" card after her first claim.
  */
 
 import { h, raw, backButton, button, progressBar, fadeStrip, iconSvg, swatch, safeHex, containerSvg } from './kit.js';
 import { pennantSvg } from './map.js';
+import { howThisWorksHtml, markGuideSeen, isSeen } from './guide.js';
 
 const CSS = `
 section[data-screen="quests"] .screen-head .title { font-family:var(--font-ui); font-weight:600; font-size:18px; }
@@ -27,6 +33,8 @@ section[data-screen="quests"] .screen-head .title { font-family:var(--font-ui); 
 .qs-sech { font-family:var(--font-ui); font-weight:600; font-size:18px; line-height:1.2; }
 .qs-h { font-family:var(--font-ui); font-weight:600; font-size:16px; line-height:1.25; }
 .qs-note { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--ink-soft); }
+section[data-screen="quests"] .how-link { min-height:24px; padding:0 8px; line-height:1; position:relative; }
+section[data-screen="quests"] .how-link::before { content:''; position:absolute; inset:-10px -8px; }
 .qs-empty { align-items:center; text-align:center; gap:10px; }
 .qs-quest.is-done { box-shadow:0 0 0 2px var(--glow-ring), var(--cut); background:var(--glow); }
 .qs-quest.is-done .progress > span { background:var(--gold); }
@@ -131,7 +139,7 @@ function questCard(q, state) {
   const more = Math.max(0, q.target - q.progress);
   let action;
   if (q.claimed) action = h`<span class="qs-stamp">${iconSvg('check', { size: 13 })} Claimed</span>`;
-  else if (q.done) action = button('Claim', { variant: 'primary', attrs: { 'data-action': 'claim', 'data-quest-id': q.id } });
+  else if (q.done) action = button('Claim', { variant: 'primary', attrs: { 'data-action': 'claim', 'data-quest-id': q.id, 'data-coach': 'quests-claim' } });
   else if (!used) action = button('Try another', { attrs: { 'data-action': 'reroll', 'data-quest-id': q.id, 'aria-label': 'Try another quest in its place, free once a day' } });
   else action = '';
   return h`<div class="card qs-quest ${q.done && !q.claimed ? 'is-done' : ''} ${q.claimed ? 'is-claimed' : ''}" data-quest="${q.id}">
@@ -153,7 +161,7 @@ function emptyQuests() {
 function dailySection(state) {
   const q = state.quests;
   const list = q.daily || [];
-  return h`<div class="qs-sec" data-section="daily"><h2 class="qs-sech">Daily</h2><span class="hint">New quests each morning</span></div>
+  return h`<div class="qs-sec" data-section="daily" data-coach="quests-daily"><h2 class="qs-sech">Daily</h2><span class="hint">New quests each morning</span></div>
     ${bankLine(state)}
     ${list.length ? list.map((x) => questCard(x, state)) : h`<div class="card qs-empty"><div class="hint">New quests arrive each morning. Make something in the workshop, then check back.</div>${button('Back to the workshop', { attrs: { 'data-action': 'go-workshop' } })}</div>`}
     ${list.length ? h`<div class="hint">${q.rerollUsed ? 'Today\'s free try-another is used. You get another tomorrow.' : 'Not feeling one? Try another, free once a day.'}</div>` : ''}`;
@@ -299,6 +307,7 @@ function onClick(e) {
       ctx.audio.coins(6);
       const extra = res.bankSeals ? ` (+${fmt(res.bankSeals)} from missed days)` : '';
       ctx.toast(`+${fmt(res.seals)} Seals${extra}${res.boostMin ? `, and a ${res.boostMin}-minute boost` : ''}`);
+      firstClaimCard();
     }
   } else if (a === 'reroll') {
     const res = ctx.game.act(S.quests.reroll, { questId: el.getAttribute('data-quest-id') });
@@ -336,6 +345,57 @@ function onClick(e) {
   else if (a === 'go-workshop') ctx.navigate('workshop');
 }
 
+// ---------------------------------------------------------------------------
+// First-open guide and the "what's next" card after her first claim
+// ---------------------------------------------------------------------------
+
+let guideTimer = 0;
+let nextTimer = 0;
+let qGuide = null;
+
+const dailies = (st) => (st && st.quests && st.quests.daily) || [];
+
+function stopGuide() {
+  clearTimeout(guideTimer);
+  guideTimer = 0;
+  if (!qGuide) return;
+  // The intro step has been seen: a later visit that is still waiting for a claim skips it.
+  if (qGuide.step >= 1 && !isSeen(ctx.game.state, 'questsIntro')) ctx.game.act(markGuideSeen, { id: 'questsIntro' });
+  try { qGuide.stop(); } catch (e) { /* ignore */ }
+  qGuide = null;
+}
+
+function startGuide({ replay = false } = {}) {
+  stopGuide();
+  if (typeof ctx.guide !== 'function') return;
+  const claimed = (st) => dailies(st).filter((x) => x.claimed).length;
+  const base = claimed(ctx.game.state);
+  const intro = { anchor: '[data-coach="quests-daily"]', text: 'Three little goals a day. No streaks, no rush.', endsOn: 'got-it', side: 'below' };
+  const claim = {
+    anchor: '[data-coach="quests-claim"]', text: 'Claim it for Seals.', endsOn: 'action',
+    when: (st) => dailies(st).some((x) => x.done && !x.claimed),
+    done: (st) => claimed(st) > base,
+  };
+  qGuide = ctx.guide('quests', !replay && isSeen(ctx.game.state, 'questsIntro') ? [claim] : [intro, claim], { screen: 'quests' });
+  const g = qGuide;
+  if (!replay) guideTimer = setTimeout(() => { guideTimer = 0; if (visible && g === qGuide) g.start(); }, 300);
+}
+
+function firstClaimCard() {
+  if (typeof ctx.guide !== 'function' || isSeen(ctx.game.state, 'questsNext')) return;
+  ctx.game.act(markGuideSeen, { id: 'questsNext' });
+  clearTimeout(nextTimer);
+  nextTimer = setTimeout(() => {
+    nextTimer = 0;
+    if (!visible) return;
+    ctx.guide.whatsNext({
+      title: 'Seals earned',
+      more: { label: 'See the weekly', run: () => { const el = root.querySelector('[data-section="weekly"]'); if (el) el.scrollIntoView({ block: 'start' }); } },
+      next: { label: 'Back to the workshop', run: () => ctx.navigate('workshop') },
+    });
+  }, 1100);
+}
+
 const screen = {
   id: 'quests',
 
@@ -344,11 +404,13 @@ const screen = {
     ctx = context;
     injectStyle();
     root.innerHTML = String(h`<div class="screen-head">${backButton('Back')}
-      <div class="titles"><div class="title">Quests and events</div><div class="subtitle">Little goals, no rush</div></div>
+      <div class="titles"><div class="title">Quests and events</div><div class="subtitle">Little goals, no rush</div>${howThisWorksHtml('quests')}</div>
       <span class="chip qs-head-seals" data-seals-chip aria-label="Seals balance">${sealIcon(18)}<span data-seals-num class="num">0</span><span class="qs-seal-label">Seals</span></span></div>
       <div class="screen-body" data-quests-body></div>`);
     bodyEl = root.querySelector('[data-quests-body]');
     root.addEventListener('click', onClick);
+    // "How this works": rebuild with the intro step first (guide.js's own listener then runs it).
+    root.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('[data-guide-replay="quests"]')) startGuide({ replay: true }); });
     bodyEl.addEventListener('scroll', (e) => {
       if (e.target.classList && e.target.classList.contains('qs-track')) trackLeft = e.target.scrollLeft;
     }, true);
@@ -367,9 +429,15 @@ const screen = {
         if (t) t.scrollIntoView({ block: 'start' });
       });
     } else if (bodyEl) bodyEl.scrollTop = 0;
+    startGuide();
   },
 
-  hide() { visible = false; },
+  hide() {
+    visible = false;
+    clearTimeout(nextTimer);
+    nextTimer = 0;
+    stopGuide();
+  },
 
   render(state) {
     if (!visible) return;

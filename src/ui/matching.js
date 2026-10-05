@@ -15,6 +15,8 @@
 
 import * as colorLib from '../color.js';
 import { h, raw, iconSvg, button, backButton, tag, swatch, safeHex, lighten, escapeHtml } from './kit.js';
+import { howThisWorksHtml, markGuideSeen } from './guide.js';
+import * as overlay from './overlay.js';
 
 // ---------------------------------------------------------------------------
 // Shared helpers (also imported by bench.js and orders.js)
@@ -28,6 +30,48 @@ export function injectStyles(id, css) {
   s.setAttribute('data-ui', id);
   s.textContent = css;
   document.head.appendChild(s);
+}
+
+/**
+ * offerWhatsNext(ctx, {screen, id, delay, ok, more, next, title, body}) -> {stop()}.
+ * The "what's next" card after a first success (PLAN-v0.2 Theme D), shared by
+ * the order, bench, commission, catalog and grading screens. It waits until
+ * `screen` is on top with no sheet, modal, naming ceremony or coach bubble up,
+ * never offers twice (state.onboarding.seen[id]), and never navigates by
+ * itself: `next.run` runs only if she picks it. While the first-ten-minutes
+ * script is running it stays quiet (that script already hands her on) and
+ * the offer counts as seen.
+ */
+export function offerWhatsNext(ctx, { screen, id, delay = 900, tries = 40, ok = () => true, ...card } = {}) {
+  const job = { dead: false, t: 0, stop() { this.dead = true; clearTimeout(this.t); } };
+  const st = () => ctx.game.state;
+  const seen = () => !!(st().onboarding && st().onboarding.seen && st().onboarding.seen[id]);
+  if (seen() || typeof ctx.guide?.whatsNext !== 'function') return job;
+  if (st().onboarding && st().onboarding.done === false) {
+    ctx.game.act(markGuideSeen, { id });
+    return job;
+  }
+  let n = 0;
+  const step = () => {
+    if (job.dead || !ok()) return;
+    const top = ctx.current && ctx.current();
+    const busy = !top || top.id !== screen || overlay.isOpen() || ctx.guide.isUp()
+      || (typeof document !== 'undefined' && document.querySelector('#coach-layer .coach-tag'));
+    if (busy) {
+      if (++n < tries) job.t = setTimeout(step, 600);
+      return;
+    }
+    if (seen()) return;
+    ctx.game.act(markGuideSeen, { id });
+    ctx.guide.whatsNext(card);
+  };
+  job.t = setTimeout(step, delay);
+  return job;
+}
+
+/** Old hands (two or more orders filled) skip the order guides: they know it. */
+export function orderVeteran(state, filledSince = 0) {
+  return Number(state && state.orders && state.orders.filledCount) - filledSince >= 2;
 }
 
 export const TIER_NAMES = Object.freeze({ perfect: 'Perfect', great: 'Great', good: 'Good', close: 'Close enough' });
@@ -131,6 +175,8 @@ export const SHARED_CSS = `
 .oq-req { display: inline-flex; align-items: center; gap: 5px; min-height: 26px; padding: 3px 11px; border-radius: 999px; background: var(--plaster); box-shadow: inset 0 0 0 1.5px var(--plaster-line); color: var(--ink); font-size: 12px; font-weight: 600; line-height: 1.1; }
 .oq-req svg { width: 12px; height: 12px; }
 .oq-btn { min-height: 44px; padding: 0 14px; font-size: 14px; }
+.oq-head .how-link { display: inline-block; position: relative; margin-top: 2px; padding: 0; min-height: 20px; border: 0; background: none; font: inherit; font-size: 12px; font-weight: 600; color: var(--ink-soft); text-decoration: underline; text-underline-offset: 2px; text-align: left; }
+.oq-head .how-link::before { content: ''; position: absolute; inset: -12px -10px; }
 `;
 
 const dropsLabel = (n) => (n ? `${n} ${n === 1 ? 'drop' : 'drops'}` : '');
@@ -383,8 +429,8 @@ export class Mixer {
 }
 
 /** The drops card markup: the chip grid (filled by Mixer.setPigments). */
-export function chipsHtml() {
-  return h`<div class="card mx-drops-card" data-coach-slot><div class="mx-chips" data-chips></div></div>`;
+export function chipsHtml(coach = '') {
+  return h`<div class="card mx-drops-card" data-coach-slot${coach ? h` data-coach="${coach}"` : ''}><div class="mx-chips" data-chips></div></div>`;
 }
 
 export const MIX_CSS = `
@@ -450,6 +496,8 @@ const S = {
   phase: 'mixing', // 'mixing' | 'submitting' | 'done'
   newColor: null, // color id found by the delivered mix
   timers: [],
+  guide: null,
+  offer: null,
 };
 
 const later = (fn, ms) => { S.timers.push(setTimeout(fn, ms)); };
@@ -459,8 +507,31 @@ function findOrder() {
   return (stateOf().orders?.open ?? []).find((o) => o.id === S.orderId) ?? null;
 }
 
-function head(title) {
-  return h`<div class="screen-head">${backButton('Back to orders')}<div class="titles"><div class="title ellipsis">${title}</div></div><span class="spacer"></span></div>`;
+function head(title, { how = false } = {}) {
+  return h`<div class="screen-head oq-head">${backButton('Back to orders')}<div class="titles"><div class="title ellipsis">${title}</div>${how ? howThisWorksHtml('matching') : ''}</div><span class="spacer"></span></div>`;
+}
+
+/** First-open guide (docs/PLAN-v0.2 Theme D): drops, then the needle once a drop is in. */
+function startGuide() {
+  stopGuide();
+  const { ctx } = S;
+  if (typeof ctx.guide !== 'function' || !S.mixer) return;
+  const state = stateOf();
+  if (orderVeteran(state) && !(state.onboarding?.seen?.matching)) {
+    ctx.game.act(markGuideSeen, { id: 'matching' });
+    return;
+  }
+  const dropIn = () => !!S.mixer && S.mixer.size > 0;
+  S.guide = ctx.guide('matching', [
+    { anchor: '[data-coach="match-drops"]', text: 'Add drops to match their swatch', endsOn: 'action', done: dropIn, side: 'below' },
+    { anchor: '[data-coach="match-dial"]', text: 'The needle shows how close you are', endsOn: 'got-it', when: dropIn, side: 'below' },
+  ], { screen: 'matching' });
+  later(() => { if (S.guide) S.guide.start(); }, 300);
+}
+
+function stopGuide() {
+  if (S.guide) { try { S.guide.stop(); } catch (e) { /* ignore */ } S.guide = null; }
+  if (S.offer) { S.offer.stop(); S.offer = null; }
 }
 
 function nextMatchOrder(exceptId) {
@@ -478,6 +549,7 @@ ${button('Back to orders', { variant: next ? 'paper' : 'primary', block: true, a
 function build() {
   const { ctx, root } = S;
   const order = S.order;
+  stopGuide();
   if (S.mixer) S.mixer = null;
   S.newColor = null;
   if (!order || order.kind !== 'match') {
@@ -486,7 +558,7 @@ function build() {
   }
   const target = safeHex(order.target);
   const who = customerName(ctx, order);
-  root.innerHTML = String(h`${head(`Order from ${who}`)}
+  root.innerHTML = String(h`${head(`Order from ${who}`, { how: true })}
 <div class="screen-body">
 <div class="card">
 <div class="small muted">${who} would like ${wishWords(ctx, order.target)}. Anything you deliver is welcome; the needle shows what it pays.</div>
@@ -495,11 +567,11 @@ function build() {
 <div class="mx-col" data-mine-col><div class="mx-jarbox" data-jar-slot></div><div class="cap">Your mix</div></div>
 </div>
 </div>
-<div class="card mx-gauge" data-gauge>
+<div class="card mx-gauge" data-gauge data-coach="match-dial">
 ${dialSvg(order.target)}
 <div class="stack stack-sm grow"><div class="mx-tier" data-tier>Add a drop</div><div class="mx-pay" data-pay-hint></div><div class="small muted" data-hint>Tap a drop below to start mixing.</div></div>
 </div>
-${chipsHtml()}
+${chipsHtml('match-drops')}
 </div>
 <div class="mx-actions" data-bar>
 ${button('Undo', { attrs: { 'data-action': 'undo' } })}
@@ -509,6 +581,7 @@ ${button('Deliver', { variant: 'primary', cls: 'grow', attrs: { 'data-action': '
   S.mixer = new Mixer(ctx, root, { onChange: update });
   S.mixer.setPigments(ctx.sim.discovery.availablePigments(stateOf()));
   update();
+  startGuide();
 }
 
 /** Refresh needle, tier label, pay preview and button states from the jar. */
@@ -584,6 +657,11 @@ function submit() {
     return;
   }
   S.phase = 'done';
+  if (S.guide) { // she has delivered: the coach is done
+    ctx.game.act(markGuideSeen, { id: 'matching' });
+    S.guide.stop();
+    S.guide = null;
+  }
   const mixHex = res.mixHex || mixer.hex;
   const tier = res.tier;
   S.newColor = res.discovered ? res.discovered.colorId : null;
@@ -646,6 +724,21 @@ ${S.newColor ? h`<div class="card mx-new" data-newcolor>${swatch(res.discovered.
   }, 380);
   // Never leave the pay hidden if the timer is cut short.
   later(() => { if (wrap) wrap.style.opacity = '1'; }, 1500);
+  // After her first filled order: two equal ways on, once the page has settled.
+  if (S.offer) S.offer.stop();
+  if (orderVeteran(stateOf(), 1)) ctx.game.act(markGuideSeen, { id: 'ordersNext' });
+  else {
+    S.offer = offerWhatsNext(ctx, {
+      screen: 'matching',
+      id: 'ordersNext',
+      delay: 1800,
+      ok: () => S.phase === 'done' && !!root.querySelector('[data-done]'),
+      title: 'Your first order is delivered',
+      body: 'Customers wait as long as it takes, so there is no rush.',
+      more: { label: 'Another order', run: () => { const o = nextMatchOrder(order.id); if (o) ctx.navigate('matching', { orderId: o.id }); else ctx.navigate('orders'); } },
+      next: { label: 'Boards reveal new colors', run: () => ctx.navigate('puzzles') },
+    });
+  }
 }
 
 export default {
@@ -690,6 +783,7 @@ export default {
   hide() {
     S.timers.forEach(clearTimeout);
     S.timers = [];
+    stopGuide();
   },
 
   render(state) {

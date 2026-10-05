@@ -9,6 +9,8 @@
  * DESIGN.md "Progression, eras and prestige > Renovate (soft prestige)".
  *
  * data-actions: renovate-ask, renovate-cancel, renovate-go, buy.
+ *
+ * First-open guide 'heritage': one got-it step on `data-coach="heritage-stays"`, the "Stays with you" list.
  */
 
 import { h, raw, backButton, button, tag, iconSvg } from './kit.js';
@@ -16,6 +18,7 @@ import { HERITAGE_TREE, HERITAGE_DIVISOR, HERITAGE_INCOME, heritageCost } from '
 import fxDefault from './fx.js';
 import audioDefault from './audio.js';
 import hapticsDefault from './haptics.js';
+import { howThisWorksHtml } from './guide.js';
 
 const GEM_FALLBACK = '<svg class="icon" width="16" height="16" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2 L17 8 L10 18 L3 8 Z" fill="#C99A2E" stroke="#8C6512" stroke-width="1.4" stroke-linejoin="round"/><path d="M3 8 H17 M7 8 L10 2 L13 8 L10 18 Z" fill="none" stroke="#8C6512" stroke-width="1" stroke-linejoin="round"/></svg>';
 /** The Heritage mark from kit (a little homestead); the old gem until kit has it. */
@@ -46,6 +49,8 @@ const CSS = `
 #screen-heritage .h2,#screen-heritage .card-title{font-family:var(--font-ui);font-weight:600}
 #screen-heritage .hr-node .card-title{font-family:var(--font-display);font-weight:400}
 #screen-heritage .btn.small{min-height:44px}
+#screen-heritage .how-link{min-height:24px;padding:0 8px;line-height:1;position:relative}
+#screen-heritage .how-link::before{content:'';position:absolute;inset:-10px -8px}
 #screen-heritage .tag{white-space:normal;min-height:28px;line-height:1.25;font-size:13px}
 #screen-heritage .hr-big{font-family:var(--font-ui);font-weight:700;font-size:30px;line-height:1.1;font-variant-numeric:tabular-nums;display:flex;align-items:center;gap:8px}
 #screen-heritage .hr-list{display:flex;flex-direction:column;gap:6px}
@@ -126,7 +131,7 @@ function renovateHtml(st) {
   <div class="small">Renovating rebuilds your workshop from the bench in return for a permanent income boost called Heritage. Your catalog and art stay.</div>
   <div class="stack stack-sm">
     <div class="semi small">Stays with you</div>
-    <div class="hr-list">${STAYS.map((t) => h`<div class="hr-li">${raw(CHECK)}<span>${t}</span></div>`)}</div>
+    <div class="hr-list" data-coach="heritage-stays">${STAYS.map((t) => h`<div class="hr-li">${raw(CHECK)}<span>${t}</span></div>`)}</div>
     <div class="semi small" style="margin-top:4px">Starts fresh</div>
     <div class="hr-list hr-fresh">${RESETS.map((t) => h`<div class="hr-li">${raw(FRESH)}<span>${t}</span></div>`)}</div>
   </div>
@@ -136,7 +141,7 @@ function renovateHtml(st) {
   const needNext = Math.max(0, (gain + 1) * (gain + 1) * HERITAGE_DIVISOR - (st.runEarned || 0));
   const lists = h`<div class="stack stack-sm">
   <div class="semi small">Stays with you</div>
-  <div class="hr-list">${STAYS.map((t) => h`<div class="hr-li">${raw(CHECK)}<span>${t}</span></div>`)}</div>
+  <div class="hr-list" data-coach="heritage-stays">${STAYS.map((t) => h`<div class="hr-li">${raw(CHECK)}<span>${t}</span></div>`)}</div>
   <div class="semi small" style="margin-top:4px">Starts fresh</div>
   <div class="hr-list hr-fresh">${RESETS.map((t) => h`<div class="hr-li">${raw(FRESH)}<span>${t}</span></div>`)}</div>
 </div>`;
@@ -191,7 +196,7 @@ function build() {
   root.innerHTML = String(h`
 <div class="screen-head">
   ${backButton('Back')}
-  <div class="titles"><div class="title">Renovate and Heritage</div><div class="subtitle">${total ? `Heritage gives +${pct}% income` : 'A permanent income boost'}</div></div>
+  <div class="titles"><div class="title">Renovate and Heritage</div><div class="subtitle">${total ? `Heritage gives +${pct}% income` : 'A permanent income boost'}</div>${howThisWorksHtml('heritage')}</div>
   <span class="spacer"></span>
 </div>
 <div class="screen-body">
@@ -263,6 +268,25 @@ function onClick(e) {
   }
 }
 
+let guide = null;
+let guideTimer = 0;
+
+function stopGuide() {
+  clearTimeout(guideTimer);
+  guideTimer = 0;
+  if (guide) { try { guide.stop(); } catch (e) { /* ignore */ } guide = null; }
+}
+
+function startGuide() {
+  stopGuide();
+  if (typeof ctx.guide !== 'function') return;
+  guide = ctx.guide('heritage', [
+    { anchor: '[data-coach="heritage-stays"]', text: 'Renovate keeps your catalog, hunters and art; stations reset.', endsOn: 'got-it', side: 'above' },
+  ], { screen: 'heritage' });
+  const g = guide;
+  guideTimer = setTimeout(() => { guideTimer = 0; if (g === guide) g.start(); }, 300);
+}
+
 const screen = {
   id: 'heritage',
 
@@ -279,10 +303,12 @@ const screen = {
   show() {
     ui.confirm = false;
     refresh(true);
+    startGuide();
   },
 
   hide() {
     ui.confirm = false;
+    stopGuide();
   },
 
   render() {

@@ -15,6 +15,11 @@
  * Selling (Theme E): a sheet with the thumbnail and "A collector offers N"; Sell plays fx.stamp "Sold" and
  * fx.coinArc to the coin pill; a "Sold to a collector" card (gallery.sold, newest first, 12 shown) stays in the archive.
  * Navigates: navigate('paint', {pieceId}), navigate('workshop').
+ *
+ * First-open guide 'gallery' (a visitor speaks): `data-coach="gallery-start"` is the first canvas's
+ * "Start painting"; the step ends when paint opens (this screen emits 'galleryStart' just before it
+ * navigates). 'galleryNext' is the one-time "what's next" card after her first hang (a Hang here, or a
+ * hung piece when the paint screen closes back to this one).
  */
 
 import { h, raw, backButton, button, tag, safeHex, progressBar } from './kit.js';
@@ -23,6 +28,7 @@ import { unlockTag, openUnlockSheet, ensureStyles as ensureWorkshopStyles } from
 import fxDefault from './fx.js';
 import audioDefault from './audio.js';
 import hapticsDefault from './haptics.js';
+import { howThisWorksHtml, markGuideSeen, isSeen } from './guide.js';
 
 const PLURAL = Object.freeze({
   red: 'reds', orange: 'oranges', yellow: 'yellows', green: 'greens', teal: 'teals',
@@ -36,6 +42,8 @@ const CSS = `
 #screen-gallery .gl-door-tag .tag{white-space:normal;text-align:left;max-width:100%}
 #screen-gallery .gl-door-tag .ws-unlockbtn{justify-content:center;text-align:center}
 #screen-gallery .btn.small{min-height:44px}
+#screen-gallery .how-link{min-height:24px;padding:0 8px;line-height:1;position:relative}
+#screen-gallery .how-link::before{content:'';position:absolute;inset:-10px -8px}
 #screen-gallery .gl-name{font-family:var(--font-display);font-size:20px;line-height:1.2}
 #screen-gallery .gl-sec{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-top:6px}
 #screen-gallery .gl-walls{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
@@ -88,7 +96,7 @@ let fx = fxDefault;
 let audio = audioDefault;
 let haptics = hapticsDefault;
 
-const ui = { sig: '', comments: {}, commentsKey: '', commentsAt: 0, sheet: null };
+const ui = { sig: '', comments: {}, commentsKey: '', commentsAt: 0, sheet: null, guide: null, guideTimer: 0, nextTimer: 0, hungBefore: 0, startShown: false };
 
 const sim = () => ctx.sim;
 const state = () => ctx.game.state;
@@ -261,11 +269,11 @@ function canvasesView(st) {
   }
   return h`
 <div class="gl-sec" data-ref="canvases"><div class="h2">Canvases</div><div class="small muted">${list.length} to paint</div></div>
-<div class="gl-grid2">${list.map((cv) => h`<div class="card gl-cv">
+<div class="gl-grid2">${list.map((cv, i) => h`<div class="card gl-cv">
   <span class="gl-frame">${raw(canvasSvgMarkup(cv, {}, { label: cv.name }))}</span>
   <div class="semi" style="font-family:var(--font-display);font-size:14px">${cv.name}</div>
   <div class="small muted">${cv.regions.length} panes</div>
-  ${button('Start painting', { small: true, variant: 'primary', block: true, attrs: { 'data-action': 'start', 'data-canvas': cv.id } })}
+  ${button('Start painting', { small: true, variant: 'primary', block: true, attrs: { 'data-action': 'start', 'data-canvas': cv.id, ...(i === 0 ? { 'data-coach': 'gallery-start' } : {}) } })}
 </div>`)}</div>
 ${list.length < 12 ? h`<div class="hint">New canvases arrive with catalog milestones, postcard sets, events and commissions.</div>` : ''}`;
 }
@@ -348,7 +356,7 @@ function build(st, now) {
   root.innerHTML = String(h`
 <div class="screen-head">
   ${backButton('Back to the workshop')}
-  <div class="titles"><div class="title">Gallery Wing</div><div class="subtitle" data-ref="sub">${headSubtitle(st, now)}</div></div>
+  <div class="titles"><div class="title">Gallery Wing</div><div class="subtitle" data-ref="sub">${headSubtitle(st, now)}</div>${unlocked ? howThisWorksHtml('gallery') : ''}</div>
   <span class="spacer"></span>
 </div>
 <div class="screen-body">
@@ -360,6 +368,8 @@ function build(st, now) {
   const body = q('.screen-body');
   if (body && scroll) body.scrollTop = scroll;
   if (ui.sheet) closeSheet();
+  // The door just opened (the 'unlocked' hand-off starts the guide): bring the first canvas into view once.
+  if (!ui.startShown && ui.guide && ui.guide.active && q('[data-coach="gallery-start"]')) showStart();
 }
 
 // ---------------------------------------------------------------------------
@@ -482,7 +492,10 @@ function onClick(e) {
   }
   if (a === 'start') {
     const res = act(sim().gallery.startPiece, { canvasId: t.dataset.canvas });
-    if (res && res.ok) ctx.navigate('paint', { pieceId: res.pieceId });
+    if (res && res.ok) {
+      if (ctx.game.emit) ctx.game.emit('galleryStart', { pieceId: res.pieceId }); // ends the first-open guide step
+      ctx.navigate('paint', { pieceId: res.pieceId });
+    }
     else ctx.toast('That canvas is not ready yet.');
     return;
   }
@@ -492,7 +505,7 @@ function onClick(e) {
   if (a === 'continue') { closeSheet(); ctx.navigate('paint', { pieceId: id }); return; }
   if (a === 'hang') {
     const res = act(sim().gallery.hang, { pieceId: id });
-    if (res && res.ok) { audio.thunk(); haptics.medium(); ctx.toast('Hung. Visitors will find it.'); }
+    if (res && res.ok) { audio.thunk(); haptics.medium(); ctx.toast('Hung. Visitors will find it.'); firstHangCard(); }
     else ctx.toast('Every wall is in use. Take one down to rotate this in.');
     closeSheet();
     refresh(true);
@@ -544,6 +557,73 @@ function refresh(force) {
   build(st, now);
 }
 
+// ---------------------------------------------------------------------------
+// First-open guide (a visitor speaks) and the "what's next" card after her first hang
+// ---------------------------------------------------------------------------
+
+/** A small papercut visitor: round glasses, a soft hat, a plum coat. */
+const VISITOR_PORTRAIT = `<svg width="32" height="32" viewBox="0 0 100 100" role="img" aria-label="A gallery visitor">
+<defs><clipPath id="glvc"><circle cx="50" cy="50" r="47"/></clipPath></defs>
+<circle cx="50" cy="50" r="47" fill="#DCE6D6"/>
+<g clip-path="url(#glvc)"><path d="M10 100 C10 76 28 68 50 68 C72 68 90 76 90 100Z" fill="#8F6F9E"/>
+<rect x="43.5" y="58" width="13" height="14" rx="3" fill="#C9A07C"/>
+<ellipse cx="50" cy="48" rx="17" ry="19" fill="#E3B895"/>
+<path d="M33 40 C34 26 66 26 67 40 C60 35 40 35 33 40Z" fill="#4A3B33"/>
+<ellipse cx="50" cy="30" rx="26" ry="5.5" fill="#2A2622"/><path d="M36 30 C36 13 64 13 64 30Z" fill="#2A2622"/>
+<g fill="none" stroke="#2A2622" stroke-width="1.8"><circle cx="43" cy="48" r="5.2"/><circle cx="57" cy="48" r="5.2"/><path d="M48.2 48 H51.8"/></g>
+<circle cx="43" cy="48" r="1.6" fill="#2A2622"/><circle cx="57" cy="48" r="1.6" fill="#2A2622"/>
+<path d="M44.5 58 Q50 62 55.5 58" fill="none" stroke="#2A2622" stroke-width="1.8" stroke-linecap="round"/></g>
+<circle cx="50" cy="50" r="47" fill="none" stroke="#2A2622" stroke-width="2.2"/></svg>`;
+
+function stopGuide() {
+  clearTimeout(ui.guideTimer);
+  ui.guideTimer = 0;
+  if (ui.guide) { try { ui.guide.stop(); } catch (e) { /* ignore */ } ui.guide = null; }
+}
+
+function startGuide() {
+  stopGuide();
+  if (typeof ctx.guide !== 'function') return;
+  // Registered even while the door is locked, so app.js's 'unlocked' hand-off can start it from here.
+  ui.guide = ctx.guide('gallery', [
+    { anchor: '[data-coach="gallery-start"]', text: 'Paint with your colors. Hang it, and visitors pay.', endsOn: 'action',
+      kicker: 'A visitor', portrait: VISITOR_PORTRAIT, event: 'galleryStart' },
+  ], { screen: 'gallery' });
+  const g = ui.guide;
+  ui.guideTimer = setTimeout(() => {
+    ui.guideTimer = 0;
+    if (g !== ui.guide || isSeen(state(), 'gallery')) return;
+    showStart();
+    g.start();
+  }, 300);
+}
+
+/** Bring the first canvas's Start painting into view so the bubble has something to point at. */
+function showStart() {
+  const el = q('[data-coach="gallery-start"]');
+  const body = q('.screen-body');
+  if (!el || !body || !el.scrollIntoView) return;
+  ui.startShown = true;
+  const r = el.getBoundingClientRect();
+  const b = body.getBoundingClientRect();
+  if (r.top < b.top || r.bottom > b.bottom) el.scrollIntoView({ block: 'center' });
+}
+
+/** Her first hang (here, or in the paint screen that just closed back to this one): two equal choices. */
+function firstHangCard() {
+  if (typeof ctx.guide !== 'function' || isSeen(state(), 'galleryNext')) return;
+  ctx.game.act(markGuideSeen, { id: 'galleryNext' });
+  clearTimeout(ui.nextTimer);
+  ui.nextTimer = setTimeout(() => {
+    ui.nextTimer = 0;
+    ctx.guide.whatsNext({
+      title: 'Hung on the wall',
+      more: { label: 'Paint another', run: () => scrollToCanvases() },
+      next: { label: 'Back to the workshop', run: () => ctx.navigate('workshop') },
+    });
+  }, 900);
+}
+
 const screen = {
   id: 'gallery',
 
@@ -555,14 +635,21 @@ const screen = {
     haptics = ctx.haptics || hapticsDefault;
     injectCss();
     root.addEventListener('click', onClick);
+    root.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('[data-guide-replay="gallery"]')) showStart(); });
   },
 
   show() {
     ui.commentsAt = 0;
     refresh(true);
+    ui.hungBefore = (gal().hung || []).length;
+    ui.startShown = false;
+    startGuide();
   },
 
   hide() {
+    clearTimeout(ui.nextTimer);
+    ui.nextTimer = 0;
+    stopGuide();
     closeSheet();
   },
 
@@ -576,6 +663,10 @@ const screen = {
   reveal() {
     ui.commentsAt = 0;
     refresh(true);
+    const hung = (gal().hung || []).length;
+    if (hung > ui.hungBefore) firstHangCard();
+    ui.hungBefore = hung;
+    if (!ui.guide || !ui.guide.active) startGuide();
     if (paintIntent.focus === 'canvases') {
       paintIntent.focus = null;
       setTimeout(scrollToCanvases, 60);

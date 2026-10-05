@@ -21,6 +21,8 @@ import {
   injectStyle, PZ_CSS, ensureActive, activeOf, TIER_IDS, TIER_LABEL, STAMP_TONE, stampSvg,
   createGradingBoard, flushTints, rememberedTier, frameName, eventName, coinsText,
 } from './puzzles.js';
+import { howThisWorksHtml, markGuideSeen } from './guide.js';
+import { offerWhatsNext } from './matching.js';
 
 const CSS = `
 .gr-body { gap: 12px; }
@@ -55,6 +57,8 @@ const CSS = `
 .gr-empty-actions { display: flex; flex-direction: column; gap: 8px; align-items: stretch; width: 100%; max-width: 260px; }
 .gr-result-top { align-items: center; }
 .gr-result-top .pz-stamp { flex: 0 0 auto; animation: pz-stamp-in 260ms var(--ease-out) both; }
+#screen-grading .how-link { display: inline-block; position: relative; margin-top: 2px; padding: 0; min-height: 20px; border: 0; background: none; font: inherit; font-size: 12px; font-weight: 600; color: var(--ink-soft); text-decoration: underline; text-underline-offset: 2px; text-align: left; }
+#screen-grading .how-link::before { content: ''; position: absolute; inset: -12px -10px; }
 `;
 
 let C = null;
@@ -62,6 +66,8 @@ let ROOT = null;
 const G = {
   visible: false, board: null, rank: [], sel: null, busy: false, celebrating: false, result: null,
   timers: [], cb: false, moves: -1, drag: null, cell: 40, tiles: [], el: {}, params: {}, settling: false,
+  guide: null, offer: null, startTimer: 0,
+  swapped: false, // she has swapped two tiles this visit (the guide's action step)
 };
 
 const reduced = () => !!(C.fx && C.fx.isReducedMotion && C.fx.isReducedMotion());
@@ -226,11 +232,11 @@ function drawAll() {
     ? h`<div class="gr-frametag"><span>${frameName(C, board.event, board.shape)}</span><span>${eventName(C, board.event)}</span></div>`
     : '';
   ROOT.innerHTML = String(h`<div class="screen-head">${backButton('Back to the puzzle table')}
-<div class="titles"><div class="title">Grading</div><div class="subtitle" data-sub></div></div><div class="spacer"></div></div>
+<div class="titles"><div class="title">Grading</div><div class="subtitle" data-sub></div>${howThisWorksHtml('grading')}</div><div class="spacer"></div></div>
 <div class="screen-body gr-body">
 <div class="gr-frame" data-frame${board.event ? ` data-event="${board.event}"` : ''}>${tag}
-<div class="gr-grid${G.cb ? ' cb' : ''}${board.glow ? ' glow' : ''}" data-grid style="--cols:${board.cols};--cell:${G.cell}px" role="group" aria-label="Gradient board">${raw(tiles.join(''))}</div></div>
-<div class="gr-tools" data-tools>${button(h`${iconSvg('sound', { size: 18 })}Hear the board`, { variant: 'primary', attrs: { 'data-action': 'hear' } })}${button('Change difficulty', { cls: 'is-quiet', attrs: { 'data-action': 'tier-sheet' } })}</div>
+<div class="gr-grid${G.cb ? ' cb' : ''}${board.glow ? ' glow' : ''}" data-grid data-coach="grading-board" style="--cols:${board.cols};--cell:${G.cell}px" role="group" aria-label="Gradient board">${raw(tiles.join(''))}</div></div>
+<div class="gr-tools" data-tools>${button(h`${iconSvg('sound', { size: 18 })}Hear the board`, { variant: 'primary', attrs: { 'data-action': 'hear', 'data-coach': 'grading-hear' } })}${button('Change difficulty', { cls: 'is-quiet', attrs: { 'data-action': 'tier-sheet' } })}</div>
 <div class="card pz-status" data-status></div>
 </div>`);
   G.el = {
@@ -335,6 +341,7 @@ function doSwap(i, j, dragOff) {
     return;
   }
   G.moves = b.moves;
+  G.swapped = true;
   paintTile(i);
   paintTile(j);
   const cell = G.cell;
@@ -353,6 +360,11 @@ function doSwap(i, j, dragOff) {
     C.game.emit('boardSolved', { puzzle: 'grading', tier: res.reward.tier, tints: res.reward.tints || [] });
     G.celebrating = true; // from here render() leaves the (now cleared) board alone
     G.reward = res.reward;
+    if (G.guide) { // she has solved one: the coach is done
+      C.game.act(markGuideSeen, { id: 'grading' });
+      G.guide.stop();
+      G.guide = null;
+    }
     later(() => celebrate(res.reward), 220);
   } else updateStatus();
 }
@@ -575,10 +587,26 @@ ${bonusLine(reward.bonus)}
   if (G.el.tools) G.el.tools.hidden = true; // the result and its next steps take the room
   const coinsEl = ROOT.querySelector('[data-coins]');
   if (coinsEl) C.fx.rollNumber(coinsEl, 0, reward.coins, { ms: 600, format: (v) => `+${coinsText(C, v)}` });
+  // After her first solved board: two equal ways on, once the naming (if any) is over.
+  if (G.offer) G.offer.stop();
+  const tint = found[0] || null;
+  const result = G.result;
+  G.offer = offerWhatsNext(C, {
+    screen: 'grading',
+    id: 'gradingNext',
+    delay: 1500,
+    tries: 400,
+    ok: () => G.result === result,
+    title: 'Your first board, graded',
+    body: 'Solved boards find new tints and give a gentle boost.',
+    more: { label: 'Another board', run: () => again() },
+    next: { label: tint ? 'See the new tint in your catalog' : 'See your catalog', run: () => C.navigate('catalog', tint ? { colorId: tint.colorId } : {}) },
+  });
 }
 
 function again() {
   clearTimers();
+  if (G.offer) { G.offer.stop(); G.offer = null; }
   const tier = G.result && G.result.reward && TIER_IDS.includes(G.result.reward.tier) ? G.result.reward.tier : rememberedTier(C.game.state);
   G.result = null;
   G.celebrating = false;
@@ -588,10 +616,36 @@ function again() {
 }
 
 // ---------------------------------------------------------------------------
+// First-open guide (docs/PLAN-v0.2 Theme D)
+// ---------------------------------------------------------------------------
+
+function startGuide() {
+  stopGuide();
+  if (typeof C.guide !== 'function' || !G.board) return;
+  const st = C.game.state;
+  if (!(st.onboarding && st.onboarding.seen && st.onboarding.seen.grading) && Number(st.lifetime && st.lifetime.puzzles) >= 1) {
+    C.game.act(markGuideSeen, { id: 'grading' }); // an old hand: she has solved a board
+    C.game.act(markGuideSeen, { id: 'gradingNext' });
+    return;
+  }
+  G.guide = C.guide('grading', [
+    { anchor: '[data-coach="grading-board"]', text: 'Swap tiles until the gradient flows', endsOn: 'action', done: () => G.swapped, side: 'above' },
+    { anchor: '[data-coach="grading-hear"]', text: 'Hear it: a solved board sounds like a scale', endsOn: 'got-it', when: () => G.swapped, side: 'below' },
+  ], { screen: 'grading' });
+  G.startTimer = setTimeout(() => { if (G.guide) G.guide.start(); }, 300);
+}
+
+function stopGuide() {
+  clearTimeout(G.startTimer);
+  if (G.guide) { try { G.guide.stop(); } catch (e) { /* ignore */ } G.guide = null; }
+}
+
+// ---------------------------------------------------------------------------
 // Screen
 // ---------------------------------------------------------------------------
 
 function onClick(e) {
+  if (e.target.closest('[data-guide-replay]')) G.swapped = false; // "How this works" starts the guide over
   const a = e.target.closest('[data-action]');
   if (a && ROOT.contains(a)) {
     const act = a.dataset.action;
@@ -642,11 +696,15 @@ export default {
       C.game.act((s, _a, now) => createGradingBoard(C, s, { tier: rememberedTier(s), own: !!params.own }, now));
     }
     G.board = activeOf(C.game.state).grading;
+    G.swapped = false;
     drawAll();
+    startGuide();
   },
 
   hide() {
     G.visible = false;
+    stopGuide();
+    if (G.offer) { G.offer.stop(); G.offer = null; }
     clearTimers();
     if (G.celebrating) {
       // Leaving mid-celebration still pays out the tints.
