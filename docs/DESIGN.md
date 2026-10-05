@@ -364,9 +364,11 @@ Tiles from a gradient are shuffled; she swaps them back into order. Anchored til
 
 Some batches come out muddy (chance rises with mixer speed upgrades, falls with grinder quality). A muddy batch becomes a tube-sort puzzle: colored layers stacked in tubes, pour top layers onto matching colors until each tube is one color.
 
-- Size scales with batch value: 4 colors / 6 tubes up to 9 colors / 11 tubes.
-- Solving sets the batch to high purity (sells for 1.5×–2×). Ignoring it is fine: muddy batches still sell at 0.8×.
-- Undo is unlimited; an extra empty tube can be added for free on Relaxed.
+- **Spawn pacing:** muddiness runs on a clock of production time, not a roll per batch. While any mixer produces, one muddy batch arrives every 2 to 3 minutes (random in that window), never during the first-session tutorial. At most 10 wait at once (a batch due past that is skipped; nothing is lost), and an offline return adds at most 3.
+- **Difficulty tiers**, all free, picked on the Purify card on the Puzzle table (same control as grading) and remembered: Relaxed 4 colors / 6 tubes with one free extra tube (about 1 min), Steady 6 / 8 (about 2 min), Tricky 8 / 10 (about 3 min), Master 9 / 11 (about 5 min). Rewards: pure / pure / flawless / flawless, plus 4 / 6 / 10 / 16 minutes of production. Changing tier mid-batch restarts the batch with nothing lost.
+- **Strict solve:** a tube corks (sound and cork) the moment it is full and one color; the batch is solved only when every non-empty tube is corked (uniform AND full), so the last pour is always a satisfying cork.
+- Solving sets the batch to high purity (sells for 1.5×–2×). Ignoring it is fine: muddy batches still sell at 0.8× ("Sell all as is" with a one-line total), never block All caught up, and the Ledger only says "3 muddy batches to sort, if you like".
+- Undo is unlimited; the extra empty tube is Relaxed only. The first batch teaches itself in three steps (pick a tube, pour onto a match, cork).
 
 ### Packing (crate sort)
 
@@ -526,7 +528,7 @@ Value is computed from what she used, never from how "right" it looks.
 
 ### Unlock and prestige
 
-The Gallery unlocks in Phase 2 at 20 colors, with the Gallery Wing room. Paintings, wall slots and canvases **survive Renovate and Era Advance**: they are her art and never reset. Admission scales with the Heritage multiplier like all income.
+The Gallery opens with the Gallery Wing room, bought for 8,000 Coins once she has 25 colors (the room IS the purchase). Paintings, wall slots and canvases **survive Renovate and Era Advance**: they are her art and never reset. Admission scales with the Heritage multiplier like all income.
 
 ## The Merge Shelf
 
@@ -534,9 +536,10 @@ The Merge Shelf is a fiddly, satisfying grid where matching containers merge int
 
 ### How it works
 
-- A shelf grid of 5 × 7 slots (expands to 6 × 9 with upgrades).
-- Two containers of the **same color and same size** merge into the next size up.
-- Merges are drag-and-drop, with a little clink, a glow and a bigger jar. A drop that triggers several merges in a row plays a rising musical scale.
+- A fixed shelf of **6 × 6** slots that fits one phone screen with the tab bar showing. No expansion purchases: the grid is the grid.
+- **Five color chips** above the shelf choose which colors spillover delivers (default: five different hue families from her mixers' recipes, then her most-stocked colors; two in one family is allowed). Spillover never delivers a sixth color; changing a chip leaves containers already on the shelf alone.
+- Two containers of the **same color and same size** merge into the next size up. Every cork and chip carries its family glyph, so the two rules (pairs match on exact color, lines on family) have a non-color cue; a same-family, different-color drop just moves.
+- Merges are drag-and-drop, with a little clink, a glow and a bigger jar. A drop that triggers several merges in a row plays a rising musical scale. The dragged container is drawn above the finger and lands where it is drawn, with a 24 px magnet toward a legal partner.
 
 | Tier | Container | Value vs one vial |
 | --- | --- | --- |
@@ -548,11 +551,19 @@ The Merge Shelf is a fiddly, satisfying grid where matching containers merge int
 
 Each tier is worth more than the two containers that made it, so merging up always pays.
 
+### Lines of six
+
+- A full row, column or either main diagonal holding six containers of one **hue family** (any sizes; a golden vial counts as any family) resolves on its own after every drop. A drop can merge first and then make a line; a chain finishes before the line.
+- The six combine into the biggest container their summed value allows, which **sells at once at 1.5×** its value (and never for less than selling the six separately). Two or more lines found in the same check are a **double line**: one sequence, two coin arcs that join, and ×2 on the 1.5× bonus. A Cask formed this way still grants Essence to the family's most-stocked color.
+- The sequence takes about 1.5 s and a tap skips to the end with the coins credited: the six lean in from the ends (60 ms apart, a rising note each), squash and pop one size bigger (heavy haptic), hold glowing for 350 ms (500 ms for her first line ever), tip into a coin arc to the pill with a "Sold" stamp, and the cells clear with a shimmer.
+- The shelf teaches itself: a first merge, then the row rule on the chips; columns the first time a column holds five of a family, diagonals the first time a diagonal does.
+- There are no row labels and no tidy-shelf bonus: the family-line rule replaces them.
+
 ### Where vials come from (no energy system)
 
 Vials arrive from things she already does, never from a refilling energy meter:
 
-- **Production spillover:** one vial per 10 minutes of production, in one of her active colors, holding about 15 seconds of that color's output so vials keep pace as the factory grows. About 1 in 40 is a Golden vial (see Fun and engagement). It accumulates while she's away until the shelf is full, which makes the shelf another forget-friendly cap.
+- **Production spillover:** one vial per 10 minutes of production, in one of her five chip colors, holding about 15 seconds of that color's output so vials keep pace as the factory grows. About 1 in 40 is a Golden vial (see Fun and engagement). Spillover rests while fewer than 6 cells are empty, so a line can always be built, and accumulates while she's away until then, which makes the shelf another forget-friendly cap. Before the shelf is bought, from 6 colors, vials pile up behind its glass (up to 12, "6 vials waiting") and are on the shelf the moment it opens.
 - **Hunter hauls** sometimes include vials of regional colors.
 - **Puzzle rewards:** Perfect matches and Master boards drop a bonus vial.
 - **Daily quests** can reward a jar or bottle.
@@ -563,13 +574,9 @@ Vials arrive from things she already does, never from a refilling energy meter:
 - **Orders and commissions** sometimes ask for a specific container ("an Urn of Lapis Blue"), which gives a reason to build toward something.
 - **Essence:** merging a Cask produces one Essence of that color. Essence permanently gives that color +5% production and +5% purity, stacking to 10 times. Each swatch in the catalog shows its Essence stars, which turns the shelf into a long-term collection goal.
 
-### Sorting touch
-
-Shelf rows can be labeled with a color family. A row holding only that family gets a **tidy shelf** bonus (+10% value on everything in it). It's optional, but it rewards the sorting instinct she already enjoys.
-
 ### Unlock and prestige
 
-The Merge Shelf unlocks early, in Phase 1 at 5 colors, as a tactile hook in the first session. Shelf contents reset on Renovate (they are stock, like vats); Essence stars never reset.
+The Merge Shelf is bought, not given: its price shows from the start ("Shelf: 8 colors · 400 coins"), it can be bought from 8 colors for 400 Coins, usually in session two, and buying it plays a short ceremony in the scene that hands off to the shelf's own guide. Shelf contents and the purchase reset on Renovate (they are stock, like vats; the Heritage node "Keep the shelf" skips the reset, and one batch re-buy reopens everything at once); Essence stars never reset.
 
 ### Guardrails
 
@@ -1066,3 +1073,7 @@ Where the Era 1 build knowingly differs from this spec, and why. Each is a tunin
 | Heritage canvases | Unlock with Heritage | The first Renovate grants the Grand Rotunda Window, the third the Heritage Tapestry (granted on the next tick after the Renovate) | No Heritage tree node exists for canvases; tying them to Renovate count keeps them a reward for the loop |
 | Gallery paint cost | Each piece uses 20 minutes of production and hangs at 1.3× its cost | A whole canvas costs 2.5 minutes of her current mixer output (`PAINT_SECONDS = 150` in `src/sim/gallery.js`), split across regions by size and locked when the piece is started | The engine opens up to 24 walls and the painter uses valuable tints, so 20 minutes gave Gallery admission a 48% share of Casual income by day 14. At 2.5 minutes the share is about 15% (target 10 to 20%) |
 | First-session pace | Puzzle rewards follow the reward-scaling formula; about 10 upgrades in the first ten minutes | A new workshop starts with 25 Coins in the till, the tour's first order and first grading board each add a tutorial reward of one cheapest upgrade (`economy.tutorialReward`), and the three starter sources cost 6 (was 10) | Before any mixer runs r_idle is 0, so the first order and board paid only the 0.25 × c_min floor (about 7 Coins against a 12-Coin upgrade) and the shop's reserve keeps it from selling for ~10 minutes. The first-ten-minutes walk now buys 8 upgrades in 5.5 minutes (tools/balance/TUNING.md change 7) |
+| Coin-gated unlocks (v0.2) | Systems open by color count: Merge Shelf at 5 colors, Hue Hunters at the end of Phase 1 (10 colors), Gallery at 20 colors, shipping at the start of Phase 2, puzzle tiers free | Every system is bought with Coins and colors only reveal the price, which shows from the start (`src/sim/unlocks.js`): Merge Shelf 8 colors / 400, Hue Hunters 15 / 2,500, Gallery Wing 25 / 8,000, Loading Yard 50 / 40,000, Commissions Phase 3 + 30 / 20,000. Grading tiers stay free and are revealed at 10 / 25 / 45 colors; Purify has no gate. Unlocks reset on Renovate (Heritage "Keep the ..." nodes skip it; one batch re-buy reopens the rest) | Playtest: things opened too fast and "unlocks should cost money". A visible price gives her something to plan toward; charging between a muddy batch and its fix would be a toll, so Purify stays free |
+| Line sequence (v0.2) | Matthew's shelf direction asked for a ~2.2 s line sequence with a ~500 ms pause | About 1.5 s, skippable by a tap at any point (coins credited at once): lean-ins 6 × 60 ms, pop 280 ms, glowing hold 350 ms (500 ms for her first line ever), tip + coin arc + "Sold" stamp 400 ms, shimmer-clear 150 ms | DESIGN's motion rules cap any effect at 1.5 s; the pause is kept but shortened. `stats.lines` / `stats.lineSkips` in the debug panel judge it in play |
+| Starting mixers (v0.2) | One mixer slot at the start; the second arrives with the Mill Room | Two mixers from the start; a third is bought for 60 Coins (`factory.buyMixer`, ×6 each, up to 6), offered by the Next button right after the tutorial | Playtest: with one mixer the easel and the shop showed a single color. The bought third mixer is the first session's "new possibility" |
+| Muddy batches (v0.2) | Muddy chance rolled per batch, rising with mixer speed; Purifying arrives in Phase 2 | A production-time clock: one muddy batch every 2 to 3 minutes while mixers run, backlog 10, offline catch-up at most 3, and a grace period: none until the first-session tutorial is done (onboarding done, or two puzzles played) | The per-batch roll flooded leveled mixers (one batch every few seconds). The grace period keeps the first order and first board clean; her first muddy batch lands 2 to 3 minutes of production later and teaches Purify itself |

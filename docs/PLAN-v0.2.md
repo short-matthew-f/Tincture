@@ -3,6 +3,18 @@
 Written 2026-10-04 from playtest notes (Matthew and his wife, builds 0.1.0–0.1.3).
 No code has changed yet. This is the work order for the next session.
 
+## Status (0.2.0 integration, 2026-10-05)
+
+| Theme | Status | Notes |
+| --- | --- | --- |
+| A — Pacing and gating | **done** (two small items open) | Two starting mixers + a bought third, coin-bought unlocks with prices from the start, "What this opens" sheet and unlock ceremonies, slower discovery, shop reserve, workshop split with one Next button, balance retuned (TUNING.md changes 8–11). Open: the Renovate sheet does not yet name which unlocks close; the local counters are not in a debug panel |
+| B — 6×6 match shelf | **done** | 6×6, five chips with family glyphs, lines of six (1.5×, double ×2), ~1.5 s skippable sequence, fx.drag with board-local hit testing / ghost / hysteresis / magnet, perturbation harness (`test/drag.e2e.mjs`), save migration. Later: undo the last shelf move |
+| C — Purifying | **done** | Production-clock spawn (2–3 min, backlog 10, offline ≤ 3, tutorial grace), strict corked solve, four free tiers on the Puzzle table, "Sell all as is", never blocks All caught up |
+| D — Subgame onboarding | **partial** | guide() mechanism, 15 first-open guides with "How this works" replay, what's-next cards, unlock → guide hand-off. Open: the Album guide |
+| E — Gallery discard and sell | **done** | Scrap (two-tap) and sell-to-a-collector with an archive card |
+| F — Feel pass | **done** | fx.js vocabulary (spring, lift/settle, touchFeel, drag, coinArc, stamp, pour + onFlooded) on every screen; haptic override rule. Later: hold-to-repeat on Level up, separate effects/ambience volume |
+| Step 7 — Integration | **done** | Version 0.2.0, e2e green (see docs/INTEGRATION-NOTES.md "v0.2 integration") |
+
 ## Amendments after the UX handbook review (2026-10-05)
 
 Source: `docs/UX-GUIDELINES-REVIEW.md` (handbook under `ux_guidelines/`).

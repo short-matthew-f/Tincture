@@ -4,7 +4,8 @@
  * Owns: rollNumber, press, squash, pourFill, ringBurst, confetti,
  * shimmerSweep, flyTo, pulse, dim, fade, and the v0.2 motion vocabulary
  * (docs/V02-CONTRACTS.md "fx.js motion vocabulary"): spring, lift, settle,
- * coinArc, stamp, pour and drag. Implements DESIGN.md "Interaction feel >
+ * touchFeel (delegated press/lift for tiles and buttons), coinArc, stamp, pour
+ * and drag. Implements DESIGN.md "Interaction feel >
  * Interaction spec" and "Motion rules": arrivals ease out, moves ease in and
  * out, overshoot never above 5% (except squash's specified 104%), nothing
  * longer than 1.5 s. Every effect checks `isReducedMotion()` and swaps its
@@ -156,9 +157,11 @@ export function pulse(elm, on = true) {
  * over the old color, then removes itself, leaving the final render beneath.
  * `{x, y}` are SVG user units (default: bottom center); `{clientX, clientY}`
  * are converted from a pointer event. Reduced motion fades the color in.
+ * `onFlooded()` runs the moment the flood covers the shape, BEFORE the overlay
+ * is removed: commit the new fill there and nothing flashes the old color.
  * @returns {Promise<void>} resolves when the flood is done (300 to 450 ms)
  */
-export function pourFill(svgEl, hex, { x, y, clientX, clientY, ms = 380, keep = false } = {}) {
+export function pourFill(svgEl, hex, { x, y, clientX, clientY, ms = 380, keep = false, onFlooded = null } = {}) {
   if (!svgEl || !svgEl.viewBox) return Promise.resolve();
   const vb = svgEl.viewBox.baseVal;
   const vbw = vb && vb.width ? vb.width : svgEl.clientWidth || 100;
@@ -189,7 +192,10 @@ export function pourFill(svgEl, hex, { x, y, clientX, clientY, ms = 380, keep = 
   if (layerEl && layerEl.parentNode) layerEl.parentNode.insertBefore(g, layerEl.nextSibling);
   else svgEl.appendChild(g);
 
-  const done = () => { if (!keep) g.remove(); };
+  const done = () => {
+    if (typeof onFlooded === 'function') { try { onFlooded(); } catch (e) { /* the caller's commit; never break the flood */ } }
+    if (!keep) g.remove();
+  };
   if (isReducedMotion()) {
     c.setAttribute('r', Math.hypot(vbw, vbh));
     return animate(g, [{ opacity: 0 }, { opacity: 1 }], { duration: FADE_MS, easing: 'ease-out' }).then(done);
@@ -464,10 +470,17 @@ function stopSpring(el) {
   if (a) { try { a.cancel(); } catch (e) { /* ignore */ } springs.delete(el); }
 }
 
-function track(el, a) {
+/**
+ * Remember `a` as `el`'s running spring so the next spring/settle can cancel it.
+ * A forwards-filled animation (`persist`, e.g. lift's 1.06 hold) keeps holding
+ * its last frame after it finishes, so it stays tracked until something
+ * replaces or cancels it: otherwise a lift held longer than the spring (~280 ms)
+ * would be untracked and settle() could not take the element back to rest.
+ */
+function track(el, a, persist = false) {
   if (!a) return Promise.resolve();
   springs.set(el, a);
-  return a.finished.then(() => { if (springs.get(el) === a) springs.delete(el); return a; }, () => a);
+  return a.finished.then(() => { if (!persist && springs.get(el) === a) springs.delete(el); return a; }, () => a);
 }
 
 /**
@@ -480,11 +493,12 @@ function track(el, a) {
 export function spring(el, { from = {}, to = {}, preset = 'firm', fill = 'none', delay = 0 } = {}) {
   if (!el || typeof el.animate !== 'function') return Promise.resolve();
   stopSpring(el);
+  const persist = fill === 'forwards' || fill === 'both';
   try {
     if (isReducedMotion()) {
       const op0 = from.opacity !== undefined ? from.opacity : 0.55;
       const op1 = to.opacity !== undefined ? to.opacity : 1;
-      return track(el, el.animate([{ ...to, opacity: op0 }, { ...to, opacity: op1 }], { duration: FADE_MS, easing: 'ease-out', fill }));
+      return track(el, el.animate([{ ...to, opacity: op0 }, { ...to, opacity: op1 }], { duration: FADE_MS, easing: 'ease-out', fill }), persist);
     }
     const curve = springCurve(preset);
     let frames;
@@ -496,7 +510,7 @@ export function spring(el, { from = {}, to = {}, preset = 'firm', fill = 'none',
       frames = [{ ...from }, { ...to }];
       easing = linearEasing(curve.values) || 'cubic-bezier(0.3, 1.12, 0.5, 1)';
     }
-    return track(el, el.animate(frames, { duration: curve.duration, easing, fill, delay }));
+    return track(el, el.animate(frames, { duration: curve.duration, easing, fill, delay }), persist);
   } catch (e) {
     return Promise.resolve();
   }
@@ -517,18 +531,22 @@ function linearEasing(values) {
 // Lift and settle (tiles, vials, any held thing)
 // ---------------------------------------------------------------------------
 
-/** Pick-up feel on pointerdown: scale 106% and a grown shadow (`.fx-lifted`). Stays until settle(). */
-export function lift(el) {
+/**
+ * Pick-up feel on pointerdown: scale 106% (or `scale`) and a grown shadow
+ * (`.fx-lifted`). The forwards-filled spring stays tracked however long the
+ * hold lasts, so settle() always takes it back to rest.
+ */
+export function lift(el, { scale = 1.06 } = {}) {
   if (!el) return Promise.resolve();
   if (el.classList) el.classList.add('fx-lifted');
   if (isReducedMotion()) return Promise.resolve();
-  return spring(el, { from: { transform: 'scale(1)' }, to: { transform: 'scale(1.06)' }, preset: 'firm', fill: 'forwards' });
+  return spring(el, { from: { transform: 'scale(1)' }, to: { transform: `scale(${scale})` }, preset: 'firm', fill: 'forwards' });
 }
 
 /** Put-down feel: from the lifted scale through a 3% overshoot (97%) back to rest, 200 ms. */
 export function settle(el) {
   if (!el) return Promise.resolve();
-  if (el.classList) el.classList.remove('fx-lifted');
+  if (el.classList) el.classList.remove('fx-lifted', 'is-held');
   let cur = 'scale(1.06)';
   try {
     const t = getComputedStyle(el).transform;
@@ -546,6 +564,115 @@ export function settle(el) {
   } catch (e) {
     return Promise.resolve();
   }
+}
+
+/** Put a lifted element back without settle's overshoot (a scroll took the finger). */
+function quietPut(el) {
+  if (!el) return;
+  if (el.classList) el.classList.remove('fx-lifted', 'is-held');
+  let cur = 'scale(1)';
+  try { const t = getComputedStyle(el).transform; if (t && t !== 'none') cur = t; } catch (e) { /* ignore */ }
+  stopSpring(el);
+  if (isReducedMotion() || cur === 'scale(1)') return;
+  spring(el, { from: { transform: cur }, to: { transform: 'matrix(1, 0, 0, 1, 0, 0)' }, preset: 'soft' });
+}
+
+/** A pressed button springs back past rest and settles (the CSS :active already collapsed it 2 px). */
+function springBack(el) {
+  if (isReducedMotion() || typeof el.animate !== 'function') return;
+  try {
+    el.animate([
+      { transform: 'translateY(2px)' },
+      { transform: 'translateY(-1.5px)', offset: 0.55, easing: 'ease-out' },
+      { transform: 'translateY(0)' },
+    ], { duration: 170, easing: 'ease-out' });
+  } catch (e) { /* ignore */ }
+}
+
+const TOUCH_HOLD_MS = 80;
+const TOUCH_SLOP_PX = 6;
+const touchBound = new WeakMap(); // root -> Set of "press|lift" keys already bound
+const inertEl = (el) => !el || el.disabled || el.hidden
+  || (el.getAttribute && el.getAttribute('aria-disabled') === 'true')
+  || (el.classList && el.classList.contains('ws-off'));
+
+/**
+ * touchFeel(root, {press, lift, holdMs=80}) -> dispose(). One delegated set of
+ * passive listeners on `root` (release and cancel also on document):
+ *  - `lift` elements (a selector) scale up while held (lift(); `data-lift="1.02"`
+ *    picks a gentler scale and the `.is-held` style for wide things) and
+ *    settle() on release. On touch the lift waits `holdMs` (80 ms) and gives up
+ *    if the finger moves more than 6 px first, so a scroll that starts on a
+ *    tile never bumps it; a quick tap lifts and settles at once. pointercancel
+ *    (a scroll taking over, the iOS edge swipe) puts a lifted thing down
+ *    quietly, without the overshoot. Mouse lifts at once.
+ *  - `press` elements (a selector) spring back past rest on release (the CSS
+ *    :active collapse does the press).
+ * Never lifts disabled / aria-disabled / hidden elements, never calls
+ * preventDefault, never captures the pointer: scrolling is untouched and the
+ * click fires on release as usual. Binding the same selectors to the same
+ * root twice is a no-op.
+ */
+export function touchFeel(root, { press = '', lift: liftSel = '', holdMs = TOUCH_HOLD_MS } = {}) {
+  if (!root || typeof root.addEventListener !== 'function' || typeof document === 'undefined') return () => {};
+  const key = `${press}|${liftSel}`;
+  let keys = touchBound.get(root);
+  if (!keys) { keys = new Set(); touchBound.set(root, keys); }
+  if (keys.has(key)) return () => {};
+  keys.add(key);
+
+  let held = null; // {el, kind, lifted, pid, x, y, timer}
+  const doLift = (el) => {
+    const k = Number(el.dataset && el.dataset.lift);
+    if (k) { if (el.classList) el.classList.add('is-held'); lift(el, { scale: k }); if (el.classList) el.classList.remove('fx-lifted'); } else lift(el);
+  };
+  const end = (cancelled) => {
+    if (!held) return;
+    const h = held;
+    held = null;
+    clearTimeout(h.timer);
+    if (h.kind === 'lift') {
+      if (cancelled) { if (h.lifted) quietPut(h.el); return; }
+      if (!h.lifted) doLift(h.el);         // a quick tap: lift, then settle straight away
+      settle(h.el);
+    } else if (!cancelled) springBack(h.el);
+  };
+  const down = (e) => {
+    if (held) end(false);
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    const t = e.target;
+    if (!t || !t.closest) return;
+    let el = liftSel ? t.closest(liftSel) : null;
+    if (el && root.contains(el) && !inertEl(el)) {
+      const h = { el, kind: 'lift', lifted: false, pid: e.pointerId, x: e.clientX, y: e.clientY, timer: 0 };
+      held = h;
+      if (e.pointerType === 'mouse' || holdMs <= 0) { h.lifted = true; doLift(el); } else {
+        h.timer = setTimeout(() => { if (held === h) { h.timer = 0; h.lifted = true; doLift(el); } }, holdMs);
+      }
+      return;
+    }
+    el = press ? t.closest(press) : null;
+    if (el && root.contains(el) && !inertEl(el)) held = { el, kind: 'press', lifted: false, pid: e.pointerId, x: e.clientX, y: e.clientY, timer: 0 };
+  };
+  const move = (e) => {
+    if (!held || held.kind !== 'lift' || held.lifted || e.pointerId !== held.pid) return;
+    if (Math.abs(e.clientX - held.x) > TOUCH_SLOP_PX || Math.abs(e.clientY - held.y) > TOUCH_SLOP_PX) end(true); // a scroll, not a press
+  };
+  const up = (e) => { if (held && (held.pid == null || e.pointerId === held.pid)) end(false); };
+  const cancel = (e) => { if (held && (held.pid == null || e.pointerId === held.pid)) end(true); };
+  const opt = { passive: true };
+  root.addEventListener('pointerdown', down, opt);
+  root.addEventListener('pointermove', move, opt);
+  document.addEventListener('pointerup', up, opt);
+  document.addEventListener('pointercancel', cancel, opt);
+  return () => {
+    root.removeEventListener('pointerdown', down, opt);
+    root.removeEventListener('pointermove', move, opt);
+    document.removeEventListener('pointerup', up, opt);
+    document.removeEventListener('pointercancel', cancel, opt);
+    keys.delete(key);
+    end(true);
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -688,9 +815,11 @@ export function stamp(el, text = '', { hold = 700, keep = false, hex = null } = 
 // ---------------------------------------------------------------------------
 
 /**
- * pour(svg, hex, from) -> Promise. pourFill's flood from `from` ({x, y} in SVG
- * units, {clientX, clientY}, or a pointer event), then the new surface wobbles
- * once (skew and a 1.5% squash, 260 ms) the way a poured layer settles.
+ * pour(svg, hex, from, opts) -> Promise. pourFill's flood from `from` ({x, y} in
+ * SVG units, {clientX, clientY}, or a pointer event), then the new surface
+ * wobbles once (skew and a 1.5% squash, 260 ms) the way a poured layer settles.
+ * `opts` go to pourFill (`ms`, `keep`, and `onFlooded()`, called when the flood
+ * covers the shape and before its overlay leaves: commit the new fill there).
  * Reduced motion: pourFill's fade, no wobble.
  */
 export function pour(svg, hex, from = {}, opts = {}) {
@@ -1184,7 +1313,7 @@ export const fx = {
   isReducedMotion, rollNumber, press, squash, pulse, pourFill, ringBurst,
   confetti, shimmerSweep, flyTo, dim, fade,
   // v0.2 motion vocabulary
-  spring, lift, settle, coinArc, stamp, pour, drag, measureGrid,
+  spring, lift, settle, touchFeel, coinArc, stamp, pour, drag, measureGrid,
   // pure helpers (also exported by name)
   SPRINGS, DRAG, springCurve, springAt, lerpKeyframe, nearestCell, applyHysteresis, cellsWithin,
   pickTarget, cellRect, boardFromRects, tiltFromVelocity,

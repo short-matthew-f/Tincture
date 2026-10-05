@@ -20,7 +20,11 @@
  * drops its 'room' phase beat (the scene's unlock ceremony is the beat) and
  * holds other beats until workshop.js emits 'unlocked'; 'unlocked' {id} then
  * starts that subgame's guide (guide id = the unlock id; hunters also 'map',
- * shipping also 'yard') when one is registered and not yet seen.
+ * shipping also 'yard' and 'packing') when one is registered and not yet seen.
+ * Purify is not an unlock (its guide starts on the first muddy batch).
+ *
+ * Commissions: a signature color's naming ceremony waits ~900 ms so the
+ * commission's "Done" stamp and confetti are seen first.
  *
  * ctx.guide(id, steps, opts) is guide.js's guide() bound to ctx, with
  * ctx.guide.whatsNext(opts), .howThisWorks(id), .howThisWorksHtml(id),
@@ -355,7 +359,25 @@ async function boot() {
 
   game.on('change', (state) => router.requestRender(state));
 
-  game.on('discover', (p) => celebrate('discover', p));
+  // A commission's signature color is discovered in the same act that finishes
+  // the commission (the sim emits 'discover' just before 'commissionDone'). The
+  // naming ceremony would cover the screen's "Done" stamp and confetti, so it
+  // waits COMMISSION_NAMING_DELAY_MS whenever the discovery came from a
+  // commission or a commissionDone fired within COMMISSION_WINDOW_MS before it.
+  const COMMISSION_NAMING_DELAY_MS = 900;
+  const COMMISSION_WINDOW_MS = 800;
+  let lastCommissionDoneAt = -Infinity;
+  let saveGen = 0; // bumps on import/reset so a delayed naming never lands on another save
+  const clockMs = () => (typeof performance !== 'undefined' ? performance.now() : 0);
+  game.on('discover', (p, meta) => {
+    const fromCommission = (p && p.method === 'commission') || clockMs() - lastCommissionDoneAt < COMMISSION_WINDOW_MS;
+    if (fromCommission && !quiet(meta)) {
+      const g = saveGen;
+      setTimeout(() => { if (g === saveGen) celebrate('discover', p); }, COMMISSION_NAMING_DELAY_MS);
+      return;
+    }
+    celebrate('discover', p);
+  });
 
   game.on('chain', (p, meta) => {
     if (quiet(meta)) return;
@@ -458,6 +480,7 @@ async function boot() {
   game.on('eventStep', (p, meta) => { if (!quiet(meta)) news('A new event reward is ready'); });
   game.on('commissionDone', (p, meta) => {
     if (quiet(meta)) return;
+    lastCommissionDoneAt = clockMs();
     // The Commissions screen runs its own "Commission complete!" ceremony; never a second one.
     if (router.isOpen('commissions')) return;
     const c = content.getCommission && content.getCommission(p.id);
@@ -483,6 +506,7 @@ async function boot() {
   game.on('import', (state) => {
     applySettings(state.settings, { audio, haptics });
     ceremonyQueue.length = 0;
+    saveGen++;
     unlockRooms.clear();
     clearTimeout(ceremonyHold);
     ceremonyHold = 0;

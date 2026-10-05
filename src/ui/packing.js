@@ -72,6 +72,14 @@ section[data-screen="packing"] .how-link::before { content: ''; position: absolu
 .pk-empty-actions { display: flex; flex-direction: column; gap: 8px; align-items: stretch; width: 100%; max-width: 260px; }
 .pk-empty-actions .btn.is-quiet { box-shadow: 0 3px 0 var(--shadow), inset 0 0 0 1.5px rgba(42,38,34,.2); }
 .pk-result .bonus { display: inline-flex; align-items: center; gap: 8px; }
+/* Short phones (375 x 667): three crates and the conveyor fit without scrolling, so a drag never has to scroll. */
+@media (max-height: 700px) {
+  .pk-conveyor { padding: 8px 14px; }
+  .pk-crates { gap: 8px; }
+  .pk-crate { padding: 7px 12px; gap: 5px; min-height: 0; }
+  .pk-slots { gap: 5px; }
+  .pk-slot, .pk-jar { height: 24px; }
+}
 `;
 
 let C = null;

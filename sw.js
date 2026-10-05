@@ -24,7 +24,7 @@
 //                                                     first online load
 //   any other cross-origin request, non-GET           ignored
 
-var CACHE_VERSION = '0.1.3';
+var CACHE_VERSION = '0.2.0';
 var CACHE_NAME = 'tincture-v' + CACHE_VERSION;
 var FONT_CACHE = 'tincture-fonts';
 
@@ -78,6 +78,7 @@ var SHELL = [
   'src/sim/hunters.js',
   'src/sim/index.js',
   'src/sim/ledger.js',
+  'src/sim/next.js',
   'src/sim/offline.js',
   'src/sim/orders.js',
   'src/sim/prestige.js',
@@ -86,15 +87,18 @@ var SHELL = [
   'src/sim/shelf.js',
   'src/sim/shipping.js',
   'src/sim/storage.js',
+  'src/sim/unlocks.js',
   'src/state.js',
   'src/ui/album.js',
   'src/ui/audio.js',
   'src/ui/bench.js',
   'src/ui/catalog.js',
   'src/ui/commissions.js',
+  'src/ui/feel.js',
   'src/ui/fx.js',
   'src/ui/gallery.js',
   'src/ui/grading.js',
+  'src/ui/guide.js',
   'src/ui/haptics.js',
   'src/ui/heritage.js',
   'src/ui/hunter.js',

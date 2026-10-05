@@ -1,7 +1,7 @@
 # Tincture
 
 Tincture is a cozy color-mixing idle game for phones. You inherit a dusty dye
-workshop at the edge of Harbor Town with three pigments and one mixer, and grow
+workshop at the edge of Harbor Town with three pigments and two mixers, and grow
 it into a color factory: sources feed grinders, grinders feed mixers, vats store
 the jars and the shop and the fleet sell them, while you are away too. Every
 color you make or find goes into a catalog of 100 Era 1 hues, and you name the
@@ -33,8 +33,8 @@ python3 -m http.server 8000      # from the repo root (or: npm run serve)
 ## Tests
 
 ```sh
-npm test       # node --test "test/**/*.test.js": unit tests + the balance suite (about 12 s)
-npm run e2e    # Playwright: shell smoke, the first-ten-minutes walk, the update flow
+npm test       # node --test "test/**/*.test.js": unit tests + the balance suite (about 17 s)
+npm run e2e    # Playwright: shell smoke, the first-ten-minutes walk, the update flow, the drag harness
 ```
 
 The e2e scripts are not dependencies of the game. They import `playwright`
@@ -46,7 +46,7 @@ walk go to `$E2E_SHOTS` (default: `<tmpdir>/tincture-e2e-shots`).
 ## Shipping a new version
 
 ```sh
-node tools/bump-version.js 0.1.1
+node tools/bump-version.js 0.2.1
 ```
 
 Run it whenever shipped files change. It rewrites `src/version.js`,
@@ -102,6 +102,29 @@ CLAUDE.md              working notes for coding agents
 
 ## Status
 
+- **0.2.0** (from the first playtest, docs/PLAN-v0.2.md):
+  - **Pacing and gating:** two mixers at the start and a third bought for 60
+    Coins right after the tutorial; every system is bought with Coins, colors
+    only reveal the price, which shows from the start (Merge Shelf 8 colors /
+    400, Hue Hunters 15 / 2,500, Gallery Wing 25 / 8,000, Commissions Phase 3
+    / 20,000, Loading Yard 50 / 40,000); each purchase plays a short ceremony
+    that hands off to that subgame's guide. Slower discovery, a shop reserve
+    ("keep 20 jars"), and a workshop home with one Next button and segments.
+  - **Merge Shelf as a match game:** 6 × 6 on one screen, five color chips,
+    lines of six of a hue family merge and sell at once (1.5×, a double line
+    ×2 more), drag with board-local hit testing, ghost above the finger and a
+    magnet.
+  - **Purifying:** one muddy batch every 2 to 3 minutes of production (backlog
+    10, offline at most 3), a corked (strict) solve, four free tiers, "Sell all
+    as is".
+  - **Onboarding per subgame:** a `guide()` coach on every subgame's first
+    open (at most 2 steps before her first action, a "How this works" replay
+    link), and a "what's next" card after a first success.
+  - **Gallery:** scrap an unsigned canvas, sell a signed piece to a collector.
+  - **Feel:** shared springs, lift/settle, touch lift, coin arcs, stamps and
+    pours (`src/ui/fx.js`) across every screen.
+  - Saves from 0.1.x migrate (save v3): anything already in use stays open, the
+    shelf moves to 6 × 6, and a one-time paper note says what changed.
 - **Era 1 is playable:** the factory, all four puzzles, the Mixing bench, the
   Merge Shelf, the Gallery, hunters and postcards, dailies, the weekly quest
   and event rotation, commissions, Renovate and the Heritage tree, the

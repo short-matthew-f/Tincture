@@ -25,7 +25,7 @@
  * unlockTag(ctx, id), openUnlockSheet(ctx, id, {host}), unlockCeremony(objectId) and
  * openRecipeSheet(ctx, {mixer, colorId, onDone, host}), and ensureStyles().
  * Theme F (feel): also exports the touch-feel helpers the six order/workshop screens share (bindTouchFeel,
- * squashOnce, flipLabel; PRESS_SEL), built here because they are not in fx.js yet.
+ * a thin wrapper over fx.touchFeel; squashOnce, flipLabel; PRESS_SEL).
  *
  * data-action names used here: settings, collect (the coin pill), next, segment, open-map,
  * open-album, open-shelf, open-bench, open-gallery, open-quests, open-ledger, open-commissions,
@@ -41,7 +41,7 @@
 import {
   h, raw, button, iconSvg, swatch, escapeHtml, lighten, safeHex, vatSvg, tag, lockTag,
 } from './kit.js';
-import defaultFx from './fx.js';
+import defaultFx, { touchFeel } from './fx.js';
 import defaultAudio from './audio.js';
 import defaultHaptics from './haptics.js';
 import { ROOMS } from '../content/rooms.js';
@@ -78,8 +78,8 @@ export function waitText(format, ms) {
 }
 
 // ---------------------------------------------------------------------------
-// Touch feel (built locally for the six screens in this group; these belong in
-// fx.js: bindTouchFeel, squashOnce, flipLabel). The action always fires on
+// Touch feel (bindTouchFeel wraps fx.touchFeel; squashOnce and flipLabel are
+// local to this screen group). The action always fires on
 // release at once (a plain click); everything here is cosmetic and passive, so
 // it never blocks scrolling and never waits for an animation.
 // ---------------------------------------------------------------------------
@@ -87,88 +87,16 @@ export function waitText(format, ms) {
 export const PRESS_SEL = '.btn, .btn-back, .ws-step, .ws-pill[data-collect="on"], .seg-control > button, .ws-panel-head, .ws-almost-row, .switch';
 
 const reduced = (fxo) => !!(fxo && fxo.isReducedMotion && fxo.isReducedMotion());
-const inert = (el) => !el || el.disabled || el.hidden || el.classList.contains('ws-off');
-
-/** Pick-up on pointerdown: scale up with a spring, a grown shadow. `data-lift="1.02"` picks a gentler scale for wide things. */
-function liftEl(fxo, el) {
-  const k = Number(el.dataset.lift);
-  if (!k) { fxo.lift(el); return; }
-  el.classList.add('is-held');
-  if (reduced(fxo)) return;
-  fxo.spring(el, { from: { transform: 'scale(1)' }, to: { transform: `scale(${k})` }, preset: 'firm', fill: 'forwards' });
-}
-
-/** Put-down on release or cancel: the shared settle (a 3% overshoot), then the held style goes. */
-function settleEl(fxo, el) {
-  el.classList.remove('is-held');
-  // fx.lift's forwards-filled spring stops being tracked once it has finished (a hold longer than ~280 ms), so
-  // fx.settle cannot cancel it and the element would stay scaled. Cancel what was running before settle starts;
-  // settle's own animation begins from the current computed transform, so nothing jumps.
-  const stale = typeof el.getAnimations === 'function' ? el.getAnimations().filter((a) => a.constructor === Animation) : [];
-  fxo.settle(el);
-  stale.forEach((a) => { try { a.cancel(); } catch (e) { /* ignore */ } });
-}
-
-/** A pressed button springs back past rest and settles (the CSS :active already collapsed it 2 px). */
-function springBack(fxo, el) {
-  if (reduced(fxo) || typeof el.animate !== 'function') return;
-  try {
-    el.animate([
-      { transform: 'translateY(2px)' },
-      { transform: 'translateY(-1.5px)', offset: 0.55, easing: 'ease-out' },
-      { transform: 'translateY(0)' },
-    ], { duration: 170, easing: 'ease-out' });
-  } catch (e) { /* ignore */ }
-}
-
-const boundRoots = new WeakSet();
-const LIFT_HOLD_MS = 80;
 
 /**
- * bindTouchFeel(root, fx, {press, lift}) -> one passive pointerdown listener on `root` (and release on
- * window). `lift` things scale up while held and settle on release; `press` things (default PRESS_SEL)
- * spring back after the CSS collapse. On touch a lift waits 80 ms (and gives up if the finger moves more than
- * 6 px or the browser takes the gesture for a scroll), so a scroll that starts on a card or a row never bumps
- * it; a quick tap lifts and settles at once. pointercancel (a scroll taking over, the iOS edge swipe) puts a
- * lifted thing down. Never calls preventDefault, never captures the pointer: scrolling is untouched.
+ * bindTouchFeel(root, fx, {press, lift}): a thin wrapper over fx.touchFeel (press defaults to PRESS_SEL).
+ * `lift` things scale up while held and settle on release (`data-lift="1.02"` picks a gentler scale and the
+ * `.is-held` style); `press` things spring back after the CSS collapse. See fx.touchFeel for the 80 ms hold,
+ * 6 px move-cancel and pointercancel rules.
  */
 export function bindTouchFeel(rootEl, fxo, { press = PRESS_SEL, lift = '' } = {}) {
-  if (!rootEl || boundRoots.has(rootEl) || typeof window === 'undefined') return;
-  boundRoots.add(rootEl);
-  let held = null; // {el, kind, lifted, pid, x, y, timer}
-  const end = (cancelled) => {
-    if (!held) return;
-    const h = held;
-    held = null;
-    clearTimeout(h.timer);
-    if (h.kind === 'lift') {
-      if (!h.lifted) { if (cancelled) return; liftEl(fxo, h.el); }
-      settleEl(fxo, h.el);
-    } else if (!cancelled) springBack(fxo, h.el);
-  };
-  rootEl.addEventListener('pointerdown', (e) => {
-    if (held) end(false);
-    if (e.pointerType === 'mouse' && e.button !== 0) return;
-    const t = e.target;
-    if (!t || !t.closest) return;
-    let el = lift ? t.closest(lift) : null;
-    if (el && rootEl.contains(el) && !inert(el)) {
-      const h = { el, kind: 'lift', lifted: false, pid: e.pointerId, x: e.clientX, y: e.clientY, timer: 0 };
-      held = h;
-      if (e.pointerType === 'mouse') { h.lifted = true; liftEl(fxo, el); } else {
-        h.timer = setTimeout(() => { if (held === h) { h.lifted = true; liftEl(fxo, el); } }, LIFT_HOLD_MS);
-      }
-      return;
-    }
-    el = press ? t.closest(press) : null;
-    if (el && rootEl.contains(el) && !inert(el)) held = { el, kind: 'press', lifted: false, pid: e.pointerId, x: e.clientX, y: e.clientY, timer: 0 };
-  }, { passive: true });
-  rootEl.addEventListener('pointermove', (e) => {
-    if (!held || held.kind !== 'lift' || held.lifted || e.pointerId !== held.pid) return;
-    if (Math.abs(e.clientX - held.x) > 6 || Math.abs(e.clientY - held.y) > 6) end(true); // a scroll, not a press
-  }, { passive: true });
-  window.addEventListener('pointerup', () => end(false), { passive: true });
-  window.addEventListener('pointercancel', () => end(true), { passive: true });
+  const tf = fxo && typeof fxo.touchFeel === 'function' ? fxo.touchFeel : touchFeel;
+  return tf(rootEl, { press, lift });
 }
 
 /** One squash per element per frame, and a new one replaces a running one: rapid taps never queue. */

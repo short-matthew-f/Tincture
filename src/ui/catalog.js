@@ -624,7 +624,28 @@ function startGuide() {
     { anchor: '[data-coach="catalog-missing"]', text: 'Faint cells are colors still to find', endsOn: 'got-it', side: 'above', when: () => !ui.sheet },
     { anchor: '[data-coach="catalog-pin"]', text: 'Pin one to chase it', endsOn: 'action', done: pinned, side: 'above', when: () => !!ui.sheet && !isFound(ui.sheet.id) && !pinned() },
   ], { screen: 'catalog' });
-  ui.startTimer = setTimeout(() => { if (ui.guide) ui.guide.start(); }, 300);
+  ui.startTimer = setTimeout(() => {
+    if (!ui.guide) return;
+    if (!state().onboarding?.seen?.catalog && !ui.sheet) bringCoachIntoView();
+    ui.guide.start();
+  }, 300);
+}
+
+/**
+ * On a short phone (375 x 667) with a few colors found, the first faint cell can sit below the fold (or under
+ * the tab bar), and the guide waits silently for an anchor that never shows. Before the first step, scroll it
+ * to the middle of the screen body so the bubble has room above it.
+ */
+function bringCoachIntoView() {
+  const el = root && root.querySelector('[data-coach="catalog-missing"]');
+  const body = el && el.closest('.screen-body');
+  if (!el || !body || typeof el.scrollIntoView !== 'function') return;
+  const r = el.getBoundingClientRect();
+  const c = body.getBoundingClientRect();
+  const bar = document.getElementById('tabbar');
+  const floor = Math.min(c.bottom, bar && !bar.hidden ? bar.getBoundingClientRect().top : Infinity);
+  if (r.top >= c.top + 120 && r.bottom <= floor - 8) return; // fully on screen, with room for the bubble above
+  try { el.scrollIntoView({ block: 'center', behavior: ctx.fx && ctx.fx.isReducedMotion && ctx.fx.isReducedMotion() ? 'auto' : 'smooth' }); } catch (e) { /* ignore */ }
 }
 
 function stopGuide() {

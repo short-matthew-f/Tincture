@@ -53,14 +53,30 @@ Final pass (early pace, toasts, small open items, review, update flow, README):
 - Update flow verified (`test/update-flow.e2e.mjs`, in `npm run e2e`): 0.1.0 says Up to date; after `bump-version.js 0.1.1` in a temp copy served on the same origin (with GitHub Pages' `max-age=600` headers) Settings shows Update ready + Restart, and Restart reloads on 0.1.1 with only the `tincture-v0.1.1` cache. No pwa.js / sw.js change was needed. `window.tincture.version` exposes `APP_VERSION`.
 - README.md at the repo root.
 
+## v0.2 integration (0.2.0)
+
+- fx.js: a forwards-filled spring (lift's 1.06 hold) stays tracked after it finishes, so `settle()` always cancels it (before, a lift held longer than ~280 ms left the element stuck at 1.06). `fx.touchFeel(root, {press, lift, holdMs})` is the one delegated press/lift helper (80 ms touch hold, 6 px move-cancel, pointercancel puts the thing down quietly, `data-lift="1.02"` for wide things); `feel.js wireLift` and `workshop.js bindTouchFeel` are thin wrappers over it. `fx.pourFill` / `fx.pour` take `onFlooded()` (runs when the flood covers the shape, before the overlay leaves).
+- haptics.js: inside the 80 ms window a stronger haptic (soft < light/ripple < medium < heavy/success) overrides the running weaker one; same or weaker is dropped (`test/haptics.test.js`). The app's light tick on pointerdown no longer swallows an action's medium.
+- app.js: a commission's signature color waits ~900 ms before its naming ceremony, so the "Done" stamp and confetti are seen. Gallery Wing / Loading Yard purchases: the sim emits unlock → room → phase; the room beat is dropped and the phase beat waits for 'unlocked' (after the scene ceremony), so no beat covers the ceremony. The 'unlocked' guide hook covers shelf, hunters/map, gallery, shipping/yard/packing, commissions; Purify is not an unlock (its guide starts on the first muddy batch).
+- Catalog guide at 375 x 667: the first faint cell can sit under the tab bar with a few colors found; the guide now scrolls it to the middle of the screen before its first step (verified with 9 colors at 375 x 667 and 390 x 844).
+- DESIGN.md: Merge Shelf (6 x 6, five chips, lines of six, no row labels), Purifying (spawn clock, tiers, strict solve) and four new "Implementation deviations" rows (coin gates, 1.5 s line sequence, two starting mixers + bought third, muddy grace period).
+- Packing at 375 x 667: the third crate sat below the fold, so a drag to it needed a scroll. A short-phone media query (max-height 700 px) tightens the conveyor and crates (slots 24 px) so all three fit with no scroll (packing.js, CSS only).
+- Version 0.2.0 (`bump-version.js`: 92 files in SHELL, including src/ui/feel.js, guide.js, sim/next.js, sim/unlocks.js). `npm test` 294 green (~16–18 s); `npm run e2e` (shell, first-ten-minutes incl. both offline checks, update-flow, drag) green. Screenshot walk of every screen at 390 x 844 and 375 x 667 with a mid-game state (52 colors, every unlock open).
+- From the v0.2 worker notes, already resolved before integration: save v3 converts 35 → 36 shelf cells; `factory.buyMixer` and the Next 'mixer' kind agree; Next's cheapest-upgrade fallback is Phase 1 only (TUNING.md change 9); balance (gallery share back to 10–20%, Casual Phase 2 on day 0.5: TUNING.md changes 8 and 11); stale color-count copy now reads `sim.unlocks.status`; guides for shelf, purify and packing register in mount so the unlock hook finds them.
+
 ## Open
 
+- **Album guide:** not written (deferred from the guides step); the album opens cold.
+- **Debug panel:** the local-only counters (`stats.lines`, `lineSkips`, `wrongDrops`, `rejectedDrags`, `coachDismissed`) are recorded but not shown in Settings yet, so the "shorten the hold if she skips more than half" check has to read the save.
+- **Renovate sheet** lists what resets in general terms; it does not yet name which unlocks will close (PLAN Theme A). The batch re-buy after it works.
+- **paint.js** still floods with `pourFill(keep: true)` and removes the overlay itself; it can move to `fx.pour(..., {onFlooded})` now.
+- `squashOnce` / `flipLabel` (workshop.js) and `springIn` / `dust` (feel.js) are still screen-side helpers; candidates for fx.js.
+- Later items from the plan: hold-to-repeat on Level up from level 10, separate effects / ambience volume, undo the last shelf move.
+- Haptics are silent on iPhones (no `navigator.vibrate` in iOS Safari); sound and motion carry every meaning, by design.
+- e2e coverage past the first session: Gallery, hunters, commissions, packing and purify are only opened by `first-ten-minutes.e2e.mjs`; a Phase 2+ walk should drive them.
 - The first grading board in onboarding uses the running event's palette and frame (Autumn Harvest leaf); a plain board in her own colors may read better as the very first one.
-- Gallery, hunters, commissions, packing and purify are beyond the first ten minutes: the e2e only opens their screens empty. A second walk (Phase 2+) should drive them.
-- The All caught up stamp needs every pending thing handled (quests, event steps, accidents, muddy batches, collector); after 3 days away that means selling or purifying every muddy batch. Consider letting "Sell as is" batch-sell from the Ledger line.
-- Early pace: 8 upgrades in the walk's first session, against DESIGN's "about 10". The shop's reserve (24 jars, ~10 minutes of one mixer) means no idle income in the first session; orders and boards (paid in minutes of r_idle once a mixer runs) carry it. Levers if playtests want more: a smaller Phase 1 reserve or a cheaper second mixer (TUNING.md "Open").
-- The flow meter's first suggestion after a recipe is the shop (46) and then the mixer (288): neither is affordable in the first minutes, so the coach mark at step 3 points at a button that says "Needs …" while cheap source upgrades sit in the panels. Consider letting the suggestion fall back to the cheapest affordable upgrade in Phase 1.
-- Old saves: `lastHaul.seen` is missing on hauls from before this pass, so the map tab shows a dot once until she opens the map.
-- Toast offset is a fixed `--head-h` (66 px). Every overlay head measures 62 px; the Workshop's taller HUD (title row, meters, suggestion) is partly under a toast, but its gear and title are not.
-- Per-screen injected `<style>` tags were left as they are (consolidating them into style.css is not trivial: 20+ screens, each scoped by its own prefix).
-- Shipped files changed in this pass but the version stays 0.1.0 (as instructed; `bump-version.js 0.1.0` refreshed the SHELL list). Bump to 0.1.1 before deploying over an installed 0.1.0, or installed players will not be offered the update.
+- Toast offset is a fixed `--head-h` (66 px); the Workshop's taller HUD is partly under a toast, but its gear and title are not.
+- Per-screen injected `<style>` tags were left as they are (20+ screens, each scoped by its own prefix).
+- Purify header at 390: "How this works" wraps to two lines between the title and Undo; cosmetic.
+- The one-time shelf migration toast ("The shelf is now 6 by 6 ...") sits over the color chips at 375 x 667 for its 6.5 s (tap dismisses it).
+- `npm test` takes about 18 s, close to the 20 s budget; the balance suite is most of it.
