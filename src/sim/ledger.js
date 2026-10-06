@@ -20,6 +20,7 @@ import { allColors, familyOfColor, colorInfo } from './hunters.js';
 import { questsReady } from './quests.js';
 import { statusAll, rebuyQuote } from './unlocks.js';
 import { claimableSteps } from './events.js';
+import { stepAccepts, stepRoom, eligibleStock } from './commissions.js';
 
 const fin = (x, d = 0) => (Number.isFinite(x) ? x : d);
 export const CONTAINER_NAMES = Object.freeze(['Vial', 'Jar', 'Bottle', 'Urn', 'Cask']);
@@ -204,7 +205,10 @@ export function almostThere(state, now = state.lastTick ?? 0) {
     items.push({ icon: 'hunter', text: `${h.name} is on the way home${region ? ` from the ${region.name}` : ''}`, screen: 'map', params: { hunterId: h.id }, score: left });
   }
 
-  // A commission step nearly done.
+  // A commission step nearly done. The line says what is really missing (a
+  // step with a `distinct` rule can be 7 jars short yet need 7 more *colors*),
+  // and `blocked` marks a step she cannot feed from stock or the shelf right
+  // now, so the workshop's Next button passes over it (src/sim/next.js).
   for (const rec of (state.commissions && state.commissions.open) || []) {
     const def = getCommission(rec.id);
     if (!def) continue;
@@ -214,8 +218,23 @@ export function almostThere(state, now = state.lastTick ?? 0) {
       const delivered = fin(p.delivered);
       if (delivered <= 0) return;
       const need = Math.max(0, s.jars - delivered);
-      const what = s.tier ? `${containerName(s.tier)}` : `${plural(Math.ceil(need), 'jar')}`;
-      items.push({ icon: 'commission', text: `${what} more for ${def.name}`, screen: 'orders', params: { commissionId: rec.id, stepIndex: i }, score: need / Math.max(1, s.jars) });
+      const distinctDone = Object.keys(p.colors || {}).filter((k) => p.colors[k] > 0).length;
+      const moreColors = Math.max(0, (s.distinct ?? 1) - distinctDone);
+      let what;
+      let blocked;
+      if (s.tier) {
+        const cn = containerName(s.tier);
+        what = `${/^[aeiou]/i.test(cn) ? 'An' : 'A'} ${cn} more`;
+        blocked = !((state.shelf && state.shelf.cells) || []).some((c) => c && (c.tier ?? 1) >= s.tier && stepAccepts(s, c.color));
+      } else if (moreColors > 0) {
+        what = `${moreColors} more different ${moreColors === 1 ? 'color' : 'colors'}`;
+        blocked = !eligibleStock(state, rec.id, i).some((id) => !(p.colors && p.colors[id] > 0) && stepRoom(s, p, id) > 0);
+      } else {
+        what = `${plural(Math.ceil(need), 'jar')} more`;
+        blocked = !eligibleStock(state, rec.id, i).some((id) => stepRoom(s, p, id) > 0);
+      }
+      const score = need / Math.max(1, s.jars) + (blocked ? 1 : 0);
+      items.push({ icon: 'commission', text: `${what} for ${def.name}`, screen: 'commissions', params: { commissionId: rec.id, stepIndex: i }, score, blocked });
     });
   }
 

@@ -48,6 +48,7 @@ const CSS = `
 .or-actions.one { grid-template-columns: 1fr; }
 .or-actions .btn { padding: 0 10px; }
 .or-lock { display: flex; align-items: center; justify-content: center; min-height: var(--tap); }
+.or-card .linkish { min-height: var(--tap); padding: 6px 12px; border: 0; background: none; font: inherit; font-size: 13px; font-weight: 600; color: var(--ink-soft); text-decoration: underline; text-underline-offset: 3px; }
 .or-empty { text-align: center; padding: 22px 16px; align-items: center; }
 .or-card.is-tap:active, .or-main.is-tap:active { transform: none; box-shadow: var(--cut); }
 .or-card.is-held { box-shadow: 0 6px 0 var(--shadow); }
@@ -176,8 +177,25 @@ function containerCard(o, coach) {
 </div>
 ${cell
     ? h`<div class="or-done">${iconSvg('check', { size: 16 })}You have one on the shelf</div>${button('Deliver it', { variant: 'primary', block: true, attrs: { 'data-action': 'deliver-container', 'data-order': o.id, 'data-cell': cellIdx } })}`
-    : h`<div class="row between wrap"><span class="oq-req">${iconSvg('pin', { size: 12 })}Merge ${article(tierName)} ${tierName} of ${colorName}</span>${button('Open the shelf', { cls: 'oq-btn', attrs: { 'data-action': 'go-shelf' } })}</div>`}
+    : containerHelp(o, want, tierName, colorName)}
 </div>`;
+}
+
+/**
+ * What to do when the container is not on the shelf yet: add the color to the
+ * shelf's chips if its vials are not arriving, else merge; and a quiet way to
+ * pass the order on to another shop (orders never expire on their own).
+ */
+function containerHelp(o, want, tierName, colorName) {
+  const { ctx } = S;
+  const state = stateOf();
+  const chips = ctx.sim.shelf.shelfColors(state);
+  const onShelf = chips.includes(want.color);
+  const lower = CONTAINER_NAMES[want.tier - 1] ? CONTAINER_NAMES[want.tier - 1].toLowerCase() : 'vial';
+  const how = onShelf
+    ? h`<div class="row between wrap"><span class="oq-req">${iconSvg('pin', { size: 12 })}Merge two ${colorName} ${lower}s into ${article(tierName)} ${tierName}</span>${button('Open the shelf', { cls: 'oq-btn', attrs: { 'data-action': 'go-shelf' } })}</div>`
+    : h`<div class="row between wrap"><span class="oq-req">${iconSvg('pin', { size: 12 })}${colorName} vials are not coming to the shelf yet</span>${button(h`Add ${colorName} to the shelf`, { cls: 'oq-btn', attrs: { 'data-action': 'shelf-color', 'data-order': o.id, 'data-color': want.color } })}</div>`;
+  return h`${how}<div class="or-lock small"><button type="button" class="linkish" data-tap data-action="pass-order" data-order="${o.id}">Pass this one on to another shop</button></div>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -288,6 +306,29 @@ function offerAny(orderId, fromEl) {
   if (S.body) S.body.scrollTop = 0;
 }
 
+/** Put a color on the shelf's chips (replacing the last one when all five are taken) and go there. */
+function addShelfColor(colorId) {
+  const { ctx } = S;
+  const state = stateOf();
+  const colors = [...ctx.sim.shelf.shelfColors(state)].filter((id) => id !== colorId);
+  const max = ctx.sim.shelf.MAX_COLORS ?? 5;
+  if (colors.length >= max) colors.length = max - 1;
+  colors.push(colorId);
+  const res = ctx.game.act(ctx.sim.shelf.setShelfColors, { colors });
+  if (res && res.ok) ctx.toast(`New ${ctx.sim.displayName(state, colorId)} vials will come to the shelf`, { hex: ctx.sim.colorDef(colorId)?.hex });
+  ctx.navigate('shelf');
+}
+
+/** Pass a container order on: it leaves the board and a fresh order takes its place. */
+function passOrder(orderId) {
+  const { ctx } = S;
+  const order = (stateOf().orders?.open ?? []).find((o) => o.id === orderId);
+  if (!order) return;
+  const res = ctx.game.act(ctx.sim.orders.passOrder, { orderId });
+  if (res && res.ok) ctx.toast(`${customerName(ctx, order)} will try another shop. A new order is up.`);
+  paint(true);
+}
+
 function deliverContainer(orderId, cell, fromEl) {
   const { ctx } = S;
   const order = (stateOf().orders?.open ?? []).find((o) => o.id === orderId);
@@ -353,6 +394,8 @@ export default {
         case 'offer-any': offerAny(order, t.closest('.card') || t); break;
         case 'deliver-container': deliverContainer(order, t.getAttribute('data-cell'), t.closest('.card') || t); break;
         case 'go-shelf': ctx.navigate('shelf'); break;
+        case 'shelf-color': addShelfColor(t.getAttribute('data-color')); break;
+        case 'pass-order': passOrder(order); break;
         case 'commissions': ctx.navigate('commissions'); break;
         case 'bench': ctx.navigate('bench'); break;
         default: break;

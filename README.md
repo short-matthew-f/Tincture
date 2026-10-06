@@ -102,6 +102,13 @@ CLAUDE.md              working notes for coding agents
 
 ## Status
 
+- **0.2.1** (second playtest): container orders ("a Jar of …") only ask for
+  the shelf's own chip colors, at most one waits on the board at a time (older
+  boards are trimmed to one), the card offers "Add <color> to the shelf" or the
+  merge to make, and a container order can be passed on to another shop. The
+  ledger's commission line says what a step really needs ("7 more different
+  colors for Festival Banners") and the workshop's Next button skips a
+  commission step she has nothing in stock for.
 - **0.2.0** (from the first playtest, docs/PLAN-v0.2.md):
   - **Pacing and gating:** two mixers at the start and a third bought for 60
     Coins right after the tutorial; every system is bought with Coins, colors

@@ -131,8 +131,9 @@ export function next(state, now = num(state?.lastTick)) {
     if (best) return pick('upgrade', best.label, upgradeAction(best), best.cost, true, 'cheapest');
   }
 
-  // 7. The nearest Almost-there item.
-  const near = almostThere(state, now)[0];
+  // 7. The nearest Almost-there item she can act on now (a commission step
+  //    with nothing eligible in stock is `blocked` and stays in the ledger only).
+  const near = almostThere(state, now).find((i) => i && !i.blocked);
   if (near) return pick('navigate', near.text, { screen: near.screen, params: near.params ?? {} }, undefined, true, 'almost');
 
   // 8. Collect.

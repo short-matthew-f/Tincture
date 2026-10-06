@@ -5,4 +5,4 @@
  * version.json and the CACHE_VERSION + SHELL list in sw.js. Lives here (not in
  * app.js) so pwa.js, settings.js and app.js can all import it.
  */
-export const APP_VERSION = '0.2.0';
+export const APP_VERSION = '0.2.1';

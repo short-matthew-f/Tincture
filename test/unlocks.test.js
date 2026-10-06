@@ -395,3 +395,33 @@ test('Almost there suggests an unlock that is ready to open', () => {
   const t = withColors(7);
   assert.ok(sim.almostThere(t, NOW).some((i) => i.icon === 'unlock' && /One more color and the Merge Shelf/.test(i.text)));
 });
+
+test('Almost there is honest about a commission\'s distinct-colors rule and Next skips what she cannot feed', () => {
+  const s = withColors(32);
+  s.phase = 3;
+  s.unlocks.commissions = true;
+  const warm = (id) => sim.commissions.stepAccepts({ families: ['red', 'orange', 'yellow', 'pink'] }, id);
+  const third = Object.keys(s.catalog.discovered).find((id) => !['madder', 'ochre'].includes(id) && warm(id));
+  assert.ok(third, 'a third discovered warm color');
+  // 193 of 200 jars in, three colors so far: the seven left must each be a new color.
+  s.commissions = { open: [{ id: 'festival-banners', acceptedAt: NOW, steps: [{ delivered: 193, colors: { madder: 100, ochre: 92, [third]: 1 }, done: false }] }], done: [] };
+  s.stock = {}; // nothing to deliver
+  const items = sim.almostThere(s, NOW);
+  const it = items.find((i) => i.icon === 'commission');
+  assert.ok(it, JSON.stringify(items));
+  assert.equal(it.text, '7 more different colors for Festival Banners');
+  assert.equal(it.blocked, true);
+  assert.equal(it.screen, 'commissions');
+  const n = sim.next(s, NOW);
+  assert.ok(!(n.why === 'almost' && /Festival/.test(n.label)), n.label);
+  // A third red/orange/yellow/pink color in stock makes it feedable again.
+  const fresh = Object.keys(s.catalog.discovered).find((id) => !['madder', 'ochre', third].includes(id) && warm(id));
+  assert.ok(fresh, 'a discovered warm color');
+  sim.addStock(s, fresh, 2);
+  const again = sim.almostThere(s, NOW).find((i) => i.icon === 'commission');
+  assert.equal(again.blocked, false);
+  // More of a color already delivered does not help: the step wants different colors.
+  s.stock = {};
+  sim.addStock(s, 'madder', 20);
+  assert.equal(sim.almostThere(s, NOW).find((i) => i.icon === 'commission').blocked, true);
+});

@@ -25,7 +25,7 @@ import {
 } from './economy.js';
 import { takeStock } from './storage.js';
 import { availablePigments, tryDiscover, discoveredColors } from './discovery.js';
-import { addVial, unlocked as shelfUnlocked, takeContainer, tierValue } from './shelf.js';
+import { addVial, unlocked as shelfUnlocked, takeContainer, tierValue, shelfColors } from './shelf.js';
 
 export const MIN_OPEN = 3;
 export const MAX_OPEN = 6;
@@ -38,6 +38,8 @@ export const ANY_CHANCE = 0.1;
 export const ANY_MULT = 1.3;
 export const ANY_TIER_BONUS = Object.freeze({ primary: 1, secondary: 1.1, tertiary: 1.2, earth: 1.2, tint: 1.35, shade: 1.35, wild: 1.6 });
 export const CONTAINER_CHANCE = 1 / 8;
+/** At most this many container orders wait on the board at once (they need a merge, not a mix). */
+export const MAX_CONTAINER_OPEN = 1;
 export const HAND_DELIVER_BONUS = 1.5;
 export const PAY_MINUTES = Object.freeze({ min: 2, max: 4 });
 export const PAY_FLOOR = 0.25;
@@ -86,7 +88,13 @@ function boardContext(state) {
   for (const h of avoidHexes) { const f = hueFamily(h); perFamily[f] = (perFamily[f] ?? 0) + 1; }
   const avoidFamilies = Object.keys(perFamily).filter((f) => perFamily[f] >= MAX_PER_FAMILY);
   const customers = new Set(open.map((o) => o && o.customer).filter(Boolean));
-  return { avoidHexes, avoidFamilies, customers };
+  const containers = open.filter((o) => o && o.kind === 'container').length;
+  return { avoidHexes, avoidFamilies, customers, containers };
+}
+
+/** Colors a container order may ask for: the shelf's chips, because those are the vials that actually arrive. */
+export function containerOrderColors(state) {
+  return shelfUnlocked(state) ? shelfColors(state) : [];
 }
 
 /** generateOrder(state, rng, now) -> Order (not yet posted), chosen to sit well beside the open board. */
@@ -99,10 +107,11 @@ export function generateOrder(state, rng = stateRng(state), now = 0) {
   const base = { id: 'o-' + uuid(rng), postedAt: now, customer, minutes, pay: orderBasePay(state, minutes), container: null };
   const roll = rng();
   if (roll < ANY_CHANCE) return { ...base, kind: 'any', target: null, recipe: null };
-  if ((state.phase ?? 1) >= 2 && shelfUnlocked(state) && rng() < CONTAINER_CHANCE) {
-    const colors = discoveredColors(state);
-    const assigned = (state.stations?.mixers ?? []).map((m) => m.recipe).filter(Boolean);
-    const color = pick(rng, assigned.length ? assigned : colors.map((c) => c.id));
+  // A container order asks for one of the shelf's own chip colors (the vials she
+  // actually receives), and only one waits at a time: a board of jars nobody can
+  // merge would block her for a day.
+  if ((state.phase ?? 1) >= 2 && ctx.containers < MAX_CONTAINER_OPEN && rng() < CONTAINER_CHANCE) {
+    const color = pick(rng, containerOrderColors(state));
     if (color) {
       const tier = 2 + Math.floor(rng() * 2);
       return { ...base, kind: 'container', target: colorDef(color)?.hex ?? null, recipe: null, container: { color, tier } };
@@ -128,6 +137,14 @@ export function refreshOrders(state, now = 0) {
   const b = board(state);
   const rng = stateRng(state);
   let added = 0;
+  // Keep at most MAX_CONTAINER_OPEN container orders (older saves could pile up
+  // three): the extras are passed on and replaced with fresh orders.
+  let containers = 0;
+  for (let i = 0; i < b.open.length; i++) {
+    const o = b.open[i];
+    if (!o || o.kind !== 'container') continue;
+    if (++containers > MAX_CONTAINER_OPEN) { b.open.splice(i, 1); i--; }
+  }
   while (b.open.length < MIN_OPEN) { b.open.push(generateOrder(state, rng, now)); added++; }
   if (!(num(b.nextRefreshAt) > 0)) b.nextRefreshAt = now + REFRESH_MS;
   while (b.nextRefreshAt <= now && b.open.length < MAX_OPEN) {
@@ -138,6 +155,24 @@ export function refreshOrders(state, now = 0) {
   if (b.nextRefreshAt <= now) b.nextRefreshAt = now + REFRESH_MS;
   if (added) emit(state, 'orders', { added });
   return { added };
+}
+
+/**
+ * passOrder(state, {orderId}, now) -> {ok, reason?}. Lets a container order go
+ * to another shop: it leaves the board and a fresh order takes its place. Only
+ * container orders can be passed on (match orders never fail, and an
+ * "anything you love" order takes any discovered color).
+ */
+export function passOrder(state, args = {}, now = 0) {
+  const b = board(state);
+  const idx = b.open.findIndex((o) => o && o.id === args.orderId);
+  if (idx < 0) return { ok: false, reason: 'order' };
+  if (b.open[idx].kind !== 'container') return { ok: false, reason: 'kind' };
+  b.open.splice(idx, 1);
+  b.passed = num(b.passed) + 1;
+  refreshOrders(state, now);
+  emit(state, 'orderPassed', { orderId: args.orderId });
+  return { ok: true };
 }
 
 function nearestDiscovered(state, hex) {

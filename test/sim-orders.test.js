@@ -105,3 +105,38 @@ test('orders: the onboarding tutorial order pays one cheapest upgrade on top', a
   assert.ok(Math.abs(r.coins - (base * 1.5 + bonus)) < 1e-9);
   assert.ok(s.coins - STARTING_COINS >= cheapestUpgrade(s).cost, 'the first order alone pays for an upgrade');
 });
+
+test('orders: only one container order waits at a time, in a shelf chip color, and it can be passed on', async () => {
+  const { passOrder, MAX_CONTAINER_OPEN, containerOrderColors } = await import('../src/sim/orders.js');
+  const { setShelfColors } = await import('../src/sim/shelf.js');
+  const s = createInitialState(NOW, 31);
+  s.phase = 2;
+  s.unlocks.shelf = true;
+  setShelfColors(s, { colors: ['madder', 'woad'] });
+  assert.deepEqual(containerOrderColors(s), ['madder', 'woad']);
+  // An older save could have piled up three: the board keeps one and refills the rest.
+  for (let i = 0; i < 3; i++) {
+    s.orders.open.push({ id: 'o-c' + i, kind: 'container', target: '#000000', recipe: null, pay: 0, minutes: 3, container: { color: 'ochre', tier: 2 }, postedAt: NOW, customer: 'C' + i });
+  }
+  refreshOrders(s, NOW);
+  assert.equal(s.orders.open.filter((o) => o.kind === 'container').length, MAX_CONTAINER_OPEN);
+  assert.equal(s.orders.open[0].id, 'o-c0', 'the oldest container order stays');
+  assert.ok(s.orders.open.length >= MIN_OPEN);
+  // Over many refreshes new container orders only ask for chip colors and never stack up.
+  for (let k = 0; k < 400; k++) {
+    s.orders.open = s.orders.open.filter((o) => o.kind === 'container');
+    refreshOrders(s, NOW + k * REFRESH_MS);
+    const cs = s.orders.open.filter((o) => o.kind === 'container');
+    assert.ok(cs.length <= MAX_CONTAINER_OPEN, 'never more than one');
+    for (const c of cs) if (c.id !== 'o-c0') assert.ok(['madder', 'woad'].includes(c.container.color), c.container.color);
+  }
+  // Passing the stuck one on replaces it with a fresh order.
+  const before = s.orders.open.length;
+  assert.equal(passOrder(s, { orderId: 'nope' }, NOW).ok, false);
+  const m = s.orders.open.find((o) => o.kind === 'match');
+  if (m) assert.equal(passOrder(s, { orderId: m.id }, NOW).ok, false, 'only container orders can be passed on');
+  assert.equal(passOrder(s, { orderId: 'o-c0' }, NOW).ok, true);
+  assert.ok(!s.orders.open.some((o) => o.id === 'o-c0'));
+  assert.ok(s.orders.open.length >= Math.min(before, MIN_OPEN));
+  assert.equal(s.orders.passed, 1);
+});
