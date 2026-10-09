@@ -3,8 +3,8 @@
 // Theme B and docs/V02-CONTRACTS.md "Line rule": a fixed 6×6 grid (no
 // expansion) where two containers of the same color and size merge into the
 // next size up (Vial 1×, Jar 2.5×, Bottle 6×, Urn 15×, Cask 40× + Essence).
-// Merging never changes a color. Vials spill over from production (one per 10
-// minutes, worth ~15 s of that color's output) in one of the ≤ 5 colors she
+// Merging never changes a color. Vials spill over from production (one per 3
+// minutes, worth ~5 s of that color's output) in one of the ≤ 5 colors she
 // picked (`shelf.colors`), pausing while fewer than 6 cells are empty so a line
 // can always be built. Golden vials (1 in 40) appear once she has made her
 // first Bottle.
@@ -23,7 +23,8 @@
 import { emit } from './bus.js';
 import { questEvent } from './quests.js';
 import { stateRng } from '../rng.js';
-import { colorPrice, colorFamily, incomeMultiplier, rates, discoveredCount, ESSENCE_MAX } from './economy.js';
+import { deltaEHex } from '../color.js';
+import { colorPrice, colorDef, colorFamily, incomeMultiplier, rates, discoveredCount, ESSENCE_MAX } from './economy.js';
 import { STATION_KINDS } from '../content/stations.js';
 
 export const TIERS = Object.freeze([
@@ -55,8 +56,10 @@ export const UNLOCK_COLORS = 8;
 export const WAITING_FROM_COLORS = 6;
 /** ...up to this many (they become real vials when the shelf is bought). */
 export const WAITING_MAX = 12;
-export const SPILLOVER_MS = 10 * 60e3;
-export const SPILLOVER_SECONDS = 15;
+export const SPILLOVER_MS = 3 * 60e3; // was 10 min; playtest 3: "filling too slowly"
+export const SPILLOVER_SECONDS = 5; // 15 s at one vial per 10 min; 5 s at one per 3 min keeps shelf income per hour the same
+/** Before the shelf is bought, vials pile behind the glass at the old, slower pace (a teaser, capped at WAITING_MAX). */
+export const WAITING_MS = 10 * 60e3;
 export const GOLDEN_CHANCE = 1 / 40;
 /** Golden vials only spill over once a container of this tier has been made (stats.firstBottleAt). */
 export const GOLDEN_FROM_TIER = 3;
@@ -195,6 +198,31 @@ export function shelfColors(state) {
 }
 
 /**
+ * chipFor(state, colorId) -> colorId|null. Bonus vials (a Perfect order, an
+ * event, a hunter's haul) land in one of her chip colors so the shelf only
+ * ever holds what the chips show: the color itself if it is a chip, else the
+ * chip of the same hue family, else the nearest chip.
+ */
+export function chipFor(state, colorId) {
+  const chips = shelfColors(state);
+  if (!chips.length) return null;
+  if (chips.includes(colorId)) return colorId;
+  const fam = colorFamily(colorId);
+  const same = chips.find((id) => colorFamily(id) === fam);
+  if (same) return same;
+  const hex = colorDef(colorId)?.hex;
+  if (!hex) return chips[0];
+  let best = chips[0];
+  let bestD = Infinity;
+  for (const id of chips) {
+    const h = colorDef(id)?.hex;
+    const d = h ? deltaEHex(hex, h) : Infinity;
+    if (d < bestD) { bestD = d; best = id; }
+  }
+  return best;
+}
+
+/**
  * setShelfColors(state, {colors}) -> {ok, colors}. Keeps up to five distinct
  * discovered ids, in order; containers already on the shelf stay. An empty
  * list means "use the defaults".
@@ -219,7 +247,7 @@ export function spilloverPaused(state) {
 }
 
 /**
- * tickSpillover(state, now) -> {added, waiting}. One vial per 10 minutes of
+ * tickSpillover(state, now) -> {added, waiting}. One vial per 3 minutes of
  * production in one of shelfColors(state) (her chips, else the defaults);
  * accumulates while away; rests while fewer than MIN_EMPTY cells are empty
  * (nothing lost from the factory). Before the shelf is bought (from
@@ -236,13 +264,13 @@ export function tickSpillover(state, now = 0) {
   const active = Object.entries(r.byColor).filter(([, j]) => j > 0);
   if (!active.length) {
     // Nothing is producing: pause the timer, keeping the time left, so it
-    // neither resets to a fresh 10 minutes every tick nor fires while idle.
+    // neither resets to a fresh timer every tick nor fires while idle.
     if (s.nextSpilloverAt > 0) s.pausedRemainingMs = Math.max(0, s.nextSpilloverAt - now);
     s.nextSpilloverAt = 0;
     return { added: 0, waiting: 0 };
   }
   if (!(s.nextSpilloverAt > 0)) {
-    const remaining = s.pausedRemainingMs > 0 ? s.pausedRemainingMs : SPILLOVER_MS;
+    const remaining = s.pausedRemainingMs > 0 ? s.pausedRemainingMs : (open ? SPILLOVER_MS : WAITING_MS);
     s.pausedRemainingMs = 0;
     s.nextSpilloverAt = now + remaining;
     return { added: 0, waiting: 0 };
@@ -252,9 +280,9 @@ export function tickSpillover(state, now = 0) {
     while (s.nextSpilloverAt <= now && s.waiting < WAITING_MAX) {
       s.waiting++;
       waiting++;
-      s.nextSpilloverAt += SPILLOVER_MS;
+      s.nextSpilloverAt += WAITING_MS;
     }
-    if (s.nextSpilloverAt <= now) s.nextSpilloverAt = now + SPILLOVER_MS; // the pile is full: wait, nothing lost
+    if (s.nextSpilloverAt <= now) s.nextSpilloverAt = now + WAITING_MS; // the pile is full: wait, nothing lost
     if (waiting) emit(state, 'shelfWaiting', { waiting: s.waiting });
     return { added: 0, waiting };
   }

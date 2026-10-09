@@ -257,8 +257,22 @@ function eventSection(state) {
 function build(state) {
   const q = state.quests || {};
   if (!(q.daily && q.daily.length) && !q.weekly && !(state.event && state.event.key)) return emptyQuests();
-  return h`<div class="qs-note" data-seals-note><span aria-hidden="true">${sealIcon(18)}</span><span>Seals are the wax stamps you earn for finishing little goals.</span></div>
-    ${dailySection(state)}${weeklySection(state)}${eventSection(state)}`;
+  return h`<div class="qs-note" data-seals-note><span aria-hidden="true">${sealIcon(18)}</span><span>Seals are the wax stamps you earn for finishing little goals. Spend them below.</span></div>
+    ${dailySection(state)}${weeklySection(state)}${sealShopSection(state)}${eventSection(state)}`;
+}
+
+const SHOP_WHY = { seals: 'Not enough Seals yet', shelf: 'Opens with the Merge Shelf', full: 'The shelf is full', home: 'Everyone is home' };
+
+/** What Seals buy (src/sim/seals.js): boosts, a crate of vials, calling the hunters home. */
+function sealShopSection(state) {
+  const offers = ctx.sim.seals.sealOffers(state);
+  const boosts = (state.boosts || []).filter((b) => b.until > ctx.game.now());
+  const left = boosts.length ? Math.max(...boosts.map((b) => b.until)) - ctx.game.now() : 0;
+  return h`<div class="qs-sec" data-section="seal-shop"><h2 class="qs-sech">Spend Seals</h2>${left > 0 ? h`<span class="hint">A boost is running, about ${Math.max(1, Math.round(left / 60e3))} min left</span>` : ''}</div>
+    ${offers.map((o) => h`<div class="card tight" style="flex-direction:row;align-items:center;gap:12px;text-align:left" data-seal-item="${o.id}">
+      <div class="grow stack stack-sm"><div class="semi">${o.name}</div><div class="hint">${o.ok || o.reason === 'seals' ? o.blurb : SHOP_WHY[o.reason] || o.blurb}</div></div>
+      ${button(h`${sealIcon(14)} ${fmt(o.cost)}`, { small: true, variant: o.ok ? 'primary' : 'paper', attrs: { 'data-action': 'seal-buy', 'data-item': o.id, 'aria-disabled': o.ok ? 'false' : 'true', 'aria-label': `${o.name} for ${o.cost} Seals` } })}
+    </div>`)}`;
 }
 
 /** Keep the event track where she left it; the first time, open on the current step. */
@@ -372,6 +386,18 @@ function onClick(e) {
       ctx.toast(`+${fmt(res.seals)} Seals${extra}${res.boostMin ? `, and a ${res.boostMin}-minute boost` : ''}`);
       firstClaimCard();
     }
+  } else if (a === 'seal-buy') {
+    const id = el.getAttribute('data-item');
+    const res = ctx.game.act(S.seals.buySealItem, { id });
+    if (res && res.ok) {
+      ctx.audio.thunk(0.6);
+      const item = S.seals.SEAL_SHOP_BY_ID[id];
+      const msg = res.vials !== undefined ? `${res.vials} vials are on the shelf.`
+        : res.recalled ? 'Your hunters are home. Their finds are on the map.'
+          : `${item.name} is running.`;
+      ctx.toast(msg);
+    } else if (res && res.reason) ctx.toast(SHOP_WHY[res.reason] || 'Not right now');
+    paint(ctx.game.state, true);
   } else if (a === 'reroll') {
     const res = ctx.game.act(S.quests.reroll, { questId: el.getAttribute('data-quest-id') });
     if (res && res.ok) ctx.toast('A fresh quest, just for you.');

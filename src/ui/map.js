@@ -717,7 +717,7 @@ export function refreshSheet(context) {
  * trip length, see the odds (including pity), what is left in the region, then Send.
  * Locked regions open the same sheet with their paper tag instead of the Send button.
  */
-export function openSendSheet(ctx, { hunterId = null, regionId = null } = {}) {
+export function openSendSheet(ctx, { hunterId = null, regionId = null, returnTo = null } = {}) {
   closeSheet();
   const state = ctx.game.state;
   const C = ctx.content;
@@ -733,7 +733,7 @@ export function openSendSheet(ctx, { hunterId = null, regionId = null } = {}) {
   host.setAttribute('aria-label', `Send a hunter to the ${region.name}`);
   host.innerHTML = '<div class="sheet mp-sheet" style="position:relative"></div>';
   const onKey = (e) => { if (e.key === 'Escape') closeSheet(); };
-  sheet = { ctx, host, regionId: region.id, hunterId: pick ? pick.id : null, duration: isSeen(state, 'map') ? 'long' : 'short', onKey };
+  sheet = { ctx, host, returnTo, regionId: region.id, hunterId: pick ? pick.id : null, duration: isSeen(state, 'map') ? 'long' : 'short', onKey };
   document.addEventListener('keydown', onKey);
   host.addEventListener('click', (e) => {
     if (e.target === host) { closeSheet(); return; }
@@ -767,7 +767,11 @@ function doSend(ctx) {
     const from = chip ? chip.getBoundingClientRect() : null;
     closeSheet();
     ctx.audio.thunk(0.6);
-    flyHunter(ctx, s.hunterId, s.regionId, from);
+    if (s.returnTo) {
+      // Sent from a hunter's page: back to the map, and the portrait lands on the pin there.
+      ctx.navigate(s.returnTo);
+      requestAnimationFrame(() => requestAnimationFrame(() => flyHunter(ctx, s.hunterId, s.regionId, from)));
+    } else flyHunter(ctx, s.hunterId, s.regionId, from);
     ctx.toast(`${hunter ? hunter.name : 'Your hunter'} sets off for the ${region.name}. Back in about ${roughTime(ms)}.`);
   } else {
     ctx.toast('That hunter is not free right now.');
@@ -921,6 +925,14 @@ function legendHtml(state) {
   </div>`;
 }
 
+/** "Send everyone out": one tap sends every home hunter back where they last went. */
+function sendAllHtml(state, trips) {
+  const home = trips.filter((x) => x.state === 'home');
+  if (!home.length) return '';
+  const label = home.length === 1 ? `Send ${home[0].name} back out` : `Send all ${home.length} back out`;
+  return h`<div class="mp-sendall">${button(label, { variant: 'primary', block: true, attrs: { 'data-action': 'send-all' } })}<div class="hint" style="text-align:center;margin-top:4px">Same place and trip length as last time. Tap a region to choose.</div></div>`;
+}
+
 function rosterHtml(state, trips) {
   if (!trips.length) return '';
   const C = ctx.content;
@@ -978,7 +990,7 @@ function build(state) {
   const now = ctx.game.now();
   const trips = ctx.sim.hunters.tripsSummary(state, now);
   const items = backpackItems(state, now);
-  return h`${backpackHtml(state, items)}${mapHtml(state, trips)}${legendHtml(state)}${eventLine(state)}${rosterHtml(state, trips)}${hireHtml(state)}`;
+  return h`${backpackHtml(state, items)}${sendAllHtml(state, trips)}${mapHtml(state, trips)}${legendHtml(state)}${eventLine(state)}${rosterHtml(state, trips)}${hireHtml(state)}`;
 }
 
 function paint(state, force = false) {
@@ -1063,6 +1075,15 @@ function onClick(e) {
   } else if (a === 'send-again') openSendSheet(ctx, { hunterId: el.getAttribute('data-hunter-id'), regionId: el.getAttribute('data-region-id') || null });
   else if (a === 'open-card') ctx.navigate('album', { cardId: el.getAttribute('data-card-id') });
   else if (a === 'open-album') ctx.navigate('album');
+  else if (a === 'send-all') {
+    const res = ctx.game.act(ctx.sim.hunters.sendAll, {});
+    if (res && res.ok) {
+      ctx.audio.thunk(0.6);
+      const n = res.sent.length;
+      ctx.toast(n === 1 ? 'Off they go. Back with something soon.' : `${n} hunters set off. Back with something soon.`);
+    } else ctx.toast('Everyone is already out exploring.');
+    paint(ctx.game.state, true);
+  }
   else if (a === 'open-quests') ctx.navigate('quests');
   else if (a === 'hire') {
     const id = el.getAttribute('data-hunter-id');

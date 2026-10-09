@@ -27,6 +27,12 @@ import { howThisWorksHtml, markGuideSeen } from './guide.js';
 import { bindTouchFeel, squashOnce } from './workshop.js';
 
 const CSS = `
+.or-rail { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.or-rail .lbl { font-size: 13px; color: var(--ink-soft); margin-right: 2px; }
+.or-rail button { width: 34px; height: 34px; min-height: 34px; border-radius: 9px; border: 0; padding: 0; box-shadow: 0 2px 0 var(--shadow-soft), inset 0 0 0 1px rgba(42,38,34,.12); }
+.or-rail button.any { background: linear-gradient(135deg, #F3D68A 0%, #E2B04A 55%, #C99A2E 100%); }
+.or-rail button.jar { background-image: none; outline: 2px dashed rgba(42,38,34,.35); outline-offset: -5px; }
+.or-card.is-jumped { box-shadow: 0 0 0 3px var(--glow-ring), var(--cut-sm); transition: box-shadow 600ms; }
 .or-chips { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .or-badge { background: var(--glow); box-shadow: 0 0 0 2px var(--glow-ring), 0 2px 0 var(--shadow-soft); color: var(--glow-ink); font-weight: 600; font-size: 14px; flex-direction: row; align-items: center; gap: 10px; padding: 10px 14px; }
 .or-thanks { flex-direction: row; align-items: center; gap: 12px; animation: screen-in 260ms var(--ease-out) both; }
@@ -123,7 +129,7 @@ function matchCard(o, coach, firstMatch) {
   const { ctx } = S;
   const base = payBase(ctx, o);
   const who = customerName(ctx, o);
-  return h`<div class="card or-card is-tap" data-lift="1.02" data-action="open-match" data-order="${o.id}" data-tap role="button" tabindex="0"${coach ? h` data-coach="first-order"` : firstMatch ? h` data-coach="first-match"` : ''} aria-label="Order from ${who}, would like ${wishWords(ctx, o.target)}">
+  return h`<div class="card or-card is-tap" data-lift="1.02" data-action="open-match" data-order="${o.id}" data-order-card="${o.id}" data-tap role="button" tabindex="0"${coach ? h` data-coach="first-order"` : firstMatch ? h` data-coach="first-match"` : ''} aria-label="Order from ${who}, would like ${wishWords(ctx, o.target)}">
 <div class="or-main">
 <span class="or-sw" style="background:${safeHex(o.target)}" aria-hidden="true"></span>
 <div class="grow stack stack-sm"><div class="or-name ellipsis">${who}</div><div class="small muted">Would like ${wishWords(ctx, o.target)}</div>${payUpTo(base)}</div>
@@ -213,6 +219,7 @@ function boardHtml(state) {
   const firstMatch = open.findIndex((o) => o.kind !== 'any' && !(o.kind === 'container' && o.container));
   return h`<div class="or-chips">${rep >= 1 ? repChip(rep) : h`<span class="small muted">Earn a reputation star with a Perfect match</span>`}</div>
 <div class="small muted" data-countdown></div>
+${open.length > 3 ? h`<div class="or-rail" aria-label="Every order waiting"><span class="lbl">All ${open.length}:</span>${open.map((o) => h`<button type="button" class="${o.kind === 'any' ? 'any' : o.kind === 'container' ? 'jar' : ''}" style="${o.kind === 'any' ? '' : `background-color:${safeHex(o.target || '#C9A277')}`}" data-action="jump" data-order="${o.id}" data-tap aria-label="Show the order from ${customerName(ctx, o)}"></button>`)}</div>` : ''}
 ${th ? h`<div class="card or-thanks" data-thanks>${swatch(th.hex, 44)}<div class="grow"><div class="semi">${th.text}</div><div class="small muted">Paid <span data-paid>${th.coins}</span></div></div></div>` : ''}
 ${bonus > 1 ? h`<div class="card or-badge">${iconSvg('coin', { size: 22 })}<span>Fleet is busy: +${Math.round((bonus - 1) * 100)}% for hand delivery</span></div>` : ''}
 <div class="or-actions${lock ? ' one' : ''}">
@@ -396,6 +403,15 @@ export default {
         case 'go-shelf': ctx.navigate('shelf'); break;
         case 'shelf-color': addShelfColor(t.getAttribute('data-color')); break;
         case 'pass-order': passOrder(order); break;
+        case 'jump': {
+          const card = S.body && [...S.body.querySelectorAll('[data-order-card]')].find((n) => n.getAttribute('data-order-card') === order);
+          if (card) {
+            card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            card.classList.add('is-jumped');
+            setTimeout(() => card.classList.remove('is-jumped'), 1200);
+          }
+          break;
+        }
         case 'commissions': ctx.navigate('commissions'); break;
         case 'bench': ctx.navigate('bench'); break;
         default: break;

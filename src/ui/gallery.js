@@ -163,12 +163,14 @@ function doorView(st) {
 }
 
 function tasteView(st, now) {
-  const fam = gal().taste || sim().gallery.weeklyTaste(now);
+  const fam = sim().gallery.weeklyTaste(now, st);
   const name = PLURAL[fam] || fam;
+  const mine = sim().gallery.tasteColors(st, fam).map((id) => sim().displayName(st, id));
+  const which = mine.length ? `Yours: ${mine.slice(0, 4).join(', ')}${mine.length > 4 ? ` and ${mine.length - 4} more` : ''}.` : '';
   return h`
 <div class="card gl-taste flat" aria-label="Weekly visitor taste">
   <span class="gl-dot" style="background:${FAMILY_HEX[fam] || '#9A9288'}"></span>
-  <div class="grow"><div class="semi">Visitors love ${name} this week</div><div class="hint">A piece that is mostly ${name} earns +25% value.</div></div>
+  <div class="grow"><div class="semi">Visitors love ${name} this week</div><div class="hint">A piece that is mostly ${name} earns +25% value. ${which}</div></div>
 </div>`;
 }
 

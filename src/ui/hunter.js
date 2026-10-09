@@ -214,7 +214,7 @@ function onClick(e) {
   const el = e.target.closest('[data-action]');
   if (!el || !root.contains(el)) return;
   const a = el.getAttribute('data-action');
-  if (a === 'send') openSendSheet(ctx, { hunterId });
+  if (a === 'send') openSendSheet(ctx, { hunterId, returnTo: 'map' });
   else if (a === 'answer-choice') openChoiceSheet(ctx, hunterId).then(() => paint(ctx.game.state, true));
   else if (a === 'open-card') ctx.navigate('album', { cardId: el.getAttribute('data-card-id') });
   else if (a === 'open-album') ctx.navigate('album');

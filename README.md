@@ -46,7 +46,7 @@ walk go to `$E2E_SHOTS` (default: `<tmpdir>/tincture-e2e-shots`).
 ## Shipping a new version
 
 ```sh
-node tools/bump-version.js 0.2.1
+node tools/bump-version.js 0.2.2
 ```
 
 Run it whenever shipped files change. It rewrites `src/version.js`,
@@ -102,6 +102,15 @@ CLAUDE.md              working notes for coding agents
 
 ## Status
 
+- **0.2.2** (third playtest): bonus vials (Perfect orders, events, hunter
+  hauls) land in the shelf's chip colors, and vials arrive every 3 minutes
+  (each worth a third, so shelf income is unchanged). Seals finally buy
+  something: a Seal shop under Quests (boosts, a crate of vials, calling the
+  hunters home). The Map has "Send all back out", and sending from a hunter's
+  page returns to the Map. Overlays no longer fade over the screen beneath
+  (the Orders "flicker"), and the board shows a row of every waiting order.
+  Fleet rows say where a cart is going and that the Dispatcher reloads it.
+  Gallery visitors only love a hue family she owns a color in.
 - **0.2.1** (second playtest): container orders ("a Jar of …") only ask for
   the shelf's own chip colors, at most one waits on the board at a time (older
   boards are trimmed to one), the card offers "Add <color> to the shelf" or the

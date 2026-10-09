@@ -77,10 +77,18 @@ test('Relaxed reaches Renovate within 2 days of Master on Casual sessions', asyn
 
 test('no tier earns more than 1.6× Relaxed\'s Coins per active minute', async () => {
   const g = await runs;
-  const base = median(g['casual@relaxed'].map(coinsPerActiveMinute));
+  // Pooled over seeds (all puzzle Coins / all active minutes), not a median of
+  // per-seed rates: with 5 seeds the median swung by ±0.15 on unrelated changes
+  // (TUNING.md change 13; 15 seeds put tricky and master near 1.3×).
+  const pooled = (k) => {
+    const rs = g[k];
+    const mins = rs.reduce((n, r) => n + r.activeMinutes, 0);
+    return mins > 0 ? rs.reduce((n, r) => n + coinsPerActiveMinute(r) * r.activeMinutes, 0) / mins : 0;
+  };
+  const base = pooled('casual@relaxed');
   assert.ok(base > 0);
   for (const t of TIER_ORDER) {
-    const ratio = median(g['casual@' + t].map(coinsPerActiveMinute)) / base;
+    const ratio = pooled('casual@' + t) / base;
     // Master sits close to the cap (doc model: 1.57×); see tools/balance/TUNING.md.
     assert.ok(ratio <= 1.6, `${t}: ${ratio.toFixed(2)}× Relaxed`);
   }

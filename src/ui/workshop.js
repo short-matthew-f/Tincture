@@ -948,7 +948,7 @@ function panelSpec(key, s, t) {
       const dispatcher = !!s.apprentices?.dispatcher;
       return {
         sig: [fl.map((v) => `${v.kind}:${v.level}:${v.route}:${num(v.arrivesAt) > 0 ? 1 : 0}`).join(','), slots, dispatcher ? 1 : 0, s.era].join('|'),
-        summary: fl.length ? `${out} out · ${fl.length - out} idle` : 'No vehicles yet',
+        summary: fl.length ? (dispatcher && fl.some((v) => v.route) ? `${out} on the road · Dispatcher reloads` : `${out} out · ${fl.length - out} idle`) : 'No vehicles yet',
         rows: () => {
           const owned = fl.map((v, i) => {
             const def = VEHICLES_BY_ID[v.kind];
@@ -960,7 +960,7 @@ function panelSpec(key, s, t) {
               lead: swatch('#9A6A47', 36),
               title: `${def?.name ?? 'Vehicle'} · Level ${v.level}`,
               sub: h`<span data-veh-status="${i}">${busy ? 'Out' : 'Idle'}</span> · holds ${fmt(capJ)} \u2192 ${fmt(eco().vehicleCapacity({ ...v, level: v.level + 1 }))} jars`,
-              hint: milestoneHint(v.level, 'capacity'),
+              hint: dispatcher && route ? 'The Dispatcher reloads it and sends it straight back out. Set the route to none to ship it by hand.' : milestoneHint(v.level, 'capacity'),
               extra: dispatcher ? h`<div class="mt-1">${button(`Route: ${route ? route.name : 'none yet'}`, { small: true, attrs: { 'data-action': 'fleet-route', 'data-vehicle': String(i) } })}</div>` : '',
               actions: h`${busy ? '' : button('Ship', { small: true, attrs: { 'data-action': 'fleet-ship', 'data-vehicle': String(i) } })}${buyBtn('Level up', eco().stationCost('vehicle', v.level, v.kind), { 'data-action': 'buy', 'data-kind': 'fleet', 'data-index': String(i) })}`,
             });
@@ -1337,7 +1337,8 @@ function patchPanels(s, t) {
   (s.stations.fleet || []).forEach((v, i) => {
     const el = root.querySelector(`[data-veh-status="${i}"]`);
     if (!el) return;
-    const label = num(v.arrivesAt) > 0 ? `Out, back in ${waitText(ctx.format, v.arrivesAt - t)}` : 'Idle';
+    const where = v.route && ROUTES_BY_ID[v.route] ? ` to ${ROUTES_BY_ID[v.route].name}` : '';
+    const label = num(v.arrivesAt) > 0 ? `On the road${where}, home in ${waitText(ctx.format, v.arrivesAt - t)}` : (s.apprentices?.dispatcher && v.route ? 'Home, waiting for a quarter load' : 'Home, ready to load');
     if (el.textContent !== label) el.textContent = label;
   });
 }
@@ -2128,7 +2129,7 @@ function openRouteSheet(vehicle) {
   if (!v) return;
   const routes = sim().shipping.availableRoutes(s, t);
   const html = h`<div class="hint">The Dispatcher sends this vehicle along its route as soon as it is loaded.</div>
-${pickRow({ action: 'set-route', attrs: { 'data-route': '' }, lead: h`<span class="swatch is-empty" style="--size:30px"></span>`, title: 'No route yet', on: !v.route })}
+${pickRow({ action: 'set-route', attrs: { 'data-route': '' }, lead: h`<span class="swatch is-empty" style="--size:30px"></span>`, title: 'No route (ship it by hand)', on: !v.route })}
 ${routes.map((r) => pickRow({ action: 'set-route', attrs: { 'data-route': r.id }, lead: swatch('#9A6A47', 30), title: r.name, sub: demandText(r.id, t) || r.blurb, on: v.route === r.id }))}`;
   const api = openSheet(root, {
     title: 'Dispatcher route',

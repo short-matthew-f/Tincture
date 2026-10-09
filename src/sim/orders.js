@@ -25,7 +25,7 @@ import {
 } from './economy.js';
 import { takeStock } from './storage.js';
 import { availablePigments, tryDiscover, discoveredColors } from './discovery.js';
-import { addVial, unlocked as shelfUnlocked, takeContainer, tierValue, shelfColors } from './shelf.js';
+import { addVial, chipFor, unlocked as shelfUnlocked, takeContainer, tierValue, shelfColors } from './shelf.js';
 
 export const MIN_OPEN = 3;
 export const MAX_OPEN = 6;
@@ -234,7 +234,8 @@ export function submitOrder(state, args = {}, now = 0) {
   if (res.tier === 'perfect') {
     b.reputation = num(b.reputation) + 1;
     if (shelfUnlocked(state)) {
-      const color = nearestDiscovered(state, order.target);
+      const near = nearestDiscovered(state, order.target);
+      const color = near ? chipFor(state, near) : null;
       if (color) res.vialCell = addVial(state, { colorId: color });
     }
   }

@@ -21,7 +21,7 @@ import { stateRng, pick, weightedPick } from '../rng.js';
 import { emit } from './bus.js';
 import { questEvent } from './quests.js';
 import { discover, tryDiscover, discoveredCount } from './discovery.js';
-import { addVial } from './shelf.js';
+import { addVial, chipFor } from './shelf.js';
 import { discoverMarket } from './shipping.js';
 
 export const BASE_HAUL = 20;              // raw units per pigment for a 1x haul at level 0
@@ -550,8 +550,8 @@ function resolveOne(state, hunter, now) {
   if (region && rng() < HAUL_VIAL_CHANCE) {
     const colors = regionalColors(state, region);
     if (colors.length) {
-      const colorId = pick(rng, colors);
-      const r = addVial(state, { colorId, tier: 1, golden: false });
+      const colorId = chipFor(state, pick(rng, colors));
+      const r = colorId && addVial(state, { colorId, tier: 1, golden: false });
       if (r !== false && r !== null && !(r && r.ok === false)) summary.vial = colorId;
     }
   }
@@ -650,6 +650,28 @@ export function markHaulsSeen(state) {
 /** Home hunters available to send. */
 export function idleHunters(state) {
   return ensureHunters(state).roster.filter((x) => x.state !== 'out');
+}
+
+/**
+ * sendAll(state, {duration?}, now) -> {ok, sent:[{hunterId, regionId, duration}]}.
+ * "Send everyone out": every home hunter goes back to the region and trip
+ * length of their last haul (else the first open region, the given duration
+ * or 'long'). A region that has since closed falls back the same way.
+ */
+export function sendAll(state, args = {}, now = 0) {
+  if (!unlocked(state)) return { ok: false, reason: 'locked', sent: [] };
+  const h = ensureHunters(state);
+  const firstOpen = h.regionsUnlocked.find((id) => regionOpen(state, id)) ?? null;
+  const sent = [];
+  for (const x of idleHunters(state)) {
+    const last = x.lastHaul ?? null;
+    const regionId = last && regionOpen(state, last.region) ? last.region : firstOpen;
+    const duration = (last && DURATIONS[last.duration] ? last.duration : null) ?? (DURATIONS[args.duration] ? args.duration : 'long');
+    if (!regionId) continue;
+    const res = send(state, { hunterId: x.id, regionId, duration }, now);
+    if (res.ok) sent.push({ hunterId: x.id, regionId, duration });
+  }
+  return { ok: sent.length > 0, sent };
 }
 
 // Aliases matching ARCHITECTURE.md naming.

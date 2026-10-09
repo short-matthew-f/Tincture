@@ -36,6 +36,7 @@ export * from './offline.js';
 export * from './closeUp.js';
 export * from './settings.js';
 export * from './unlocks.js';
+export * from './seals.js';
 export { next, unlockLabel } from './next.js';
 export { emit } from './bus.js';
 
@@ -57,6 +58,7 @@ export * as offline from './offline.js';
 export * as closeUp from './closeUp.js';
 export * as settings from './settings.js';
 export * as unlocks from './unlocks.js';
+export * as seals from './seals.js';
 
 // Explicit resolutions of names exported by more than one module.
 export { unlocked as huntersUnlocked } from './hunters.js';

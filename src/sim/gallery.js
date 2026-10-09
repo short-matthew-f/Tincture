@@ -108,7 +108,7 @@ export function unlock(state, args = {}, now = 0) { // eslint-disable-line no-un
   const ids = starters.map((c) => (typeof c === 'string' ? c : c.id)).filter(Boolean);
   g.canvases = [...new Set([...g.canvases, ...ids])];
   g.walls = Math.max(num(g.walls, START_WALLS), START_WALLS);
-  if (!g.taste) g.taste = weeklyTaste(now);
+  if (!g.taste) g.taste = weeklyTaste(now, state);
   emit(state, 'gallery', { unlocked: true });
   return { ok: true, canvases: g.canvases.slice() };
 }
@@ -185,12 +185,24 @@ export function paintRegion(state, args = {}, now = 0) {
   return { ok: true, jars: got.taken, purity };
 }
 
-/** Week's visitor taste: a hue family chosen by ISO week. */
-export function weeklyTaste(now = 0) {
+/**
+ * Week's visitor taste: a hue family chosen by ISO week. Given `state`, only
+ * families she has discovered a color in are drawn, so visitors never ask for
+ * a family she has no way to paint with (playtest: "teals, but she has none").
+ */
+export function weeklyTaste(now = 0, state = null) {
   const key = isoWeekKey(now);
   const m = /(\d+)-W(\d+)/.exec(key);
   const n = m ? Number(m[1]) * 53 + Number(m[2]) : 0;
-  return FAMILIES[n % FAMILIES.length];
+  const owned = new Set(Object.keys(state?.catalog?.discovered ?? {}).map((id) => colorFamily(id)));
+  const pool = FAMILIES.filter((f) => owned.has(f));
+  const list = pool.length ? pool : FAMILIES;
+  return list[n % list.length];
+}
+
+/** Her discovered colors in a hue family (the weekly taste banner names them). */
+export function tasteColors(state, family) {
+  return Object.keys(state?.catalog?.discovered ?? {}).filter((id) => colorFamily(id) === family);
 }
 
 /** Value breakdown of a (possibly unsigned) piece. */
@@ -203,7 +215,7 @@ export function pieceValue(state, piece, now = 0) {
   let rar = 0;
   const distinct = new Set();
   let tasteCount = 0;
-  const taste = weeklyTaste(now);
+  const taste = weeklyTaste(now, state);
   for (const r of painted) {
     const c = piece.regions[r.id];
     const jars = num(piece.jars?.[r.id], sizeOf(r) * JARS_PER_SIZE);
@@ -343,7 +355,7 @@ export function tickAdmission(state, now = 0) {
   const last = num(g.lastAdmissionAt, num(state.lastTick, now));
   g.lastAdmissionAt = now;
   if (!galleryOpen(state)) return { coins: 0 };
-  g.taste = weeklyTaste(now);
+  g.taste = weeklyTaste(now, state);
   const dt = Math.max(0, now - last) / 1000;
   const coins = admissionRate(state, now) * dt;
   if (coins > 0) {

@@ -15,7 +15,7 @@ import { isoWeekKey } from '../format.js';
 import { stateRng, pick } from '../rng.js';
 import { emit } from './bus.js';
 import { discover } from './discovery.js';
-import { addVial } from './shelf.js';
+import { addVial, chipFor } from './shelf.js';
 import { familyOfColor, colorInfo, eventColors, allColors } from './hunters.js';
 
 const fin = (x, d = 0) => (Number.isFinite(x) ? x : d);
@@ -156,7 +156,8 @@ export function claimStep(state, { step } = {}, now = 0) {
     if (!colors.length) colors = known;
     granted.vials = [];
     for (let i = 0; i < r.vial && colors.length; i++) {
-      const colorId = pick(rng, colors);
+      const colorId = chipFor(state, pick(rng, colors));
+      if (!colorId) break;
       const res = addVial(state, { colorId, tier: 1, golden: false });
       if (res !== false && res !== null && !(res && res.ok === false)) granted.vials.push(colorId);
     }
