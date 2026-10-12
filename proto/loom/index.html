@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#F4EFE4">
+<title>Floor loom</title>
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Young+Serif&amp;family=Figtree:wght@400;500;600;700&amp;display=swap">
+<style>
+:root {
+  --paper: #F4EFE4;
+  --card: #FBF8F1;
+  --ink: #2A2622;
+  --ink-soft: #6B635A;
+  --line: #E4DBC8;
+  --line-strong: #CFC4AD;
+  --walnut: #6B4A32;
+  --gold: #C99A2E;
+  --glow: #FFF3D6;
+  --shadow: 0 3px 0 rgba(42, 38, 34, .18);
+  --font-display: 'Young Serif', Georgia, serif;
+  --font-ui: 'Figtree', system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); font-size: 16px; line-height: 1.4; }
+body { overflow-x: hidden; padding: 0 12px 28px; }
+body.weaving { padding-bottom: 232px; }
+.wrap { max-width: 460px; margin: 0 auto; }
+
+.back { display: inline-flex; align-items: center; min-height: 44px; color: var(--ink-soft); text-decoration: none; font-weight: 600; }
+.back:hover { color: var(--ink); }
+h1 { font-family: var(--font-display); font-weight: 400; font-size: 28px; margin: 0 0 2px; line-height: 1.15; }
+.sub { color: var(--ink-soft); margin: 0 0 12px; font-size: 14px; }
+
+.card { background: var(--card); border-radius: 14px; box-shadow: var(--shadow); padding: 12px; margin: 0 0 14px; }
+.card h2 { font-family: var(--font-ui); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-soft); margin: 0 0 8px; font-weight: 700; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.row + .row { margin-top: 8px; }
+.grow { flex: 1 1 auto; }
+
+button { font: inherit; color: inherit; cursor: pointer; }
+.btn {
+  min-height: 44px; min-width: 44px; padding: 0 14px; border-radius: 12px;
+  background: var(--card); border: 1.5px solid var(--line-strong); font-weight: 600;
+  box-shadow: 0 2px 0 rgba(42, 38, 34, .14); display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+}
+.btn:active { transform: translateY(1px); box-shadow: 0 1px 0 rgba(42, 38, 34, .14); }
+.btn.primary { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+.btn.on { background: var(--glow); border-color: var(--gold); }
+.btn[aria-disabled="true"] { opacity: .45; box-shadow: none; }
+.btn.small { font-size: 14px; }
+
+.seg { display: inline-flex; border: 1.5px solid var(--line-strong); border-radius: 12px; overflow: hidden; background: var(--paper); }
+.seg button { min-height: 44px; min-width: 44px; padding: 0 12px; border: 0; background: transparent; font-weight: 600; font-size: 14px; border-right: 1px solid var(--line); }
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+
+.setting { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 48px; border-top: 1px solid var(--line); }
+.setting:first-of-type { border-top: 0; }
+.setting label, .setting .lbl { font-weight: 600; font-size: 15px; }
+.stepper { display: inline-flex; align-items: center; gap: 4px; }
+.stepper button { width: 44px; height: 44px; border-radius: 12px; border: 1.5px solid var(--line-strong); background: var(--card); font-size: 22px; font-weight: 600; line-height: 1; box-shadow: 0 2px 0 rgba(42, 38, 34, .14); }
+.stepper output { min-width: 36px; text-align: center; font-weight: 700; font-size: 17px; font-variant-numeric: tabular-nums; }
+
+canvas { display: block; max-width: none; }
+#clothWrap { width: 100%; border-radius: 10px; overflow: hidden; background: #ece4d2; }
+#cloth { width: 100%; }
+.caption { color: var(--ink-soft); font-size: 13px; margin: 8px 0 0; }
+
+#draftBox { position: relative; overflow: auto; max-height: 62vh; border-radius: 10px; background: var(--card); border: 1px solid var(--line); -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+#draftInner { position: relative; }
+#draft { touch-action: pan-x pan-y; }
+.strip { position: absolute; display: none; touch-action: none; background: rgba(201, 154, 46, .08); border: 1.5px dashed var(--gold); border-radius: 6px; }
+body.painting .strip { display: block; }
+
+.brushes { display: none; gap: 6px; overflow-x: auto; padding: 4px 2px 8px; }
+body.painting .brushes { display: flex; }
+
+.swatch { flex: 0 0 auto; width: 40px; height: 40px; border-radius: 12px; border: 2px solid rgba(42, 38, 34, .18); box-shadow: 0 2px 0 rgba(42, 38, 34, .14); padding: 0; position: relative; }
+.swatch[aria-pressed="true"]::after { content: ''; position: absolute; inset: -6px; border: 2.5px solid var(--ink); border-radius: 15px; }
+.brushes .swatch { margin: 4px 2px; }
+.palette { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.palette .swatch { width: 100%; height: 56px; }
+.palette .name { display: block; font-size: 12px; color: var(--ink-soft); text-align: center; margin-top: 4px; }
+.palette > div { text-align: center; }
+
+.info { font-size: 14px; color: var(--ink-soft); margin: 4px 2px 0; }
+.info b { color: var(--ink); font-weight: 600; }
+.note { display: inline-block; background: var(--glow); border-radius: 8px; padding: 1px 8px; margin-left: 4px; color: #7A5410; font-weight: 600; }
+
+#overlay { position: fixed; inset: 0; background: rgba(42, 38, 34, .35); display: none; z-index: 20; }
+#overlay.open { display: block; }
+#sheet {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 21; max-height: 82vh; overflow-y: auto;
+  background: var(--card); border-radius: 18px 18px 0 0; box-shadow: 0 -3px 0 rgba(42, 38, 34, .12);
+  padding: 14px 14px calc(18px + env(safe-area-inset-bottom)); display: none;
+}
+#sheet.open { display: block; }
+#sheet .inner { max-width: 460px; margin: 0 auto; }
+#sheet h3 { font-family: var(--font-display); font-weight: 400; font-size: 22px; margin: 0 0 10px; }
+.preset { display: flex; gap: 12px; width: 100%; text-align: left; align-items: center; padding: 8px; min-height: 64px; border: 1.5px solid var(--line); background: var(--paper); border-radius: 12px; margin-bottom: 8px; }
+.preset canvas { flex: 0 0 auto; border-radius: 8px; width: 64px; height: 64px; }
+.preset .t { font-weight: 700; }
+.preset .n { font-size: 13px; color: var(--ink-soft); }
+.listbtn { display: block; width: 100%; text-align: left; margin-bottom: 8px; }
+
+#weaveBar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; display: none;
+  background: var(--card); border-radius: 18px 18px 0 0; box-shadow: 0 -3px 0 rgba(42, 38, 34, .12);
+  padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
+}
+body.weaving #weaveBar { display: block; }
+body.weaving .editOnly { display: none; }
+body:not(.weaving) .weaveOnly { display: none; }
+#weaveBar .inner { max-width: 460px; margin: 0 auto; }
+#treadles { display: grid; grid-template-columns: repeat(auto-fit, minmax(54px, 1fr)); gap: 8px; margin-top: 10px; }
+.treadle {
+  min-height: 72px; border-radius: 12px; border: 1.5px solid var(--line-strong); background: var(--paper);
+  box-shadow: 0 3px 0 rgba(42, 38, 34, .18); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; padding: 6px 2px;
+}
+.treadle:active { transform: translateY(2px); box-shadow: 0 1px 0 rgba(42, 38, 34, .18); }
+.treadle b { font-size: 18px; line-height: 1; }
+.dots { display: grid; gap: 2px; }
+.dots i { width: 5px; height: 5px; border-radius: 2px; background: var(--line-strong); display: block; }
+.dots i.on { background: var(--ink); }
+.shaftbtn { min-height: 56px; border-radius: 12px; border: 1.5px solid var(--line-strong); background: var(--paper); font-weight: 700; font-size: 18px; box-shadow: 0 2px 0 rgba(42, 38, 34, .14); }
+.shaftbtn[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+#curColor { width: 44px; height: 44px; border-radius: 12px; border: 2px solid rgba(42, 38, 34, .25); box-shadow: 0 2px 0 rgba(42, 38, 34, .14); padding: 0; }
+.wlbl { font-size: 13px; color: var(--ink-soft); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a class="back" href="../index.html">&larr; Fiber prototypes</a>
+  <h1>Floor loom</h1>
+  <p class="sub">Draft it, see the cloth, or sit down and weave a pick at a time.</p>
+
+  <section class="card" id="clothCard">
+    <h2 class="editOnly">The cloth</h2>
+    <h2 class="weaveOnly">At the loom</h2>
+    <div id="clothWrap"><canvas id="cloth" aria-label="Woven cloth"></canvas></div>
+    <div class="row editOnly" style="margin-top:10px">
+      <div class="seg" id="viewSeg" role="group" aria-label="Cloth view">
+        <button data-v="cloth" aria-pressed="true">Cloth</button>
+        <button data-v="grid" aria-pressed="false">Grid</button>
+        <button data-v="color" aria-pressed="false">Colors</button>
+      </div>
+      <div class="seg" id="sideSeg" role="group" aria-label="Side of the cloth">
+        <button data-s="face" aria-pressed="true">Face</button>
+        <button data-s="back" aria-pressed="false">Back</button>
+      </div>
+    </div>
+    <p class="caption editOnly" id="clothCaption"></p>
+    <p class="caption weaveOnly" id="weaveCaption"></p>
+  </section>
+
+  <section class="card editOnly" id="draftCard">
+    <h2>The draft</h2>
+    <div class="row">
+      <button class="btn" id="presetsBtn">Presets</button>
+      <button class="btn" id="undoBtn" aria-disabled="true">Undo</button>
+      <button class="btn" id="paintBtn" aria-pressed="false">Paint colors</button>
+      <button class="btn primary" id="weaveBtn">Weave</button>
+    </div>
+    <div class="brushes" id="brushes" aria-label="Brush color"></div>
+    <p class="caption" id="draftCaption"></p>
+    <div id="draftBox"><div id="draftInner"><canvas id="draft" aria-label="Weaving draft"></canvas>
+      <div class="strip" id="warpStrip" aria-hidden="true"></div>
+      <div class="strip" id="weftStrip" aria-hidden="true"></div></div></div>
+    <div class="row" style="margin-top:10px">
+      <span class="wlbl">Zoom</span>
+      <div class="stepper"><button id="zoomOut" aria-label="Smaller cells">&minus;</button><output id="zoomVal"></output><button id="zoomIn" aria-label="Larger cells">+</button></div>
+    </div>
+  </section>
+
+  <section class="card editOnly" id="loomCard">
+    <h2>Loom set-up</h2>
+    <div class="setting"><span class="lbl">Shafts</span><div class="seg" id="shaftSeg" role="group" aria-label="Shafts"></div></div>
+    <div class="setting"><span class="lbl">Treadles</span><div class="stepper" data-step="treadles"><button data-d="-1" aria-label="Fewer treadles">&minus;</button><output></output><button data-d="1" aria-label="More treadles">+</button></div></div>
+    <div class="setting"><span class="lbl">Ends</span><div class="stepper" data-step="ends"><button data-d="-1" aria-label="Fewer ends">&minus;</button><output></output><button data-d="1" aria-label="More ends">+</button></div></div>
+    <div class="setting"><span class="lbl">Picks</span><div class="stepper" data-step="picks"><button data-d="-1" aria-label="Fewer picks">&minus;</button><output></output><button data-d="1" aria-label="More picks">+</button></div></div>
+    <div class="setting"><span class="lbl">Shed</span><div class="seg" id="shedSeg" role="group" aria-label="Shed"><button data-v="rising" aria-pressed="true">Rising</button><button data-v="sinking" aria-pressed="false">Sinking</button></div></div>
+    <div class="setting"><span class="lbl">Treadling</span><div class="seg" id="modeSeg" role="group" aria-label="Treadling style"><button data-v="treadle" aria-pressed="true">Treadles</button><button data-v="liftplan" aria-pressed="false">Lift plan</button></div></div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn small" id="repThread">Repeat threading</button>
+      <button class="btn small" id="repTread">Repeat treadling</button>
+      <button class="btn small" id="mirThread">Mirror threading</button>
+      <button class="btn small" id="mirTread">Mirror treadling</button>
+      <button class="btn small" id="clearBtn">Clear&hellip;</button>
+    </div>
+  </section>
+
+  <p class="info" id="info"></p>
+</div>
+
+<div id="weaveBar" role="region" aria-label="Weaving controls"><div class="inner">
+  <div class="row">
+    <button class="btn" id="doneBtn">Done</button>
+    <button class="btn" id="wUndo" aria-disabled="true">Undo pick</button>
+    <span class="grow"></span>
+    <span class="wlbl">Weft</span>
+    <button id="curColor" aria-label="Choose weft color"></button>
+  </div>
+  <div id="treadles"></div>
+</div></div>
+
+<div id="overlay"></div>
+<div id="sheet" role="dialog" aria-modal="true"><div class="inner" id="sheetInner"></div></div>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>

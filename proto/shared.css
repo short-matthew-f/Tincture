@@ -1,0 +1,21 @@
+/* Shared look for the fiber prototypes (papercut, warm paper). */
+:root {
+  --paper: #F4EFE4; --card: #FBF8F1; --ink: #2A2622; --ink-soft: #6B635A; --line: rgba(42,38,34,.14);
+  --shadow: 0 3px 0 rgba(42,38,34,.18); --press: 0 1px 0 rgba(42,38,34,.18);
+  --gold: #E2B04A; --accent: #8C6512; --tap: 44px;
+  --font-display: 'Young Serif', Georgia, serif; --font-ui: 'Figtree', system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--font-ui); -webkit-tap-highlight-color: transparent; }
+body { min-height: 100vh; overflow-x: hidden; }
+a { color: var(--accent); }
+.serif { font-family: var(--font-display); font-weight: 400; }
+.card { background: var(--card); border-radius: 14px; box-shadow: var(--shadow); padding: 12px; }
+.btn { appearance: none; border: 0; border-radius: 12px; background: var(--card); color: var(--ink); box-shadow: var(--shadow); min-height: var(--tap); padding: 0 14px; font: 600 15px var(--font-ui); cursor: pointer; touch-action: manipulation; }
+.btn:active { transform: translateY(2px); box-shadow: var(--press); }
+.btn.primary { background: var(--ink); color: var(--card); }
+.btn.small { min-height: 36px; font-size: 13px; padding: 0 10px; border-radius: 10px; }
+.btn[aria-pressed="true"] { background: #F3E3B8; box-shadow: 0 0 0 2px var(--gold), var(--shadow); }
+.hint { font-size: 13px; color: var(--ink-soft); }
+.muted { color: var(--ink-soft); }
+.back { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; text-decoration: none; color: var(--ink-soft); min-height: var(--tap); }
