@@ -27,7 +27,7 @@ function tile(c, { tag = 'span', cls = '', attrs = '' } = {}) {
 // ---------- state ----------
 let G, sel = null, undoSnap = null, pending = false, busy = false, timer = 0;
 let idaMsg = 'Morning! I take the dish with the most of one glaze. Ties go to the left.';
-let confirmNew = 0, busyMsg = '';
+let confirmNew = 0, busyMsg = '', lastGain = null;
 
 const randSeed = () => ((Date.now() ^ Math.floor(Math.random() * 4294967296)) >>> 0) || 1;
 
@@ -81,9 +81,26 @@ function render() {
   $('#newBtn').textContent = confirmNew ? 'Tap again to start over' : 'New wall';
   if (G.over) { renderSummary(fs); return; }
 
+  // The action bar (fixed at the bottom): what is happening, and the one next step.
   const canUndo = !!undoSnap && !busy;
-  $('#status').innerHTML = `<span class="msg" role="status">${busy ? busyMsg : pending && !sel ? 'Placed. Ida takes a dish next. You can still change your mind.' : hintFor()}</span>` +
-    (canUndo ? '<button class="btn small" type="button" data-undo>Undo</button>' : '');
+  const needsDeal = !busy && !pending && roundOver(G);
+  const onlyMid = !busy && !pending && G.center.length && G.dishes.every((d) => !d.length);
+  let msg = busy ? busyMsg : hintFor();
+  let act = '';
+  if (needsDeal) {
+    msg = lastGain !== null ? `Round ${G.round} is done: +${lastGain} points. The wall is set.` : `Round ${G.round} is done. The wall is set.`;
+    act = `<button class="btn primary" type="button" data-deal>Deal round ${G.round + 1}</button>`;
+  } else if (!busy && pending && !sel) {
+    msg = roundOver(G) ? 'That was the last tile. Time to set the wall.' : G.rival ? 'Placed. Ida takes a dish next. You can still undo.' : 'Placed.';
+    act = `<button class="btn primary" type="button" data-go>${roundOver(G) ? 'Score the round' : G.rival ? 'Ida\'s turn' : 'Next'}</button>`;
+  } else if (!busy && sel && !legal.length) {
+    act = '<button class="btn primary" type="button" data-basket>Seconds basket</button>';
+  } else if (onlyMid && !sel) {
+    msg = 'Only the middle is left. Take a colour, or finish the round.';
+    act = '<button class="btn primary" type="button" id="sweepBtn">Finish the round</button>';
+  }
+  $('#status').innerHTML = `<span class="msg" role="status">${msg}</span>` +
+    (canUndo ? '<button class="btn small" type="button" data-undo>Undo</button>' : '') + act;
 
   let dishes = '';
   for (let d = 0; d < 5; d++) {
@@ -102,9 +119,7 @@ function render() {
     center += tile(c, { tag: 'button', cls: on ? 'sel' : '', attrs: `data-src="center" data-i="0" aria-label="${label(c)}, middle" aria-pressed="${!!on}"` });
   }
   $('#dishes').innerHTML = dishes;
-  const onlyMiddle = G.center.length && G.dishes.every((d) => !d.length) && !G.over;
-  $('#center').innerHTML = (center || '<span class="hint">The middle is empty for now.</span>')
-    + (onlyMiddle ? `<div style="flex-basis:100%;margin-top:8px"><button type="button" class="btn small" id="sweepBtn" style="width:100%">Finish the round <span class="hint">(the rest sell as seconds)</span></button></div>` : '');
+  $('#center').innerHTML = center || '<span class="hint">The middle is empty for now.</span>';
 
   let lines = '';
   for (let i = 0; i < 5; i++) {
@@ -328,13 +343,21 @@ async function finishRound() {
     await sleep(reduced() ? 0 : 300);
   }
   G = e.state;
-  if (!e.gameOver) {
-    G = dealRound(G);
-    if (G.over) { /* shelf ran bare */ }
-    idaMsg = G.rival ? `Round ${G.round}. Fresh dishes, same rules. Take your time.` : idaMsg;
-  }
+  lastGain = e.placements.reduce((n, p) => n + p.points, 0) + (e.seconds || 0);
+  if (G.rival) idaMsg = 'Lovely work. Deal the next round whenever you are ready.';
   undoSnap = null;
+  // The next round waits for her: the bar offers "Deal round N".
   render();
+}
+
+function deal() {
+  if (busy || pending || G.over || !roundOver(G)) return;
+  G = dealRound(G);
+  lastGain = null;
+  idaMsg = G.rival ? `Round ${G.round}. Fresh dishes, same rules. Take your time.` : idaMsg;
+  save();
+  render();
+  $('#dishes').scrollIntoView({ behavior: reduced() ? 'auto' : 'smooth', block: 'center' });
   if (!G.over && !reduced()) {
     $$('#dishes .tile').forEach((t, i) => t.animate([{ opacity: 0, transform: 'translateY(-10px) scale(.9)' }, { opacity: 1, transform: 'none' }], { duration: 320, delay: i * 25, fill: 'backwards', easing: 'ease-out' }));
   }
@@ -373,6 +396,9 @@ app.addEventListener('click', async (ev) => {
   }
   if (t.closest('#againBtn')) return startNew();
   if (G.over) return;
+  if (t.closest('[data-deal]')) return deal();
+  if (t.closest('[data-go]')) return resolve();
+  if (t.closest('[data-basket]') && sel) return place(-1);
   if (t.closest('#sweepBtn')) {
     if (pending) await resolve();
     const r = sweepMiddle(G);
