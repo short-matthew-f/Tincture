@@ -107,10 +107,15 @@ function anim(ms, fn) {
   return new Promise((resolve) => {
     if (reduceMQ.matches || S.fast || ms <= 0) { fn(1); resolve(); return; }
     const t0 = performance.now();
+    // The first frame's timestamp can be a hair earlier than t0: clamp t to [0, 1]
+    // (a negative t gave a negative ellipse radius and an exception that left the
+    // studio busy for good: "the wax won't boil off"). A frame that throws never
+    // stops the animation from finishing.
+    const safe = (t) => { try { fn(t); } catch (e) { console.error(e); } };
     const step = (now) => {
-      const t = Math.min(1, (now - t0) / ms);
-      fn(t);
-      if (t < 1 && !S.fast) requestAnimationFrame(step); else { if (t < 1) fn(1); resolve(); }
+      const t = Math.max(0, Math.min(1, (now - t0) / ms));
+      safe(t);
+      if (t < 1 && !S.fast) requestAnimationFrame(step); else { if (t < 1) safe(1); resolve(); }
     };
     requestAnimationFrame(step);
   });
@@ -1102,7 +1107,22 @@ function holdButton(label) {
   return b;
 }
 function action(label, fn, cls = 'btn') {
-  return el('button', { class: cls, onclick: async () => { if (S.busy) return; await fn(); } }, label);
+  return el('button', { class: cls, onclick: async () => {
+    if (S.busy) return;
+    // Bring the cloth into view first, so she sees what the step does to it.
+    const v = document.getElementById('view');
+    const r = v && v.getBoundingClientRect();
+    if (r && (r.top < -r.height * 0.4 || r.bottom > innerHeight + r.height * 0.4)) {
+      v.scrollIntoView({ behavior: reduceMQ.matches ? 'auto' : 'smooth', block: 'start' });
+      await new Promise((ok) => setTimeout(ok, reduceMQ.matches ? 0 : 380));
+    }
+    try { await fn(); } catch (e) {
+      // Never leave the studio locked: whatever happened, the next tap works.
+      console.error(e);
+      S.busy = false; S.overlay = null;
+      refresh();
+    }
+  } }, label);
 }
 
 const thumbCache = new Map();
@@ -1349,7 +1369,7 @@ async function crumpleFx() {
       const k = Math.sin(t * Math.PI);
       ctx.save(); ctx.globalAlpha = 0.25 * k;
       ctx.fillStyle = '#000';
-      for (let i = 0; i < 8; i++) { ctx.beginPath(); ctx.ellipse(W * ((i * 0.37) % 1), W * ((i * 0.61) % 1), W * 0.25 * k, W * 0.04, i, 0, TAU); ctx.fill(); }
+      for (let i = 0; i < 8; i++) { ctx.beginPath(); ctx.ellipse(W * ((i * 0.37) % 1), W * ((i * 0.61) % 1), Math.max(0.01, W * 0.25 * k), W * 0.04, i, 0, TAU); ctx.fill(); }
       ctx.restore();
     };
     draw();
