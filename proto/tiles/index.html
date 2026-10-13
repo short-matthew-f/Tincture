@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#F4EFE4">
+<title>The Tile Room</title>
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Young+Serif&amp;family=Figtree:wght@400;500;600;700&amp;display=swap">
+<link rel="stylesheet" href="../shared.css">
+<style>
+  :root {
+    --madder: #B8433A; --ochre: #D9A63A; --woad: #3E6A9E; --sage: #8A9A6B; --walnut: #6B4A32; --cream: #EFE6D2;
+    --t: clamp(26px, calc((100vw - 76px) / 10), 40px);
+    --pitch: calc(var(--t) + 7px);
+  }
+  body { padding: 0 12px 32px; overflow-x: hidden; }
+  .wrap { max-width: 460px; margin: 0 auto; }
+  button { font: inherit; color: inherit; }
+  .topbar { display: flex; align-items: center; justify-content: space-between; }
+  h1 { font: 400 22px var(--font-display); margin: 0; }
+  .head { display: flex; align-items: center; gap: 12px; margin: 2px 0 8px; }
+  .scorebox { display: flex; align-items: baseline; gap: 6px; }
+  #score { font: 400 40px/1 var(--font-display); font-variant-numeric: tabular-nums; min-width: 1ch; }
+  .scorebox small { color: var(--ink-soft); font-size: 13px; }
+  #round { margin-left: auto; font-weight: 700; font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-soft); }
+  .ida { display: flex; align-items: center; gap: 8px; }
+  #idaFace { width: 44px; height: 44px; border-radius: 50%; background: #F3E3B8; box-shadow: var(--shadow); flex: none; overflow: hidden; }
+  #idaMsg { margin: 0 0 8px; font-size: 13px; line-height: 1.35; color: var(--ink-soft); background: var(--card); border-radius: 12px; padding: 8px 10px; min-height: 3.1em; box-shadow: 0 1px 0 var(--line); }
+  #idaMsg b { color: var(--ink); }
+
+  .status { display: flex; align-items: center; gap: 8px; min-height: 48px; margin: 0 0 8px; }
+  .status .msg { flex: 1; font-size: 14px; line-height: 1.3; font-weight: 500; }
+
+  .card { padding: 8px; margin: 0 0 10px; }
+  .cap { margin: 0 0 6px 2px; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-soft); }
+
+  /* tiles: glazed squares */
+  .tile { --s: 44px; --g: rgba(255,250,235,.92); position: relative; display: inline-block; flex: none; width: var(--s); height: var(--s);
+    margin: 0; padding: 0; border: 0; border-radius: 24%; background: var(--b); cursor: default;
+    background: linear-gradient(150deg, color-mix(in srgb, var(--b) 72%, #fff) 0%, var(--b) 48%, color-mix(in srgb, var(--b) 80%, #000) 100%);
+    box-shadow: inset 0 1.5px 0 rgba(255,255,255,.5), inset 0 -2px 0 rgba(0,0,0,.24), inset 0 0 0 1px rgba(0,0,0,.14), 0 1.5px 1.5px rgba(42,38,34,.35);
+    display: inline-grid; place-items: center; touch-action: manipulation; transition: transform .16s ease, box-shadow .16s ease; }
+  .tile::after { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+    background: radial-gradient(120% 90% at 22% 12%, rgba(255,255,255,.38), rgba(255,255,255,0) 52%); }
+  .tile svg { width: 58%; height: 58%; fill: var(--g); stroke: none; position: relative; z-index: 1; filter: drop-shadow(0 .5px 0 rgba(0,0,0,.25)); }
+  .c0 { --b: var(--madder); } .c1 { --b: var(--ochre); --g: rgba(60,42,18,.8); } .c2 { --b: var(--woad); }
+  .c3 { --b: var(--sage); --g: rgba(36,44,24,.8); } .c4 { --b: var(--walnut); }
+  button.tile { cursor: pointer; }
+  button.tile:focus-visible, .line:focus-visible, .basket:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+  .tile.sel { transform: translateY(-4px) scale(1.06); z-index: 2; box-shadow: inset 0 1.5px 0 rgba(255,255,255,.5), inset 0 -2px 0 rgba(0,0,0,.24), 0 0 0 2.5px var(--gold), 0 9px 10px rgba(42,38,34,.28); }
+  .tile.ghost { opacity: .2; box-shadow: inset 0 0 0 1px rgba(0,0,0,.2); }
+  .tile.ghost::after { display: none; }
+  .tile.fly { position: fixed; z-index: 50; pointer-events: none; margin: 0; transition: none; }
+
+  /* dishes */
+  #dishes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; justify-items: center; }
+  .dish { position: relative; display: grid; grid-template-columns: 44px 44px; grid-auto-rows: 44px; gap: 3px; padding: 7px; width: 108px; height: 108px; align-content: center; justify-content: center;
+    border-radius: 30px; background: radial-gradient(circle at 35% 30%, #fffdf6, #EFE6D2 70%, #E2D6BB); box-shadow: inset 0 0 0 1px var(--line), var(--shadow); }
+  .dish.empty { opacity: .5; box-shadow: inset 0 0 0 1px var(--line); }
+  .dish.ida-pick { box-shadow: inset 0 0 0 2px #C9A8D8, var(--shadow); }
+  .dn { position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); font-size: 10px; color: rgba(107,99,90,.45); font-weight: 700; pointer-events: none; }
+  .stock { align-self: center; font-size: 12px; color: var(--ink-soft); line-height: 1.6; justify-self: start; padding-left: 8px; }
+  .stock b { color: var(--ink); font-weight: 600; }
+  #center { display: flex; flex-wrap: wrap; gap: 3px; min-height: 52px; align-items: center; padding: 4px; border-radius: 12px; background: rgba(42,38,34,.045); }
+
+  /* her board */
+  .board { display: flex; justify-content: center; gap: 12px; }
+  .col { display: flex; flex-direction: column; }
+  #lines { display: flex; flex-direction: column; gap: 0; }
+  .line { all: unset; box-sizing: border-box; position: relative; display: flex; justify-content: flex-end; align-items: center; gap: 3px; height: var(--pitch); padding: 0 2px; border-radius: 10px; cursor: pointer; width: calc(var(--t) * 5 + 12px + 4px); }
+  .line::after { content: ''; position: absolute; left: 0; right: 0; top: -2px; bottom: -2px; }
+  .line.ok { background: rgba(226,176,74,.26); box-shadow: 0 0 0 2px var(--gold); z-index: 1; }
+  .line.no { opacity: .5; }
+  .slot { --s: var(--t); width: var(--t); height: var(--t); border-radius: 24%; background: rgba(42,38,34,.07); box-shadow: inset 0 0 0 1.5px rgba(42,38,34,.12); display: grid; place-items: center; }
+  .slot .tile, .cell .tile, .seconds-tiles .tile { --s: var(--t); }
+  .wall { display: grid; grid-template-columns: repeat(5, var(--t)); gap: 7px 3px; }
+  .cell { width: var(--t); height: var(--t); }
+  #wallBox { padding-top: 0; }
+  #lines, #wallBox .wall { margin-top: 0; }
+  #wallBox { height: auto; }
+  .col .cap { margin-bottom: 2px; }
+  .wall { padding: 3.5px 0; }
+
+  .basket { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 10px; width: 100%; min-height: 56px; padding: 8px 10px; border-radius: 14px; background: var(--card); box-shadow: var(--shadow); cursor: pointer; }
+  .basket.ok { box-shadow: 0 0 0 2.5px var(--gold), var(--shadow); background: #FBF0D4; }
+  .basket .t { flex: 1; min-width: 0; }
+  .basket .t strong { display: block; font-size: 13px; }
+  .basket .t span { font-size: 12px; color: var(--ink-soft); }
+  .seconds-tiles { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 6px; min-height: 8px; }
+  .seconds-tiles .tile { --s: 24px; border-radius: 22%; }
+  #secVal { font: 400 22px var(--font-display); color: #6A5A1E; }
+
+  .foot { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
+  details { margin-top: 12px; font-size: 14px; color: var(--ink-soft); }
+  details summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font-weight: 600; color: var(--ink); }
+  details ol { margin: 0; padding-left: 20px; line-height: 1.5; }
+
+  .pop { position: fixed; z-index: 60; pointer-events: none; font: 400 20px var(--font-display); color: #6A5A1E; text-shadow: 0 1px 0 #fff8; }
+
+  /* summary */
+  #summary .card { padding: 14px; text-align: center; }
+  #summary h2 { font: 400 24px var(--font-display); margin: 4px 0 4px; }
+  #sumWall { display: flex; justify-content: center; margin: 14px 0; }
+  .wall.big { --t: min(52px, calc((100vw - 24px - 28px - 4 * 7px) / 5)); gap: 7px; padding: 12px; border-radius: 16px; background: linear-gradient(160deg, #E8DCC0, #D9CAA6); box-shadow: inset 0 0 0 2px rgba(107,74,50,.3), var(--shadow); }
+  .wall.big .tile { --s: var(--t); }
+  .wall.big .ghost { opacity: .12; }
+  #sumBreak { list-style: none; margin: 0 0 10px; padding: 0; text-align: left; }
+  #sumBreak li { display: flex; justify-content: space-between; padding: 8px 2px; border-top: 1px solid var(--line); font-size: 14px; }
+  #sumBreak b { color: #6A5A1E; }
+  .total { font: 400 44px/1 var(--font-display); margin: 8px 0 2px; }
+  .coins { font-size: 16px; margin: 0 0 14px; }
+  .btn.wide { width: 100%; min-height: 52px; font-size: 17px; }
+
+  @media (prefers-reduced-motion: reduce) { .tile { transition: none; } }
+</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <div class="topbar">
+    <a class="back" href="../">&#8592; Prototypes</a>
+    <h1>The Tile Room</h1>
+  </div>
+  <div class="head">
+    <div class="scorebox"><span id="score" aria-live="polite">0</span><small>points</small></div>
+    <span id="round">Round 1</span>
+    <div class="ida" id="ida">
+      <svg id="idaFace" viewBox="0 0 44 44" role="img" aria-label="Ida from the pottery next door">
+        <rect width="44" height="44" fill="#F3E3B8"/>
+        <path d="M6 44c1-9 8-13 16-13s15 4 16 13z" fill="#3E6A9E"/>
+        <circle cx="22" cy="20" r="9" fill="#E8C3A0"/>
+        <path d="M12 21c-1-10 6-14 11-14 7 0 11 5 9 14-2-5-4-8-10-8s-8 3-10 8z" fill="#8C6512"/>
+        <path d="M11 18c2-9 9-12 14-11-6 1-9 5-9 9z" fill="#B8433A" opacity=".0"/>
+        <circle cx="18.5" cy="20.5" r="1.1" fill="#2A2622"/><circle cx="25.5" cy="20.5" r="1.1" fill="#2A2622"/>
+        <path d="M18.5 24.5q3.5 3 7 0" stroke="#2A2622" stroke-width="1.3" fill="none" stroke-linecap="round"/>
+      </svg>
+    </div>
+  </div>
+  <p id="idaMsg" aria-live="polite"></p>
+
+  <div id="play">
+    <div class="status" id="status"></div>
+    <section class="card" aria-label="Dishes">
+      <div id="dishes"></div>
+      <p class="cap" style="margin-top:8px">The middle</p>
+      <div id="center"></div>
+    </section>
+    <section class="card" aria-label="Your board">
+      <div class="board">
+        <div class="col"><p class="cap">Pattern lines</p><div id="lines"></div></div>
+        <div class="col"><p class="cap">Wall</p><div id="wallBox"></div></div>
+      </div>
+    </section>
+    <button type="button" class="basket" id="basket" aria-label="Seconds basket">
+      <div class="t"><strong>Seconds basket</strong><span>+1 each, sold as seconds</span><div class="seconds-tiles" id="secTiles"></div></div>
+      <span id="secVal">+0</span>
+    </button>
+  </div>
+
+  <div id="summary" hidden>
+    <div class="card">
+      <h2 id="sumTitle">Your mosaic is finished</h2>
+      <p class="muted" style="margin:0">Take a moment to look at it.</p>
+      <div id="sumWall"></div>
+      <ul id="sumBreak"></ul>
+      <div class="total" id="sumTotal">0</div>
+      <p class="muted" style="margin:0 0 6px">points in all</p>
+      <p class="coins serif" id="sumCoins"></p>
+      <button type="button" class="btn primary wide" id="againBtn">Start a new wall</button>
+    </div>
+  </div>
+
+  <div class="foot">
+    <button type="button" class="btn small" id="idaBtn" aria-pressed="true">Ida: playing</button>
+    <button type="button" class="btn small" id="newBtn">New wall</button>
+  </div>
+  <details>
+    <summary>How the Tile Room works</summary>
+    <ol>
+      <li>Tap a tile in a dish: you take every tile of that colour. The others slide to the middle. You can also take a colour from the middle.</li>
+      <li>Choose a pattern line. A line holds one colour, and not one already on that row of your wall.</li>
+      <li>Extra tiles go to the seconds basket and are sold for +1 each.</li>
+      <li>Ida next door takes a dish after each turn (most tiles of one colour, ties go left) and sells them.</li>
+      <li>When the dishes are empty, full lines place one tile on the wall and score by neighbours. Finish a wall row to end the game.</li>
+    </ol>
+  </details>
+</div>
+<div id="fx" aria-hidden="true"></div>
+<script type="module" src="./app.js"></script>
+</body>
+</html>
