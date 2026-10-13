@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#F4EFE4">
+<title>Marbling and origami</title>
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Young+Serif&amp;family=Figtree:wght@400;500;600;700&amp;display=swap">
+<link rel="stylesheet" href="../shared.css">
+<style>
+  body { padding: 0 12px 40px; font-size: 16px; line-height: 1.4; }
+  .wrap { max-width: 460px; margin: 0 auto; }
+  h1 { font: 400 28px/1.15 var(--font-display); margin: 0 0 2px; }
+  h2 { font: 700 12px var(--font-ui); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-soft); margin: 0 0 8px; }
+  .sub { margin: 0 0 10px; font-size: 14px; color: var(--ink-soft); }
+  .card { margin: 0 0 14px; }
+  button { font: inherit; color: inherit; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1.5px solid var(--line); }
+  .btn.primary { border-color: var(--ink); }
+  .btn[disabled], .btn[aria-disabled="true"] { opacity: .45; box-shadow: none; pointer-events: none; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .row.tight > * { flex: 1 1 0; }
+  .tabs { display: flex; gap: 8px; margin: 4px 0 12px; }
+  .tabs .btn { flex: 1; }
+
+  /* the tray */
+  .tray { position: relative; border-radius: 20px; padding: 7px; background: linear-gradient(160deg, #8d6b4c, #6B4A32); box-shadow: 0 4px 0 rgba(42,38,34,.22), inset 0 1px 0 rgba(255,255,255,.18); }
+  .tray .well { position: relative; border-radius: 13px; overflow: hidden; box-shadow: inset 0 3px 8px rgba(42,38,34,.35); background: #F1EBDD; }
+  #bath { display: block; width: 100%; aspect-ratio: 1; touch-action: none; cursor: crosshair; user-select: none; -webkit-user-select: none; }
+  .tray-note { position: absolute; left: 14px; right: 14px; bottom: 14px; text-align: center; pointer-events: none; font-size: 14px; font-weight: 600; color: var(--ink); background: rgba(251,248,241,.88); border-radius: 12px; padding: 6px 10px; opacity: 0; transition: opacity .25s; }
+  .tray-note.on { opacity: 1; }
+  .tipline { min-height: 20px; margin: 8px 2px 8px; font-size: 14px; color: var(--ink-soft); }
+
+  .palette { display: flex; justify-content: space-between; gap: 2px; margin: 12px 0 8px; }
+  .palette button { flex: 0 0 44px; height: 48px; border: 0; background: transparent; padding: 0; display: grid; place-items: center; touch-action: manipulation; }
+  .palette i { display: block; width: 34px; height: 34px; border-radius: 50%; box-shadow: inset 0 0 0 2px rgba(42,38,34,.18), 0 2px 0 rgba(42,38,34,.18); transition: transform .12s; }
+  .palette button:active i { transform: scale(.92); }
+  .palette button[aria-pressed="true"] i { box-shadow: 0 0 0 3px var(--card), 0 0 0 5.5px var(--ink); transform: scale(1.04); }
+  @media (max-width: 380px) { .palette { flex-wrap: wrap; } .palette button { flex: 1 0 25%; } }
+
+  .tools { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .tool { flex-direction: column; gap: 2px; min-height: 58px; padding: 4px 2px; font-size: 13px; }
+  .tool svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .seg { display: inline-flex; border: 1.5px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--paper); }
+  .seg button { min-height: 44px; min-width: 54px; padding: 0 10px; border: 0; background: transparent; font-weight: 600; font-size: 14px; border-right: 1px solid var(--line); }
+  .seg button:last-child { border-right: 0; }
+  .seg button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+  #combOpts { margin-top: 8px; display: none; align-items: center; gap: 10px; }
+  #combOpts.on { display: flex; }
+  .actions { display: grid; grid-template-columns: .8fr 1.25fr 1.4fr; gap: 8px; margin-top: 10px; }
+  .actions .btn { padding: 0 8px; font-size: 14px; }
+  .starters { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .starters .btn { flex-direction: column; align-items: flex-start; justify-content: center; text-align: left; min-height: 62px; padding: 6px 12px; gap: 0; }
+  .starters small { font-weight: 400; font-size: 12px; color: var(--ink-soft); line-height: 1.25; }
+
+  .thumbs { display: flex; gap: 10px; overflow-x: auto; padding: 4px 4px 10px; margin: 0 -4px; scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch; }
+  .thumbs:empty::before { content: attr(data-empty); color: var(--ink-soft); font-size: 14px; padding: 8px 4px; }
+  .thumb { flex: 0 0 auto; width: 68px; height: 68px; padding: 0; border: 0; border-radius: 8px; background: none; box-shadow: 0 3px 0 rgba(42,38,34,.2); scroll-snap-align: start; position: relative; overflow: hidden; transform: rotate(var(--tilt, 0deg)); }
+  .thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+  .thumb[aria-pressed="true"] { box-shadow: 0 0 0 3px var(--card), 0 0 0 5px var(--ink), 0 3px 0 5px rgba(42,38,34,.2); }
+  .thumb.arriving { visibility: hidden; }
+  .thumb.landed { animation: land .5s ease-out; }
+  @keyframes land { 0% { transform: scale(1.18) rotate(var(--tilt, 0deg)); } 100% { transform: scale(1) rotate(var(--tilt, 0deg)); } }
+
+  /* fold view */
+  .models { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .model { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 4px 8px; min-height: 120px; border: 1.5px solid var(--line); border-radius: 14px; background: var(--paper); box-shadow: 0 3px 0 rgba(42,38,34,.14); touch-action: manipulation; }
+  .model:active { transform: translateY(2px); box-shadow: 0 1px 0 rgba(42,38,34,.14); }
+  .model canvas { width: 76px; height: 76px; }
+  .model b { font-size: 14px; }
+  .model span { font-size: 11px; color: var(--ink-soft); text-align: center; line-height: 1.2; padding: 0 2px; }
+  .stage-wrap { position: relative; border-radius: 18px; overflow: hidden; background: radial-gradient(ellipse at 50% 40%, #FBF8F1, #E9E0CC); box-shadow: inset 0 2px 10px rgba(42,38,34,.18); }
+  #stage { display: block; width: 100%; aspect-ratio: 1 / 1.02; touch-action: none; user-select: none; -webkit-user-select: none; }
+  .stephead { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 8px; }
+  .dots { display: flex; gap: 6px; align-items: center; }
+  .dots i { width: 9px; height: 9px; border-radius: 50%; background: var(--line); display: block; }
+  .dots i.done { background: var(--ink-soft); }
+  .dots i.now { background: var(--gold); box-shadow: 0 0 0 3px #F3E3B8; }
+  .steptext { font-size: 16px; font-weight: 500; margin: 10px 2px; min-height: 46px; }
+  .name { text-align: center; background: #FFF3D6; border: 2px solid var(--gold); animation: warm 1.6s ease-out; }
+  .name h3 { font: 400 26px var(--font-display); margin: 0 0 2px; }
+  .name p { margin: 0 0 10px; color: var(--ink-soft); font-size: 14px; }
+  .name .btn { font-size: 14px; padding: 0 8px; }
+  @keyframes warm { from { box-shadow: 0 0 0 0 rgba(226,176,74,.7), var(--shadow); } to { box-shadow: 0 0 0 18px rgba(226,176,74,0), var(--shadow); } }
+  .shelf { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px 6px; padding: 4px 4px 0; background:
+      linear-gradient(to bottom, transparent calc(100% - 7px), #8d6b4c calc(100% - 7px), #6B4A32 100%) bottom / 100% 100% no-repeat; border-radius: 4px; }
+  .shelf:empty::before { content: attr(data-empty); grid-column: 1 / -1; color: var(--ink-soft); font-size: 14px; padding: 8px 4px 14px; }
+  .shelf button { padding: 0 0 7px; border: 0; background: none; min-height: 72px; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; touch-action: manipulation; }
+  .shelf img { width: 100%; max-width: 78px; aspect-ratio: 1; object-fit: contain; display: block; }
+  .shelf-row { margin-bottom: 6px; }
+  .empty-note { color: var(--ink-soft); font-size: 14px; margin: 4px 2px 10px; }
+
+  #dialog { position: fixed; inset: 0; z-index: 30; display: none; background: rgba(42,38,34,.42); align-items: center; justify-content: center; padding: 16px; }
+  #dialog.open { display: flex; }
+  #dialog .box { background: var(--card); border-radius: 18px; padding: 16px; width: min(340px, 100%); text-align: center; box-shadow: 0 6px 0 rgba(42,38,34,.2); }
+  #dialog img { width: 220px; max-width: 80%; aspect-ratio: 1; object-fit: contain; }
+  #dialog h3 { font: 400 24px var(--font-display); margin: 0; }
+  #dialog p { margin: 2px 0 12px; font-size: 14px; color: var(--ink-soft); }
+
+  #fly { position: fixed; left: 0; top: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 20; display: none; }
+  #fly.on { display: block; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  [hidden] { display: none !important; }
+  @media (prefers-reduced-motion: reduce) { .thumb.landed, .name { animation: none; } * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a class="back" href="../index.html">&larr; Fiber prototypes</a>
+  <h1>Marbling and origami</h1>
+  <p class="sub">Float natural dyes on the bath, lay a sheet of paper, then fold it into something small.</p>
+
+  <div class="tabs" role="group" aria-label="Sections">
+    <button class="btn" id="tabMarble" aria-pressed="true">Marble</button>
+    <button class="btn" id="tabFold" aria-pressed="false">Fold</button>
+  </div>
+
+  <!-- ============================ MARBLE ============================ -->
+  <section id="viewMarble">
+    <div class="tray"><div class="well">
+      <canvas id="bath" role="img" aria-label="Marbling bath. Tap to drop ink, drag to pull a stylus through it."></canvas>
+      <div class="tray-note" id="trayNote"></div>
+    </div></div>
+    <p class="tipline" id="tip"></p>
+
+    <div class="palette" id="palette" role="group" aria-label="Dye inks"></div>
+
+    <div class="tools" id="tools" role="group" aria-label="Tools">
+      <button class="btn tool" data-tool="drop" aria-pressed="true"><svg viewBox="0 0 24 24"><path d="M12 3c3.5 4.2 6 7.2 6 10.5A6 6 0 0 1 6 13.5C6 10.200 8.500 7.200 12 3Z"/></svg>Drop</button>
+      <button class="btn tool" data-tool="stylus" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M4 20l3-1L19 7l-2-2L5 17l-1 3Z"/><path d="M15 7l2 2"/></svg>Stylus</button>
+      <button class="btn tool" data-tool="comb" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M4 8h16M7 8v10M10.500 8v10M14 8v10M17.500 8v10"/></svg>Comb</button>
+      <button class="btn tool" data-tool="swirl" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M12 12m-1 0a1 1 0 1 0 2 0a1 1 0 1 0-2 0M12 10.500c1.500-.5 3 .5 3 2s-1.500 3.500-3.500 3.500S8 14 8 12c0-3 2.500-5 5-5 3.500 0 6 2.500 6 5.500"/></svg>Swirl</button>
+    </div>
+    <div id="combOpts"><span class="hint">Tines</span>
+      <div class="seg" id="tineSeg" role="group" aria-label="Number of tines">
+        <button data-n="5" aria-pressed="false">5</button><button data-n="7" aria-pressed="true">7</button><button data-n="9" aria-pressed="false">9</button>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button class="btn" id="undo" aria-disabled="true">Undo</button>
+      <button class="btn" id="clear">Clear the bath</button>
+      <button class="btn primary" id="lay">Lay the paper</button>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <h2>One-tap starters</h2>
+      <div class="starters" id="starters"></div>
+    </div>
+
+    <div class="card">
+      <h2>Paper drawer</h2>
+      <div class="thumbs" id="drawer" data-empty="Lay a sheet on the bath and it will rest here."></div>
+      <p class="hint" style="margin:0">Tap a sheet to fold it. The drawer keeps your eight newest.</p>
+    </div>
+  </section>
+
+  <!-- ============================ FOLD ============================ -->
+  <section id="viewFold" hidden>
+    <div id="foldPick">
+      <div class="card">
+        <h2>1. Pick a sheet</h2>
+        <div class="thumbs" id="sheetPick" data-empty="Your drawer is empty."></div>
+        <div class="row" id="pickTools">
+          <button class="btn" id="sample">Use a sample sheet</button>
+          <button class="btn" id="recycle" hidden>Let this sheet go</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>2. Pick a model</h2>
+        <div class="models" id="models"></div>
+      </div>
+    </div>
+
+    <div id="foldStage" hidden>
+      <div class="stephead">
+        <button class="btn" id="choose">&larr; Choose another</button>
+        <div class="dots" id="dots" aria-hidden="true"></div>
+        <span class="hint" id="stepCount"></span>
+      </div>
+      <div class="stage-wrap"><canvas id="stage" role="img" aria-label="Paper being folded"></canvas></div>
+      <p class="steptext" id="stepText" aria-live="polite"></p>
+      <div class="row tight" id="foldBtns">
+        <button class="btn" id="foldUndo" aria-disabled="true">Unfold a step</button>
+        <button class="btn primary" id="foldGo">Fold it</button>
+      </div>
+      <div class="card name" id="nameCard" hidden>
+        <h3 id="mName"></h3>
+        <p id="mNote"></p>
+        <div class="row tight">
+          <button class="btn primary" id="toShelf">Put it on the shelf</button>
+          <button class="btn" id="again">Fold another</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <h2>Your shelf</h2>
+      <div class="shelf" id="shelf" data-empty="Finished pieces will stand here."></div>
+    </div>
+  </section>
+</div>
+
+<div id="dialog" role="dialog" aria-modal="true" aria-labelledby="dName">
+  <div class="box">
+    <img id="dImg" alt="">
+    <h3 id="dName"></h3>
+    <p id="dNote"></p>
+    <div class="row tight"><button class="btn" id="dClose">Back to the shelf</button><button class="btn" id="dRemove">Take it down</button></div>
+  </div>
+</div>
+<canvas id="fly" aria-hidden="true"></canvas>
+<div class="sr" id="live" role="status" aria-live="polite"></div>
+<script type="module" src="./app.js"></script>
+</body>
+</html>
