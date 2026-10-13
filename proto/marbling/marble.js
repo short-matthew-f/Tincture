@@ -370,9 +370,29 @@ export function stylusStep(bath, a, b, c = LIMITS.stylusC) {
   }
 }
 
+/**
+ * basinOffsets(start, nrm, gap, size) -> tine offsets (along nrm, relative to
+ * start) for a comb as wide as the whole basin in that direction: like a real
+ * marbling comb, it reaches wall to wall whichever way it is drawn, diagonals
+ * included. Tines sit `gap` apart, centred in the basin's extent.
+ */
+export function basinOffsets(start, nrm, gap, size = BATH_SIZE) {
+  let lo = Infinity, hi = -Infinity;
+  for (const [x, y] of [[0, 0], [size, 0], [0, size], [size, size]]) {
+    const s = (x - start[0]) * nrm[0] + (y - start[1]) * nrm[1];
+    if (s < lo) lo = s;
+    if (s > hi) hi = s;
+  }
+  const n = Math.max(1, Math.floor((hi - lo) / gap));
+  const first = lo + (hi - lo - (n - 1) * gap) / 2;
+  const out = [];
+  for (let i = 0; i < n; i++) out.push(first + i * gap);
+  return out;
+}
+
 export function combStep(bath, a, b, nrm, tines, spacing, c = LIMITS.combC) {
   if (a[0] === b[0] && a[1] === b[1]) return;
-  const offs = combOffsets(tines, spacing);
+  const offs = Array.isArray(tines) ? tines : combOffsets(tines, spacing);
   const n = subSteps(a, b, c);
   let p = a;
   for (let i = 1; i <= n; i++) {

@@ -407,3 +407,15 @@ test('models are grouped by difficulty and bounds include the pen marks', () => 
   const b = modelBounds(kite);
   assert.ok(b.y1 > 1.5, 'the kite tail is inside the camera bounds');
 });
+
+test('the comb spans the whole basin in any direction, diagonals included', async () => {
+  const { basinOffsets, BATH_SIZE } = await import('../proto/marbling/marble.js');
+  for (const [start, nrm] of [[[500, 500], [0, 1]], [[100, 900], [1, 0]], [[300, 300], [Math.SQRT1_2, Math.SQRT1_2]]]) {
+    const offs = basinOffsets(start, nrm, 70);
+    const ends = [0, offs.length - 1].map((i) => [start[0] + nrm[0] * offs[i], start[1] + nrm[1] * offs[i]]);
+    const proj = ([x, y]) => x * nrm[0] + y * nrm[1];
+    const corners = [[0, 0], [BATH_SIZE, 0], [0, BATH_SIZE], [BATH_SIZE, BATH_SIZE]].map(proj);
+    assert.ok(proj(ends[0]) - Math.min(...corners) <= 70, 'first tine within a gap of one wall');
+    assert.ok(Math.max(...corners) - proj(ends[1]) <= 70, 'last tine within a gap of the other wall');
+  }
+});

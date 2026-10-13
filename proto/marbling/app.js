@@ -2,7 +2,7 @@
 // The ink maths lives in marble.js and the flat-folding geometry in fold.js (both pure).
 import {
   INKS, BATH_COLOR, LIMITS, createBath, snapshot, restore, beginDrop, growDrop, maintain, stylusStep, combStep, swirlStep,
-  resample, starterOps, applyOp, STARTERS, mulberry32, runStarter, countVerts, pathNormal, combOffsets, dropInk,
+  resample, basinOffsets, starterOps, applyOp, STARTERS, mulberry32, runStarter, countVerts, pathNormal, combOffsets, dropInk,
 } from './marble.js';
 import {
   buildStates, finalState, modelBounds, stackBounds, planStep, stepOps, creaseSegments, applyM, mul, rotationMatrix,
@@ -91,8 +91,8 @@ const bctx = bathCanvas.getContext('2d');
 let bath = createBath();
 let inkColor = INKS[2].hex;
 let tool = 'drop';
-let tines = 7;
-const COMB_SPACING = { 5: 120, 7: 100, 9: 84 };
+let tines = 70; // gap between tines, in bath units (the comb always spans the basin)
+const COMB_SPACING = {};
 let undoStack = [];
 let busy = false; // starter or paper animation playing
 let runner = null; // scripted starter
@@ -175,10 +175,18 @@ function paintOverlay(now) {
     bctx.strokeStyle = 'rgba(42,38,34,.7)';
     bctx.beginPath(); bctx.arc(p.x, p.y, 9, 0, 6.2832); bctx.stroke();
   } else if (p.mode === 'comb') {
+    // The comb reaches wall to wall: show every tine across the basin.
     const n = p.nrm || [0, 1];
-    bctx.strokeStyle = 'rgba(42,38,34,.6)';
-    for (const o of combOffsets(tines, COMB_SPACING[tines])) {
-      bctx.beginPath(); bctx.arc(p.x + n[0] * o, p.y + n[1] * o, 6, 0, 6.2832); bctx.stroke();
+    const offs = p.offs || basinOffsets([p.x, p.y], n, tines);
+    const ox = p.x;
+    bctx.strokeStyle = 'rgba(42,38,34,.55)';
+    bctx.lineWidth = 1.5 * dprOf() * px;
+    bctx.beginPath();
+    bctx.moveTo(ox + n[0] * offs[0], p.y + n[1] * offs[0]);
+    bctx.lineTo(ox + n[0] * offs[offs.length - 1], p.y + n[1] * offs[offs.length - 1]);
+    bctx.stroke();
+    for (const o of offs) {
+      bctx.beginPath(); bctx.arc(ox + n[0] * o, p.y + n[1] * o, 5, 0, 6.2832); bctx.stroke();
     }
   } else if (p.mode === 'swirl') {
     bctx.strokeStyle = 'rgba(42,38,34,.55)';
@@ -258,10 +266,11 @@ function flushQueue(p) {
       if (!p.nrm) {
         if (Math.hypot(x - p.start[0], y - p.start[1]) < 16) continue;
         p.nrm = pathNormal([p.start, [x, y]]);
+        p.offs = basinOffsets(p.start, p.nrm, tines);
         p.lx = p.start[0]; p.ly = p.start[1];
       }
       if (Math.hypot(x - p.lx, y - p.ly) < 1.5) continue;
-      combStep(bath, [p.lx, p.ly], [x, y], p.nrm, tines, COMB_SPACING[tines], LIMITS.combC);
+      combStep(bath, [p.lx, p.ly], [x, y], p.nrm, p.offs, 0, LIMITS.combC);
       p.lx = x; p.ly = y;
     }
   }
@@ -385,7 +394,7 @@ INKS.forEach((ink, i) => {
 const TIPS = {
   drop: 'Tap to drop ink. Press and hold for a bigger drop. Drops can land inside older drops.',
   stylus: 'Drag a fine stylus through the ink. It carries the colour along with it.',
-  comb: 'Swipe across the bath. The comb pulls several lines at once.',
+  comb: 'Draw the comb in any direction. It reaches wall to wall, like a real marbling comb.',
   swirl: 'Press and hold to stir a gentle vortex. Slide your finger to move it.',
 };
 function setTool(t) {
