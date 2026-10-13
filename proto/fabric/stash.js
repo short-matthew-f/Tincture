@@ -3,7 +3,10 @@
 // CONTRACT (shared by the Dye Studio, proto/dye/, and the Quilt Designer,
 // proto/quilt/; keep it stable):
 //
-//   localStorage['tincture.proto.stash'] = { v: 1, fabrics: [Fabric] }
+//   localStorage['tincture.proto.stash'] = { v: 1, seeded?: true, fabrics: [Fabric] }
+//   (seeded: the starter fabrics were added once; letting them all go keeps them gone)
+//   addFabric keeps at most STASH_MAX dyed fabrics, dropping the oldest; stashSaved() is
+//   false after a save that had to let fabrics go because storage was full.
 //
 //   Fabric = {
 //     id: string,            // unique
@@ -38,15 +41,27 @@ function read() {
   return { v: 1, fabrics: [] };
 }
 
+let lastWriteOk = true;
+/** False if the last save had to drop fabrics (or failed) because storage was full. */
+export function stashSaved() { return lastWriteOk; }
+
 function write(s) {
   // Keep under the browser quota: drop the oldest non-starter fabrics first.
+  let dropped = 0;
   for (let tries = 0; tries < 30; tries++) {
-    try { localStorage.setItem(STASH_KEY, JSON.stringify(s)); return true; } catch {
+    try {
+      localStorage.setItem(STASH_KEY, JSON.stringify(s));
+      lastWriteOk = dropped === 0;
+      if (dropped) console.warn(`stash: storage was full, ${dropped} oldest fabric(s) were let go`);
+      return lastWriteOk;
+    } catch {
       const i = s.fabrics.findIndex((f) => !f.starter);
-      if (i < 0) return false;
+      if (i < 0) { lastWriteOk = false; return false; }
       s.fabrics.splice(i, 1);
+      dropped++;
     }
   }
+  lastWriteOk = false;
   return false;
 }
 
@@ -95,9 +110,21 @@ export function newId(prefix = 'f') {
 
 /** Makes sure the starter fabrics are in the stash (call once on load in either app). */
 export function ensureStarters() {
+  // Seed once. If she later lets every starter go, they stay gone.
   const s = read();
-  if (s.fabrics.some((f) => f.starter)) return s;
-  s.fabrics = [...starterFabrics(), ...s.fabrics];
+  if (s.seeded) return s;
+  if (!s.fabrics.some((f) => f.starter)) s.fabrics = [...starterFabrics(), ...s.fabrics];
+  s.seeded = true;
+  write(s);
+  return s;
+}
+
+/** Puts the starter fabrics back (for a "bring back the starters" button). */
+export function restoreStarters() {
+  const s = read();
+  const have = new Set(s.fabrics.map((f) => f.id));
+  s.fabrics = [...starterFabrics().filter((f) => !have.has(f.id)), ...s.fabrics];
+  s.seeded = true;
   write(s);
   return s;
 }
