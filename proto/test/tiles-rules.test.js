@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   newGame, take, legalLines, rivalTurn, rivalChoice, endRound, dealRound, finalScore,
   countTiles, placementScore, roundOver, wallColor, wallCol, coinValue, TOTAL_TILES,
-} from '../proto/tiles/rules.js';
+} from '../tiles/rules.js';
 
 const emptyWall = () => Array.from({ length: 5 }, () => Array(5).fill(false));
 const fresh = (seed = 7, o) => newGame(seed, o);
@@ -282,7 +282,7 @@ test('full scripted games conserve tiles and finish', () => {
 });
 
 test('finish the round: once the dishes are empty, the middle can go to the seconds basket', async () => {
-  const R = await import('../proto/tiles/rules.js');
+  const R = await import('../tiles/rules.js');
   let s = R.newGame(11, { rival: false });
   assert.equal(R.sweepMiddle(s).ok, false, 'not while dishes still hold tiles');
   s = { ...s, dishes: s.dishes.map(() => []), center: [0, 0, 2, 4] };

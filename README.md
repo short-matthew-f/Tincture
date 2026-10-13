@@ -34,6 +34,7 @@ python3 -m http.server 8000      # from the repo root (or: npm run serve)
 
 ```sh
 npm test       # node --test "test/**/*.test.js": unit tests + the balance suite (about 17 s)
+npm run test:proto  # the craft prototypes under proto/ (proto/test/*.test.js, about 3 s)
 npm run e2e    # Playwright: shell smoke, the first-ten-minutes walk, the update flow, the drag harness
 ```
 

@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import * as D from '../proto/loom/draft.js';
-import * as Z from '../proto/loom/puzzles.js';
-import * as W from '../proto/loom/wif.js';
+import * as D from '../loom/draft.js';
+import * as Z from '../loom/puzzles.js';
+import * as W from '../loom/wif.js';
 
 const rowStr = (row) => row.map((c) => (c === 'warp' ? '#' : '.')).join('');
 
@@ -590,7 +590,7 @@ test('progress rescales so a blank draft reads 0, the solution 1, and a half-rig
 });
 
 /* ------------------------------------------------------------- tartan setts */
-import * as T from '../proto/loom/tartan.js';
+import * as T from '../loom/tartan.js';
 
 test('tartan: a symmetric sett mirrors at its pivots and does not double them', () => {
   const p = T.parseSett('R/8 G24 K/4');

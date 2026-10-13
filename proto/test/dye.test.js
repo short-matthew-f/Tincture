@@ -5,8 +5,8 @@ import assert from 'node:assert/strict';
 import {
   createPiece, applyOp, replay, resistMap, composite, mixSubtractive, dyeAbsorb, makeName, dominantColor, mainDyes,
   iceComponents, tileInfo, POTS, R, clonePiece, packOps, unpackOps, nextSteps,
-} from '../proto/dye/dyecore.js';
-import { weaveField, shadeCloth, absorbOf, hexRgb, BASES, DYES, PRINTS, mulberry32, noiseField } from '../proto/fabric/textures.js';
+} from '../dye/dyecore.js';
+import { weaveField, shadeCloth, absorbOf, hexRgb, BASES, DYES, PRINTS, mulberry32, noiseField } from '../fabric/textures.js';
 
 const N = 96;
 const mean = (a) => a.reduce((s, v) => s + v, 0) / a.length;
@@ -230,7 +230,7 @@ test('the shared palettes keep their contract', () => {
 test('stash: add, get, rename, remove, and the cap on dyed fabrics', async () => {
   const mem = new Map();
   globalThis.localStorage = { getItem: (k) => (mem.has(k) ? mem.get(k) : null), setItem: (k, v) => mem.set(k, String(v)), removeItem: (k) => mem.delete(k) };
-  const st = await import('../proto/fabric/stash.js');
+  const st = await import('../fabric/stash.js');
   const f = st.addFabric({ id: 'a', name: 'Indigo kumo shibori', base: 'quilting-cotton', kind: 'shibori', color: '#2C3E66', img: 'data:image/jpeg;base64,xx', inches: 8, repeat: false, createdAt: 1 });
   assert.equal(f.starter, false);
   assert.deepEqual(st.getFabric('a').colors, ['#2C3E66']);

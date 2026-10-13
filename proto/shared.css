@@ -14,7 +14,7 @@ a { color: var(--accent); }
 .btn { appearance: none; border: 0; border-radius: 12px; background: var(--card); color: var(--ink); box-shadow: var(--shadow); min-height: var(--tap); padding: 0 14px; font: 600 15px var(--font-ui); cursor: pointer; touch-action: manipulation; }
 .btn:active { transform: translateY(2px); box-shadow: var(--press); }
 .btn.primary { background: var(--ink); color: var(--card); }
-.btn.small { min-height: 36px; font-size: 13px; padding: 0 10px; border-radius: 10px; }
+.btn.small { min-height: 44px; font-size: 14px; padding: 0 12px; border-radius: 11px; }
 .btn[aria-pressed="true"] { background: #F3E3B8; box-shadow: 0 0 0 2px var(--gold), var(--shadow); }
 .hint { font-size: 13px; color: var(--ink-soft); }
 .muted { color: var(--ink-soft); }

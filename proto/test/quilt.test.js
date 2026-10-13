@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import * as K from '../proto/quilt/blocks.js';
-import * as Q from '../proto/quilt/layout.js';
-import * as C from '../proto/quilt/cutting.js';
-import * as P from '../proto/quilt/quilting.js';
+import * as K from '../quilt/blocks.js';
+import * as Q from '../quilt/layout.js';
+import * as C from '../quilt/cutting.js';
+import * as P from '../quilt/quilting.js';
 
 const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
 

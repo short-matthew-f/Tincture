@@ -5,13 +5,13 @@ import {
   INKS, LIMITS, BATH_SIZE, mulberry32, createBath, countVerts, snapshot, restore, circlePts, dropVertexCount,
   dropField, tineLineField, segmentField, combField, swirlField, transformPoly, simplifyPoly,
   dropInk, beginDrop, growDrop, stylusStep, combStep, swirlStep, resample, starterOps, runStarter, applyOp, combOffsets,
-} from '../proto/marbling/marble.js';
+} from '../marbling/marble.js';
 import {
   createStack, planStep, planOp, foldStack, buildStates, finalState, area, invert, applyM, det, mul, reflectionMatrix,
   splitConvex, creaseLine, stackBounds, creaseSegments, SHEET_M, stepOps, modelBounds, sheetFraction, poseItems,
   finalPull, finishBounds, edgeFlags, planHints, isPullStep,
-} from '../proto/marbling/fold.js';
-import { MODELS, LEVELS, getModel } from '../proto/marbling/models.js';
+} from '../marbling/fold.js';
+import { MODELS, LEVELS, getModel } from '../marbling/models.js';
 const H = 2 / (2 + Math.SQRT2);
 
 const near = (a, b, e = 1e-6) => assert.ok(Math.abs(a - b) <= e, `${a} vs ${b}`);
@@ -571,7 +571,7 @@ test('models are grouped by difficulty and the camera bounds include the finishe
 });
 
 test('the comb spans the whole basin in any direction, diagonals included', async () => {
-  const { basinOffsets, BATH_SIZE } = await import('../proto/marbling/marble.js');
+  const { basinOffsets, BATH_SIZE } = await import('../marbling/marble.js');
   for (const [start, nrm] of [[[500, 500], [0, 1]], [[100, 900], [1, 0]], [[300, 300], [Math.SQRT1_2, Math.SQRT1_2]]]) {
     const offs = basinOffsets(start, nrm, 70);
     const ends = [0, offs.length - 1].map((i) => [start[0] + nrm[0] * offs[i], start[1] + nrm[1] * offs[i]]);
@@ -583,7 +583,7 @@ test('the comb spans the whole basin in any direction, diagonals included', asyn
 });
 
 // ---- saving the bath across reloads (UX audit: a reload used to lose the ink)
-import { serializeBath, deserializeBath } from '../proto/marbling/marble.js';
+import { serializeBath, deserializeBath } from '../marbling/marble.js';
 
 test('serializeBath / deserializeBath round-trip keeps colours and shapes within 0.1 units', () => {
   const b = createBath();
