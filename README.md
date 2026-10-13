@@ -102,14 +102,9 @@ CLAUDE.md              working notes for coding agents
 
 ## Fiber prototypes
 
-`proto/` holds standalone prototypes for a future fiber wing, outside the game
+`proto/` holds a standalone prototype for a future fiber wing, outside the game
 and its offline cache: https://short-matthew-f.github.io/Tincture/proto/
 
-- `proto/knit/`: the Knitting Room. A stitch engine (`engine.js`, pure, US
-  terms) with knit, purl, tbl, slips, decreases, increases, cables, brioche,
-  short rows and bind off; fabric drawn from the stitch structure, a chart, a
-  tube view for knitting in the round, a written-pattern writer and a parser
-  for typed rows.
 - `proto/loom/`: the Loom. Threading, tie-up, treadling or lift plan, the
   drawdown, cloth rendering and a weave mode.
 
