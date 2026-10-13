@@ -73,11 +73,13 @@ canvas { display: block; max-width: none; }
 #draftBox { position: relative; overflow: auto; max-height: 62vh; border-radius: 10px; background: var(--card); border: 1px solid var(--line); -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
 #draftInner { position: relative; }
 #draft { touch-action: pan-x pan-y; }
-.strip { position: absolute; display: none; touch-action: none; background: rgba(201, 154, 46, .08); border: 1.5px dashed var(--gold); border-radius: 6px; }
-body.painting .strip { display: block; }
+.strip { position: absolute; display: block; touch-action: none; border-radius: 6px; }
+body.selecting .strip { display: none; }
 
-.brushes { display: none; gap: 6px; overflow-x: auto; padding: 4px 2px 8px; }
-body.painting .brushes { display: flex; }
+.brushes { display: flex; gap: 6px; overflow-x: auto; padding: 4px 2px 4px; align-items: center; }
+.dyebar { display: flex; flex-direction: column; gap: 2px; margin: 6px 0 4px; }
+.dyebar .hint { font-size: 12px; color: var(--ink-soft); }
+.dyebar .row { display: flex; gap: 6px; flex-wrap: wrap; }
 
 .swatch { flex: 0 0 auto; width: 40px; height: 40px; border-radius: 12px; border: 2px solid rgba(42, 38, 34, .18); box-shadow: 0 2px 0 rgba(42, 38, 34, .14); padding: 0; position: relative; }
 .swatch[aria-pressed="true"]::after { content: ''; position: absolute; inset: -6px; border: 2.5px solid var(--ink); border-radius: 15px; }
@@ -194,7 +196,6 @@ textarea { min-height: 120px; font-family: ui-monospace, Menlo, monospace; font-
     <div class="row">
       <button class="btn noPuzzle" id="presetsBtn">Presets</button>
       <button class="btn" id="undoBtn" aria-disabled="true">Undo</button>
-      <button class="btn" id="paintBtn" aria-pressed="false">Paint colors</button>
       <button class="btn primary noPuzzle" id="weaveBtn">Weave</button>
     </div>
     <div class="row">
@@ -204,7 +205,11 @@ textarea { min-height: 120px; font-family: ui-monospace, Menlo, monospace; font-
       <button class="btn small" id="selectBtn" aria-pressed="false">Select range</button>
     </div>
     <div id="selBar" class="selbar" style="display:none"></div>
-    <div class="brushes" id="brushes" aria-label="Brush color"></div>
+    <div class="dyebar">
+      <span class="hint">Dye: pick a color, then tap a color chip (or drag along the chips) to dye ends and picks.</span>
+      <div class="brushes" id="brushes" aria-label="Dye color"></div>
+      <div class="row"><button class="btn small" id="dyeWarp">Dye every warp end</button><button class="btn small" id="dyeWeft">Dye every weft pick</button></div>
+    </div>
     <p class="caption" id="draftCaption"></p>
     <div id="draftBox"><div id="draftInner"><canvas id="draft" aria-label="Weaving draft"></canvas>
       <div class="strip" id="warpStrip" aria-hidden="true"></div>

@@ -462,9 +462,9 @@ function initDraftInput() {
   canvas.addEventListener('pointerup', (ev) => {
     if (!down) return;
     const moved = Math.hypot(ev.clientX - down.x, ev.clientY - down.y);
-    const quick = ev.timeStamp - down.t < 600;
+    const quick = ev.timeStamp - down.t < 1500;
     down = null;
-    if (moved > 8 || !quick || ui.painting) return;
+    if (moved > 14 || !quick) return;
     const r = canvas.getBoundingClientRect();
     const L = layoutDraft(draft, ui.cell);
     tapDraft(hitDraft(L, draft, ev.clientX - r.left, ev.clientY - r.top));
@@ -527,17 +527,10 @@ function tapDraft(h) {
   else if (h.area === 'tie') commit(D.toggleTieup(draft, h.shaft, h.treadle));
   else if (h.area === 'tread') commit(D.toggleTreadling(draft, h.pick, h.treadle));
   else if (h.area === 'lift') commit(D.toggleLift(draft, h.pick, h.shaft));
-  else if (h.area === 'warpchip') {
-    openPalette(`Warp end ${h.end + 1}`, (hex, scope) => {
-      if (scope === 'all') commit(D.setAllWarpColors(draft, hex));
-      else commit(D.setWarpColor(draft, h.end, hex));
-    }, draft.warpColors[h.end], 'All warp ends');
-  } else if (h.area === 'weftchip') {
-    openPalette(`Weft pick ${h.pick + 1}`, (hex, scope) => {
-      if (scope === 'all') commit(D.setAllWeftColors(draft, hex));
-      else commit(D.setWeftColor(draft, h.pick, hex));
-    }, draft.weftColors[h.pick], 'All weft picks');
-  }
+  // One rule for color chips: a tap dyes it with the chosen dye (the strips over
+  // the chips normally catch this first; this is the same behaviour as a fallback).
+  else if (h.area === 'warpchip') commit(D.setWarpColor(draft, h.end, ui.brush));
+  else if (h.area === 'weftchip') commit(D.setWeftColor(draft, h.pick, ui.brush));
 }
 
 /* -------------------------------------------------------------- sheets */
@@ -669,7 +662,8 @@ function bindControls() {
   $('presetsBtn').onclick = openPresets;
   $('undoBtn').onclick = undo;
   $('wUndo').onclick = undo;
-  $('paintBtn').onclick = () => { ui.painting = !ui.painting; if (ui.painting) { ui.selecting = false; ui.sel = null; } renderAll(); };
+  $('dyeWarp').onclick = () => commit(D.setAllWarpColors(draft, ui.brush));
+  $('dyeWeft').onclick = () => commit(D.setAllWeftColors(draft, ui.brush));
   $('weaveBtn').onclick = () => setWeaving(true);
   $('doneBtn').onclick = () => setWeaving(false);
   $('curColor').onclick = () => openPalette('Weft color', (hex) => { ui.weftColor = hex; save(); renderAll(); }, ui.weftColor);
@@ -687,7 +681,7 @@ function bindControls() {
   $('puzzlesBtn').onclick = openPuzzleList;
   $('libraryBtn').onclick = openLibrary;
   $('wifBtn').onclick = openWif;
-  $('selectBtn').onclick = () => { ui.selecting = !ui.selecting; if (ui.selecting) ui.painting = false; else ui.sel = null; renderAll(); };
+  $('selectBtn').onclick = () => { ui.selecting = !ui.selecting; if (!ui.selecting) ui.sel = null; renderAll(); };
   $('floatBtn').onclick = () => { ui.floatOn = !ui.floatOn; save(); renderAll(); };
   $('floatStep').querySelectorAll('button').forEach((b) => { b.onclick = () => { ui.floatLimit = Math.max(1, Math.min(12, ui.floatLimit + Number(b.dataset.d))); save(); renderAll(); }; });
   bindPuzzleCard();
@@ -725,15 +719,13 @@ function renderBrushes() {
 
 function renderControls() {
   const d = draft;
-  document.body.classList.toggle('painting', ui.painting);
+  document.body.classList.toggle('selecting', !!ui.selecting);
   document.body.classList.toggle('weaving', ui.weaving);
   document.body.classList.toggle('puzzling', !!ui.puzzle);
   $('floatBtn').setAttribute('aria-pressed', String(ui.floatOn));
   $('floatBtn').classList.toggle('on', ui.floatOn);
   $('floatStep').style.display = ui.floatOn ? 'inline-flex' : 'none';
   $('floatVal').textContent = `>${ui.floatLimit}`;
-  $('paintBtn').setAttribute('aria-pressed', String(ui.painting));
-  $('paintBtn').classList.toggle('on', ui.painting);
   $('undoBtn').setAttribute('aria-disabled', String(!history.length));
   $('wUndo').setAttribute('aria-disabled', String(!history.length));
   setPressed($('viewSeg'), 'v', ui.view);
