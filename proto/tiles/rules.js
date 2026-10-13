@@ -125,6 +125,20 @@ export function take(state, { source, index = 0, color, line }) {
 
 // Ida: takes the colour group with the most tiles of one colour on any dish;
 // ties go to the leftmost dish, then the lowest colour. The rest slide to the centre.
+/**
+ * sweepMiddle(state) -> {ok, state, count}. Once every dish is empty she may
+ * finish the round: whatever is left in the middle goes to the seconds basket
+ * (it sells there), and the round ends as usual.
+ */
+export function sweepMiddle(state) {
+  if (state.dishes.some((d) => d.length) || !state.center.length) return { ok: false, count: 0, state };
+  const s = clone(state);
+  const count = s.center.length;
+  for (const c of s.center) s.seconds.push(c);
+  s.center = [];
+  return { ok: true, count, state: s };
+}
+
 export function rivalChoice(state) {
   let best = null;
   for (let d = 0; d < DISHES; d++) {

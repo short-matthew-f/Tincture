@@ -1,7 +1,7 @@
 // The Tile Room: UI, rendering and animation. Rules live in rules.js (pure).
 import {
   COLORS, GLYPHS, SECOND_VALUE, newGame, take, legalLines, rivalTurn, endRound, dealRound,
-  roundOver, finalScore, coinValue, wallColor,
+  roundOver, finalScore, coinValue, wallColor, sweepMiddle,
 } from './rules.js';
 
 const KEY = 'tincture.proto.tiles';
@@ -102,7 +102,9 @@ function render() {
     center += tile(c, { tag: 'button', cls: on ? 'sel' : '', attrs: `data-src="center" data-i="0" aria-label="${label(c)}, middle" aria-pressed="${!!on}"` });
   }
   $('#dishes').innerHTML = dishes;
-  $('#center').innerHTML = center || '<span class="hint">The middle is empty for now.</span>';
+  const onlyMiddle = G.center.length && G.dishes.every((d) => !d.length) && !G.over;
+  $('#center').innerHTML = (center || '<span class="hint">The middle is empty for now.</span>')
+    + (onlyMiddle ? `<div style="flex-basis:100%;margin-top:8px"><button type="button" class="btn small" id="sweepBtn" style="width:100%">Finish the round <span class="hint">(the rest sell as seconds)</span></button></div>` : '');
 
   let lines = '';
   for (let i = 0; i < 5; i++) {
@@ -371,6 +373,16 @@ app.addEventListener('click', async (ev) => {
   }
   if (t.closest('#againBtn')) return startNew();
   if (G.over) return;
+  if (t.closest('#sweepBtn')) {
+    if (pending) await resolve();
+    const r = sweepMiddle(G);
+    if (!r.ok) return render();
+    sel = null; undoSnap = null;
+    G = r.state;
+    pending = true;
+    save();
+    return resolve();
+  }
   const tl = t.closest('[data-src]');
   if (tl) {
     if (pending) await resolve();

@@ -280,3 +280,17 @@ test('full scripted games conserve tiles and finish', () => {
     }
   }
 });
+
+test('finish the round: once the dishes are empty, the middle can go to the seconds basket', async () => {
+  const R = await import('../proto/tiles/rules.js');
+  let s = R.newGame(11, { rival: false });
+  assert.equal(R.sweepMiddle(s).ok, false, 'not while dishes still hold tiles');
+  s = { ...s, dishes: s.dishes.map(() => []), center: [0, 0, 2, 4] };
+  const before = s.seconds.length;
+  const r = R.sweepMiddle(s);
+  assert.equal(r.ok, true);
+  assert.equal(r.count, 4);
+  assert.equal(r.state.seconds.length, before + 4);
+  assert.equal(R.roundOver(r.state), true);
+  assert.equal(R.sweepMiddle(r.state).ok, false, 'nothing left to sweep');
+});
