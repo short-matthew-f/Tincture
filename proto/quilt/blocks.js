@@ -76,6 +76,10 @@ export const SHAPES = {
       [[1, 1 - c], [1, 1], [1 - c, 1]], [[0, 1 - c], [c, 1], [0, 1]],
     ],
   },
+  corner: {
+    name: 'Square with a flipped corner',
+    patches: [[[0.5, 0], [1, 0], [1, 1], [0, 1], [0, 0.5]], [[0, 0], [0.5, 0], [0, 0.5]]],
+  },
   strips2: { name: 'Two strips', patches: [[[0, 0], [1, 0], [1, 0.5], [0, 0.5]], [[0, 0.5], [1, 0.5], [1, 1], [0, 1]]] },
   strips3: {
     name: 'Three strips',
@@ -89,7 +93,7 @@ export const SHAPES = {
 };
 
 /** Shapes offered when tapping a unit, by footprint. */
-export const CYCLE_SQUARE = ['square', 'hst', 'qst', 'hqst', 'sqsq', 'snowball', 'strips2', 'strips3', 'arc'];
+export const CYCLE_SQUARE = ['square', 'hst', 'qst', 'hqst', 'sqsq', 'snowball', 'corner', 'strips2', 'strips3', 'arc'];
 export const CYCLE_GEESE = ['geese', 'square', 'strips2', 'strips3'];
 export const CYCLE_RECT = ['square', 'strips2', 'strips3'];
 
@@ -306,6 +310,9 @@ function drunkard() {
   return units;
 }
 
+/** Double Irish Chain, pieced block (rows top to bottom). */
+const DIC_A = ['DMLMD', 'MDMDM', 'LMDML', 'MDMDM', 'DMLMD'];
+
 /**
  * The library. Fills use value roles: L light (background), M medium,
  * D dark, A accent, B second accent. `note` is a short, true line about it.
@@ -362,6 +369,56 @@ export const LIBRARY = [
     units: [U(0, 0, 'snowball', 'LDDDD', 0, 2, 2)] },
   { id: 'square-in-a-square', name: 'Square in a Square', n: 2, note: 'A square on point with four corner triangles.',
     units: [U(0, 0, 'sqsq', 'MDDDD', 0, 2, 2)] },
+
+  // ---- added in the second round
+  { id: 'bow-tie', name: 'Bow Tie', n: 2, note: 'Two dark squares and two light ones; stitch-and-flip corners make the knot in the middle.',
+    units: [U(0, 0, 'square', 'D'), U(1, 1, 'square', 'D'), U(1, 0, 'corner', 'LD', 3), U(0, 1, 'corner', 'LD', 1)] },
+  { id: 'double-four-patch', name: 'Double Four Patch', n: 4, note: 'Two small four patches and two plain squares; set side by side they make a chain.',
+    units: [...[[0, 0], [2, 2]].flatMap(([x, y]) => [U(x, y, 'square', 'D'), U(x + 1, y, 'square', 'L'), U(x, y + 1, 'square', 'L'), U(x + 1, y + 1, 'square', 'D')]),
+      U(2, 0, 'square', 'M', 0, 2, 2), U(0, 2, 'square', 'M', 0, 2, 2)] },
+  { id: 'whirligig', name: 'Whirligig', n: 2, note: 'A pinwheel whose light halves are split again, so a second, smaller whirl turns inside the first.',
+    units: quad(2, [U(0, 0, 'hqst', 'DLM', 3)]) },
+  { id: 'spool', name: 'Spool', n: 3, note: 'Dark spool ends cut on the angle, with the thread wound in the middle.',
+    units: [U(0, 0, 'hst', 'LD', 3), U(1, 0, 'square', 'D'), U(2, 0, 'hst', 'LD', 2),
+      U(0, 1, 'square', 'L'), U(1, 1, 'square', 'M'), U(2, 1, 'square', 'L'),
+      U(0, 2, 'hst', 'LD', 0), U(1, 2, 'square', 'D'), U(2, 2, 'hst', 'LD', 1)] },
+  { id: 'hole-in-the-barn-door', name: 'Hole in the Barn Door', n: 3, note: 'Another name for the Churn Dash (and Monkey Wrench, Sherman’s March); shown with a dark center.',
+    units: [...quad(3, [U(0, 0, 'hst', 'LD', 0), U(1, 0, 'strips2', 'LM', 0)]), U(1, 1, 'square', 'D')] },
+  { id: 'monkey-wrench', name: 'Monkey Wrench', n: 5, note: 'The five-patch Churn Dash: big triangle corners and two-square sides. Also sold as Hole in the Barn Door.',
+    units: [...quad(5, [U(0, 0, 'hst', 'LD', 0, 2, 2), U(2, 0, 'square', 'L'), U(2, 1, 'square', 'D')]), U(2, 2, 'square', 'L')] },
+  { id: 'lady-of-the-lake', name: 'Lady of the Lake', n: 5, note: 'One big half-square triangle ringed by small ones, light on the dark side and dark on the light side.',
+    units: [U(1, 1, 'hst', 'DL', 0, 3, 3),
+      ...[0, 1, 2, 3, 4].flatMap((i) => [[i, 0], [i, 4]]).concat([1, 2, 3].flatMap((i) => [[0, i], [4, i]]))
+        .map(([x, y]) => U(x, y, 'hst', x + y < 4 ? 'LD' : 'DL', 0))] },
+  { id: 'cake-stand', name: 'Cake Stand', n: 4, note: 'A big triangle stand (or basket) with sawtooth edges. Set on point so it sits upright.',
+    units: [U(0, 0, 'hst', 'LD', 0, 3, 3), U(3, 0, 'hst', 'DL', 3), U(3, 1, 'hst', 'DL', 3), U(3, 2, 'hst', 'DL', 3),
+      U(0, 3, 'hst', 'DL', 1), U(1, 3, 'hst', 'DL', 1), U(2, 3, 'hst', 'DL', 1), U(3, 3, 'square', 'L')] },
+  { id: 'pine-tree', name: 'Pine Tree', n: 4, note: 'Stacked flying geese for the branches and a trunk below.',
+    units: [U(0, 0, 'square', 'L'), U(1, 0, 'geese', 'DLL', 0, 2, 1), U(3, 0, 'square', 'L'),
+      U(0, 1, 'geese', 'DLL', 0, 4, 2),
+      U(0, 3, 'square', 'L'), U(1, 3, 'square', 'A', 0, 2, 1), U(3, 3, 'square', 'L')] },
+  { id: 'double-nine-patch', name: 'Double Nine Patch', n: 9, note: 'Five small nine patches set like the squares of one big one.',
+    units: [[0, 0], [6, 0], [3, 3], [0, 6], [6, 6]].flatMap(([x, y]) => [0, 1, 2, 3, 4, 5, 6, 7, 8].map((i) => U(x + (i % 3), y + Math.floor(i / 3), 'square', i % 2 ? 'L' : 'D')))
+      .concat([[3, 0], [0, 3], [6, 3], [3, 6]].map(([x, y]) => U(x, y, 'square', 'M', 0, 3, 3))) },
+  { id: 'irish-chain-a', name: 'Double Irish Chain (chain block)', n: 5, note: 'The pieced block of the Double Irish Chain: a dark diagonal flanked by mediums.',
+    units: [0, 1, 2, 3, 4].flatMap((y) => [0, 1, 2, 3, 4].map((x) => U(x, y, 'square', DIC_A[y][x]))) },
+  { id: 'irish-chain-b', name: 'Double Irish Chain (plain block)', n: 5, note: 'The light block between the chains, with medium corners that carry them through.',
+    units: [U(0, 0, 'square', 'M'), U(4, 0, 'square', 'M'), U(0, 4, 'square', 'M'), U(4, 4, 'square', 'M'),
+      U(1, 0, 'square', 'L', 0, 3, 1), U(1, 4, 'square', 'L', 0, 3, 1), U(0, 1, 'square', 'L', 0, 5, 3)] },
+  { id: 'hst', name: 'Half-Square Triangle', n: 1, note: 'One half-square triangle. Use the layouts below, or Turn in Layout, to set them.',
+    units: [U(0, 0, 'hst', 'DL', 0)] },
+  { id: 'plain-square', name: 'Plain Square', n: 1, note: 'One square: for Trip Around the World, or a plain alternate block.',
+    units: [U(0, 0, 'square', 'L')] },
+];
+
+/** Library sections, in the order the library shows them. */
+export const GROUPS = [
+  { id: 'four', name: 'Four-patch', ids: ['four-patch', 'double-four-patch', 'pinwheel', 'whirligig', 'broken-dishes', 'hourglass', 'bow-tie', 'dutchmans-puzzle', 'flying-geese', 'pine-tree', 'cake-stand', 'snowball', 'square-in-a-square', 'hst'] },
+  { id: 'nine', name: 'Nine-patch', ids: ['nine-patch', 'double-nine-patch', 'shoofly', 'churn-dash', 'hole-in-the-barn-door', 'card-trick', 'spool', 'jacobs-ladder', 'plain-square'] },
+  { id: 'stars', name: 'Stars', ids: ['friendship-star', 'ohio-star', 'variable-star', 'sawtooth-star'] },
+  { id: 'five', name: 'Five-patch and bigger', ids: ['monkey-wrench', 'lady-of-the-lake', 'irish-chain-a', 'irish-chain-b', 'bears-paw'] },
+  { id: 'strip', name: 'Strip and log', ids: ['rail-fence', 'log-cabin', 'courthouse-steps'] },
+  { id: 'curves', name: 'Curves', ids: ['drunkards-path'] },
 ];
 
 export function libraryBlock(id) {
@@ -371,6 +428,38 @@ export function libraryBlock(id) {
 
 export function cloneBlock(b) {
   return { ...b, units: b.units.map((u) => ({ ...u, f: [...u.f], off: u.off ? u.off.map((o) => (o ? [...o] : null)) : undefined })) };
+}
+
+/**
+ * A block read back from storage, checked: every unit on the grid, a known
+ * shape, one fill per patch, no two units on the same cell, every cell covered.
+ * Returns a clean copy, or null if it cannot be trusted (the caller then
+ * falls back to a library block instead of failing to draw).
+ */
+export function sanitizeBlock(b) {
+  if (!b || typeof b !== 'object' || !Array.isArray(b.units)) return null;
+  const n = Number(b.n);
+  if (!Number.isInteger(n) || n < 1 || n > 12) return null;
+  const cells = new Set();
+  const units = [];
+  for (const u of b.units) {
+    if (!u || typeof u !== 'object') return null;
+    const [x, y, w, h] = [u.x, u.y, u.w, u.h].map(Number);
+    if (![x, y, w, h].every(Number.isInteger) || x < 0 || y < 0 || w < 1 || h < 1 || x + w > n || y + h > n) return null;
+    const t = SHAPES[u.t] ? u.t : 'square';
+    for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++) {
+      const k = `${xx},${yy}`;
+      if (cells.has(k)) return null;
+      cells.add(k);
+    }
+    const k = patchCount(t);
+    const src = Array.isArray(u.f) ? u.f.filter((f) => typeof f === 'string' && f) : [];
+    const f = Array.from({ length: k }, (_, i) => src[i] ?? src[0] ?? 'L');
+    const off = Array.isArray(u.off) ? u.off.slice(0, k).map((o) => (Array.isArray(o) && o.length === 2 && o.every(Number.isFinite) ? [o[0], o[1]] : null)) : undefined;
+    units.push({ x, y, w, h, t, rot: ((Math.round(Number(u.rot) || 0) % 4) + 4) % 4, flip: !!u.flip, f, ...(off ? { off } : {}) });
+  }
+  if (cells.size !== n * n) return null;
+  return { ...b, name: typeof b.name === 'string' && b.name ? b.name : 'My block', n, units };
 }
 
 /** Area covered by a block's patches (should equal n²). */

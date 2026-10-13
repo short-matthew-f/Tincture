@@ -105,7 +105,7 @@ test('editing: shapes cycle, joins make flying geese, splits undo them', () => {
   assert.equal(b.units.length, 9);
   let u = b.units[0];
   const seen = new Set();
-  for (let n = 0; n < 9; n++) { u = K.nextShape(u); seen.add(u.t); assert.equal(u.f.length, K.patchCount(u.t)); }
+  for (let n = 0; n < K.CYCLE_SQUARE.length; n++) { u = K.nextShape(u); seen.add(u.t); assert.equal(u.f.length, K.patchCount(u.t)); }
   assert.equal(seen.size, K.CYCLE_SQUARE.length);
   assert.equal(K.turnUnit({ ...g, rot: 0 }).rot, 2); // rectangles turn half way
 });
@@ -308,4 +308,213 @@ test('quilting: the meander is one loop through every cell that never crosses it
   const sq = P.insetConvex([[0, 0], [4, 0], [4, 4], [0, 4]], 1);
   assert.deepEqual(sq.map((q) => q.map((v) => +v.toFixed(9))), [[1, 1], [3, 1], [3, 3], [1, 3]]);
   assert.equal(P.insetConvex([[0, 0], [1, 0], [0, 1]], 1), null);
+});
+
+test('damaged saves: blocks are checked and replaced, never drawn broken', () => {
+  const good = K.libraryBlock('ohio-star');
+  assert.deepEqual(K.sanitizeBlock(good).units.length, good.units.length);
+  assert.equal(K.sanitizeBlock(null), null);
+  assert.equal(K.sanitizeBlock({ n: 3, units: [{ x: 0 }] }), null, 'unit without a size');
+  assert.equal(K.sanitizeBlock({ n: 2, units: [{ x: 0, y: 0, w: 2, h: 2, t: 'square', f: ['L'] }, { x: 1, y: 1, w: 1, h: 1, t: 'square', f: ['L'] }] }), null, 'overlap');
+  assert.equal(K.sanitizeBlock({ n: 2, units: [{ x: 0, y: 0, w: 1, h: 1, t: 'square', f: ['L'] }] }), null, 'cells left uncovered');
+  // Unknown shapes become squares; fills are padded to the patch count.
+  const fixed = K.sanitizeBlock({ n: 1, units: [{ x: 0, y: 0, w: 1, h: 1, t: 'qst', f: ['D'] }] });
+  assert.deepEqual(fixed.units[0].f, ['D', 'D', 'D', 'D']);
+  assert.equal(K.sanitizeBlock({ n: 1, units: [{ x: 0, y: 0, w: 1, h: 1, t: 'nope', f: [] }] }).units[0].t, 'square');
+
+  const d = Q.normalizeDesign({ blocks: [{ n: 3, units: [{ x: 0 }] }], borders: 'no', sash: null, quilting: null, palette: 'x', setting: 'sideways', rows: 'many' });
+  assert.equal(d.blocks[0].name, 'Ohio Star');
+  assert.deepEqual(d.borders, Q.defaultDesign().borders);
+  assert.equal(d.setting, 'straight');
+  assert.equal(typeof d.palette.L, 'string');
+  assert.ok(Q.layoutQuilt(d).blocks.length > 0);
+  assert.ok(C.cuttingPlan(d).fabrics.length > 0);
+});
+
+test('quilting stays quick on a huge quilt: the stitch budget loosens only what it must', () => {
+  const d = Q.normalizeDesign(Q.defaultDesign());
+  d.blocks[0] = K.libraryBlock('bears-paw');
+  d.cols = 12; d.rows = 14;
+  const L = Q.layoutQuilt(d);
+  for (const [pattern, spacing] of [['stipple', 0.5], ['meander', 0.5], ['fan', 0.5]]) {
+    const t0 = performance.now();
+    const paths = P.quiltingPaths(d, L, { pattern, spacing });
+    const pts = paths.reduce((s, p) => s + p.pts.length, 0);
+    assert.ok(pts < 200000, `${pattern}: ${pts} points`);
+    assert.ok(performance.now() - t0 < 1500, `${pattern} took too long`);
+    assert.equal(P.quiltingLoosened(d, L, { pattern, spacing }), true);
+  }
+  // The sample lap quilt at the default spacing is drawn exactly as asked.
+  const s = Q.normalizeDesign(Q.defaultDesign());
+  for (const pattern of ['stipple', 'meander', 'fan']) assert.equal(P.quiltingLoosened(s, Q.layoutQuilt(s), { pattern, spacing: 1.5 }), false, pattern);
+  const g = P.meanderGrid(180, 208, 0.225, 9000);
+  assert.ok(g.capped && g.cols * g.rows <= 9000 && g.cell > 0.225);
+  assert.deepEqual(P.meanderGrid(54, 68, 0.675), { cols: 40, rows: 51, cell: 0.675, capped: false });
+});
+
+test('baptist fan: neighbor lookup gives the same arcs as checking every fan', () => {
+  // Reference: the original all-pairs version.
+  const ref = (w, h, sp) => {
+    const R = 4 * sp, Rmax = 1.45 * R, n = Math.floor(Rmax / sp + 1e-9);
+    const fans = [];
+    for (let cy = 0; cy <= h + R; cy += R) for (let cx = Math.floor(w / R) * R; cx >= -R; cx -= R) fans.push([cx, cy]);
+    const inFan = ([x, y], [cx, cy]) => x >= cx - 1e-9 && y <= cy + 1e-9 && Math.hypot(x - cx, y - cy) < Rmax - 1e-6;
+    const out = [], done = [];
+    for (const c of fans) {
+      const near = done.filter(([ox, oy]) => Math.abs(ox - c[0]) <= R + 1e-6 && Math.abs(oy - c[1]) <= R + 1e-6);
+      for (let k = 1; k <= n; k++) {
+        const r = k * sp, segs = Math.max(8, Math.round(r * 4));
+        let run = [];
+        for (let s = 0; s <= segs; s++) {
+          const a = -Math.PI / 2 + (Math.PI / 2) * (s / segs);
+          const p = [c[0] + r * Math.cos(a), c[1] + r * Math.sin(a)];
+          const hidden = near.some((o) => inFan(p, o)) || p[0] < -1 || p[0] > w + 1 || p[1] < -1 || p[1] > h + 1;
+          if (!hidden) run.push(p); else { if (run.length > 1) out.push({ pts: run }); run = []; }
+        }
+        if (run.length > 1) out.push({ pts: run });
+      }
+      done.push(c);
+    }
+    return out;
+  };
+  assert.deepEqual(P.baptistFan(30, 26, 1.5), ref(30, 26, 1.5));
+});
+
+/** Which fill covers point p (quilt inches) — sampled from the laid-out patches. */
+function fillAt(d, L, p) {
+  for (const q of Q.quiltPatches(d, L)) if (K.pointInPoly(p, q.pts)) return q.fill;
+  return null;
+}
+
+test('half-square triangle settings: barn raising, straight furrows, streak of lightning', () => {
+  const base = Q.applyPreset(Q.defaultDesign(), 'barn-raising');
+  base.borders = [];
+  const at = (d, L, r, c, side) => {
+    const inst = L.blocks[r * d.cols + c];
+    const B = d.size;
+    const x = inst.cx + (side === 'L' ? -B / 2 + 0.05 : side === 'R' ? B / 2 - 0.05 : 0);
+    const y = inst.cy + (side === 'T' ? -B / 2 + 0.05 : side === 'B' ? B / 2 - 0.05 : 0);
+    return fillAt(d, L, [x, y]);
+  };
+  // Barn raising: the center four meet in a diamond of one color, and the
+  // quilt is the same turned a quarter (fourfold symmetry).
+  {
+    const d = { ...base, rotate: 'barn' };
+    const L = Q.layoutQuilt(d);
+    const n = d.rows;
+    const rot = (r, c) => L.blocks[r * n + c].rot;
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) assert.equal(rot(c, n - 1 - r), (rot(r, c) + 1) % 4, `barn ${r},${c}`);
+    const m = n / 2;
+    const around = [at(d, L, m - 1, m - 1, 'R'), at(d, L, m - 1, m, 'L'), at(d, L, m, m - 1, 'R'), at(d, L, m, m, 'L')];
+    assert.equal(new Set(around).size, 1);
+  }
+  // Furrows: along every anti-diagonal the turn is the same; across each
+  // shared edge the two triangles match, so the bands are unbroken.
+  {
+    const d = { ...base, rotate: 'furrows' };
+    const L = Q.layoutQuilt(d);
+    for (let r = 0; r < d.rows; r++) for (let c = 1; c < d.cols; c++) assert.equal(at(d, L, r, c - 1, 'R'), at(d, L, r, c, 'L'), `furrows ${r},${c}`);
+  }
+  // Lightning: dark and light meet edge to edge across the columns, and down
+  // each column the diagonal flips every row (the zigzag).
+  {
+    const d = { ...base, rotate: 'lightning' };
+    const L = Q.layoutQuilt(d);
+    for (let r = 0; r < d.rows; r++) for (let c = 1; c < d.cols; c++) assert.equal(at(d, L, r, c - 1, 'R'), at(d, L, r, c, 'L'), `lightning ${r},${c}`);
+    for (let r = 1; r < d.rows; r++) for (let c = 0; c < d.cols; c++) assert.notEqual(L.blocks[r * d.cols + c].rot % 2, L.blocks[(r - 1) * d.cols + c].rot % 2);
+    // Neighboring bands alternate: dark on the left of column 0, light on the left of column 1.
+    assert.notEqual(at(d, L, 0, 0, 'L'), at(d, L, 0, 1, 'L'));
+  }
+});
+
+test('Trip Around the World colors rings from the center out', () => {
+  const d = Q.applyPreset(Q.defaultDesign(), 'trip-around-the-world');
+  assert.ok(d.rings && d.rows % 2 === 1 && d.cols % 2 === 1);
+  const role = Q.ringRoles(d);
+  const idx = (r, c) => r * d.cols + c;
+  const mr = (d.rows - 1) / 2, mc = (d.cols - 1) / 2;
+  assert.equal(role(idx(mr, mc)), 'D');
+  assert.equal(role(idx(mr - 1, mc)), Q.RING_ORDER[1]);
+  assert.equal(role(idx(mr, mc + 1)), role(idx(mr + 1, mc)));
+  assert.equal(role(idx(mr - 2, mc)), role(idx(mr - 1, mc + 1))); // a diamond, not a circle
+  const res = Q.makeResolver(d, []);
+  assert.equal(res('L', idx(mr, mc)), d.palette.D);
+  assert.equal(res('L', -1), d.palette.L); // pieces outside the blocks keep their fabric
+  assert.equal(Q.ringRoles({ ...d, setting: 'onpoint' }), null);
+});
+
+test('every whole-quilt layout lays out and cuts', () => {
+  for (const p of Q.LAYOUT_PRESETS) {
+    const d = Q.applyPreset(Q.defaultDesign(), p.id);
+    const L = Q.layoutQuilt(d);
+    assert.ok(L.blocks.length >= 25, p.id);
+    const plan = C.cuttingPlan(d, Q.makeResolver(d, []), L);
+    for (const f of plan.fabrics) for (const c of f.cuts) assert.ok(Number.isFinite(c.w) && Number.isFinite(c.h) && c.n > 0, `${p.id} ${c.what}`);
+  }
+  // Single Irish Chain: nine patches at the corners, plain blocks between.
+  const s = Q.layoutQuilt(Q.applyPreset(Q.defaultDesign(), 'single-irish-chain'));
+  assert.equal(s.blocks[0].kind, 'block');
+  assert.equal(s.blocks[1].kind, 'plain');
+  // Double Irish Chain: the medium chain carries from the pieced block into the plain block's corner.
+  const dd = Q.applyPreset(Q.defaultDesign(), 'double-irish-chain');
+  const dl = Q.layoutQuilt(dd);
+  const cell = dd.size / 5;
+  const a = dl.blocks[0];
+  const right = fillAt(dd, dl, [a.cx + dd.size / 2 + cell / 2, a.cy - dd.size / 2 + cell / 2]); // B's top-left cell
+  assert.equal(right, 'M');
+  assert.equal(fillAt(dd, dl, [a.cx + dd.size / 2 - cell / 2, a.cy - dd.size / 2 + cell * 1.5]), 'M'); // A's chain next to it
+});
+
+test('every library block has a cutting list: eighth-inch sizes, every fabric it uses', () => {
+  for (const item of K.LIBRARY) {
+    const b = K.libraryBlock(item.id);
+    const d = Q.normalizeDesign({ ...Q.defaultDesign(), size: b.n * 2, rows: 1, cols: 1, sash: { w: 0 }, borders: [], blocks: [b, b] });
+    const plan = C.cuttingPlan(d, (f) => f);
+    const used = new Set(b.units.flatMap((u) => u.f));
+    const cut = new Set(plan.fabrics.filter((f) => f.cuts.some((c) => !c.long)).map((f) => f.fab));
+    for (const f of used) assert.ok(cut.has(f), `${item.name}: nothing cut from ${f}`);
+    for (const f of plan.fabrics) for (const c of f.cuts) {
+      assert.ok(C.isEighth(c.w) && C.isEighth(c.h), `${item.name}: ${c.what} ${c.w} × ${c.h}`);
+      assert.ok(c.n > 0 && c.w >= 0.5);
+    }
+  }
+  // The flipped corner (Bow Tie): a base square and a half-size corner square, nothing else.
+  const bow = Q.normalizeDesign({ ...Q.defaultDesign(), size: 8, rows: 1, cols: 1, sash: { w: 0 }, borders: [], blocks: [K.libraryBlock('bow-tie'), K.libraryBlock('bow-tie')] });
+  const cuts = C.cuttingPlan(bow).fabrics.flatMap((f) => f.cuts.filter((c) => !c.long).map((c) => `${f.fab} ${c.n}×${c.w}`));
+  assert.deepEqual(cuts.sort(), ['D 2×4.5', 'D 2×2.5', 'L 2×4.5'].sort());
+});
+
+test('more quilting designs: every one draws, stays in budget, and borders can have their own', () => {
+  const d = Q.normalizeDesign(Q.defaultDesign());
+  const L = Q.layoutQuilt(d);
+  for (const p of P.PATTERNS) {
+    if (p.id === 'none') continue;
+    const l = P.quiltingLayers(d, L, { pattern: p.id, spacing: 1.5, border: 'same' });
+    assert.ok(l.center.length > 0, p.id);
+    for (const pl of l.center) for (const [x, y] of pl.pts) assert.ok(Number.isFinite(x) && Number.isFinite(y), p.id);
+    assert.equal(l.clip, null);
+    assert.equal(l.border.length, 0);
+  }
+  for (const border of ['feather', 'cable', 'lines']) {
+    const l = P.quiltingLayers(d, L, { pattern: 'meander', spacing: 1.5, border });
+    assert.ok(l.border.length > 0, border);
+    assert.deepEqual(l.clip, L.center);
+    // Border stitches stay inside the border frame.
+    for (const pl of l.border) for (const [x, y] of pl.pts) {
+      assert.ok(x > -1e-6 && y > -1e-6 && x < L.w + 1e-6 && y < L.h + 1e-6);
+      assert.ok(!(x > L.center.x + 0.3 && x < L.center.x + L.center.w - 0.3 && y > L.center.y + 0.3 && y < L.center.y + L.center.h - 0.3), `${border} inside the center`);
+    }
+  }
+  // No borders: nothing separate to quilt.
+  assert.equal(P.bordersSeparate({ ...d, borders: [] }, { border: 'feather' }), false);
+  // Huge quilt: every design stays within the stitch budget.
+  const big = Q.normalizeDesign({ ...d, cols: 12, rows: 14, blocks: [K.libraryBlock('bears-paw'), d.blocks[1]] });
+  const BL = Q.layoutQuilt(big);
+  for (const p of P.PATTERNS) for (const sp of [0.5, 1.5]) {
+    const pts = P.quiltingPaths(big, BL, { pattern: p.id, spacing: sp, border: 'feather' }).reduce((s, x) => s + x.pts.length, 0);
+    assert.ok(pts < 210000, `${p.id} at ${sp}: ${pts}`);
+  }
+  // The arc helper puts its middle the asked distance off the chord.
+  const a = P.arc([0, 0], [4, 0], 1, 8);
+  assert.ok(near(a[4][0], 2) && near(Math.abs(a[4][1]), 1));
 });

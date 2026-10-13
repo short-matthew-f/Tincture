@@ -1,6 +1,8 @@
 // Quilt designer UI. Geometry, layout, cutting and quilting math live in the
 // pure modules next to this file; this file draws and listens.
-import { ensureStarters, fabrics as stashFabrics, onStashChange } from '../fabric/stash.js';
+import * as Stash from '../fabric/stash.js';
+
+const { ensureStarters, fabrics: stashFabrics, onStashChange } = Stash;
 import * as K from './blocks.js';
 import * as Q from './layout.js';
 import * as C from './cutting.js';
@@ -24,14 +26,40 @@ let store = { v: 1, current: null, saved: [], hintDone: false };
 let design = Q.defaultDesign();
 let history = [];
 let stash = [];
-const ui = { tab: 'block', view: 'quilt', tool: 'fill', brush: 'D', edit: 0, joinSel: -1, z: 1, px: 0, py: 0 };
+const ui = { tab: 'block', view: 'quilt', tool: 'fill', brush: 'D', edit: 0, joinSel: -1, z: 1, px: 0, py: 0, notice: '', removed: null };
+
+const SESSION_KEY = 'tincture.proto.quilt.session';
+
+/** True if a design can be laid out and cut without throwing. */
+function usable(d) {
+  try { Q.layoutQuilt(d); C.cuttingPlan(d, (f) => Q.resolveRole(d, f)); return true; } catch { return false; }
+}
 
 function loadStore() {
   try {
     const s = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
-    if (s && s.v === 1) store = { ...store, ...s, saved: Array.isArray(s.saved) ? s.saved : [] };
+    if (s && s.v === 1) store = { ...store, ...s, saved: Array.isArray(s.saved) ? s.saved.filter((x) => x && x.design) : [] };
   } catch { /* storage blocked: start fresh */ }
-  if (store.current) design = Q.normalizeDesign(store.current);
+  if (store.current) {
+    let d = null;
+    try { d = Q.normalizeDesign(store.current); } catch { d = null; }
+    if (d && usable(d)) design = d;
+    else {
+      // Never let a damaged save lock the page: keep a copy, open the sample.
+      try { localStorage.setItem(`${STORE_KEY}.rescued`, JSON.stringify(store.current)); } catch { /* full */ }
+      store.current = null;
+      ui.notice = 'Your last quilt could not be opened, so here is the sample. Your saved quilts are safe.';
+    }
+  }
+  // Undo history and the open tab survive a reload (iOS reloads tabs left in the background).
+  try {
+    const ss = JSON.parse(sessionStorage.getItem(SESSION_KEY) || 'null');
+    if (ss && Array.isArray(ss.history)) history = ss.history.filter((x) => typeof x === 'string').slice(-40);
+    if (ss && typeof ss.tab === 'string') ui.tab = ss.tab;
+  } catch { /* no session storage */ }
+}
+function saveSession() {
+  try { sessionStorage.setItem(SESSION_KEY, JSON.stringify({ history: history.slice(-40), tab: ui.tab })); } catch { /* full or blocked */ }
 }
 function saveStore() {
   store.current = design;
@@ -45,19 +73,33 @@ function saveStore() {
 }
 
 function commit(next, { keep = false } = {}) {
+  if (!usable(next)) {
+    toast('That change would not lay out, so the quilt stays as it was.');
+    return false;
+  }
   if (!keep) {
     history.push(JSON.stringify(design));
     if (history.length > 80) history.shift();
   }
   design = next;
   saveStore();
+  saveSession();
   invalidate();
+  flashMini();
+  return true;
 }
 function undo() {
-  if (!history.length) return;
-  design = JSON.parse(history.pop());
+  if (!history.length) { toast('Nothing to undo yet.'); return; }
+  try { design = Q.normalizeDesign(JSON.parse(history.pop())); } catch { /* skip a bad step */ }
+  ui.joinSel = -1;
   saveStore();
+  saveSession();
   invalidate();
+  flashMini();
+  toast('Undone.');
+}
+function syncUndo() {
+  for (const id of ['undoBtn', 'dockUndo']) $(id).setAttribute('aria-disabled', String(!history.length));
 }
 const clone = (x) => JSON.parse(JSON.stringify(x));
 
@@ -68,7 +110,11 @@ const fabCache = new Map(); // id -> { f, src (canvas|img), w }
 function fabricById(id) { return stash.find((f) => f.id === id) || null; }
 function fabricName(id) {
   if (K.ROLES.includes(id)) return fabricName(design.palette[id]);
-  return fabricById(id)?.name || 'Missing fabric';
+  const f = fabricById(id);
+  if (f) return f.name;
+  // Taken out of the stash since it was sewn in: keep calling it by its name.
+  const gone = fabCache.get(id)?.f.name;
+  return gone ? `${gone} (no longer in your stash)` : 'A fabric no longer in your stash';
 }
 function fabricImg(id) {
   const rid = Q.resolveRole(design, id);
@@ -176,41 +222,99 @@ function drawPieces(ctx, layout, seam) {
   }
 }
 
-function drawQuilting(ctx, layout, k) {
-  const q = design.quilting;
-  if (!q || q.pattern === 'none') return;
-  const paths = P.quiltingPaths(design, layout, q);
-  const path = new Path2D();
+/**
+ * What the quilting depends on. Fabrics do not move stitches, so sewing a new
+ * fabric into a patch never recomputes them; only the pattern, the quilt's
+ * size and (for ditch and echo) the piecing geometry do.
+ */
+function quiltingKey(layout) {
+  const q = design.quilting || {};
+  const key = [q.pattern, q.spacing, q.border, layout.w, layout.h, design.borders.map((b) => b.w)];
+  if (['ditch', 'echo', 'curves', 'sqsq'].includes(q.pattern)) {
+    const geo = (b) => [b.n, b.units.map((u) => [u.x, u.y, u.w, u.h, u.t, u.rot, u.flip])];
+    key.push(design.size, design.rows, design.cols, design.setting, design.alt, design.sash.w, design.sash.outer,
+      design.rotate, design.mirror, design.blocks.map(geo));
+  }
+  return JSON.stringify(key);
+}
+/**
+ * Polylines to Path2D, in batches: one path holding thousands of small
+ * closed shapes (pebbles, curves in every patch) strokes many times slower
+ * than the same shapes split into a few hundred paths.
+ */
+function toPath(paths, batch = 2500) {
+  const out = [];
+  let path = new Path2D();
+  let inPath = 0;
+  let count = 0;
   for (const pl of paths) {
     const pts = pl.pts;
     if (pts.length < 2) continue;
+    count += pts.length;
     path.moveTo(pts[0][0], pts[0][1]);
     for (let i = 1; i < pts.length; i++) path.lineTo(pts[i][0], pts[i][1]);
     if (pl.closed) path.closePath();
+    inPath += pts.length;
+    if (inPath >= batch) { out.push(path); path = new Path2D(); inPath = 0; }
   }
+  if (inPath) out.push(path);
+  return { path: out, count };
+}
+let qPath = { key: '', center: null, border: null, clip: null, count: 0 };
+function quiltingPath(layout) {
+  const key = quiltingKey(layout);
+  if (qPath.key === key) return qPath;
+  const l = P.quiltingLayers(design, layout, design.quilting);
+  const c = toPath(l.center);
+  const b = toPath(l.border);
+  qPath = { key, center: c.path, border: b.count ? b.path : null, clip: l.clip, count: c.count + b.count };
+  return qPath;
+}
+
+function drawQuilting(ctx, layout, k) {
+  const q = design.quilting;
+  if (!q || q.pattern === 'none') return;
+  const { center, border, clip, count } = quiltingPath(layout);
+  const inner = new Path2D();
+  // Stitches stop at the binding.
+  inner.rect(0.375, 0.375, layout.w - 0.75, layout.h - 0.75);
+  if (clip) {
+    const c = new Path2D(); c.rect(clip.x, clip.y, clip.w, clip.h);
+    stitch(ctx, center, c, q, count, k);
+    if (border) {
+      const ring = new Path2D(); ring.rect(0.375, 0.375, layout.w - 0.75, layout.h - 0.75); ring.rect(clip.x, clip.y, clip.w, clip.h);
+      stitch(ctx, border, ring, q, count, k, 'evenodd');
+    }
+  } else stitch(ctx, center, inner, q, count, k);
+}
+
+function stitch(ctx, path, clipPath, q, count, k, rule = 'nonzero') {
   const px = 1 / k; // one device pixel in inches
   ctx.save();
-  ctx.beginPath(); ctx.rect(0, 0, layout.w, layout.h); ctx.clip();
+  ctx.clip(clipPath, rule);
   ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-  // The batting puffs up between the lines; the stitches sink in.
+  // The batting puffs up between the lines; the stitches sink in. Dense
+  // quilting gets one soft shadow pass instead of three (it is the same look
+  // at that density, at a third of the cost).
   const ditch = q.pattern === 'ditch';
-  for (const [w, a] of [[0.42, 0.045], [0.26, 0.06], [0.13, 0.08]]) {
+  const puff = count > 60000 ? [[0.3, 0.12]] : [[0.42, 0.045], [0.26, 0.06], [0.13, 0.08]];
+  for (const [w, a] of puff) {
     ctx.strokeStyle = `rgba(40,24,8,${a * (ditch ? 1.3 : 1)})`;
     ctx.lineWidth = Math.max(w, px * 1.2);
-    ctx.stroke(path);
+    for (const pp of path) ctx.stroke(pp);
   }
   ctx.save();
   ctx.translate(-Math.max(0.05, px), -Math.max(0.05, px));
   ctx.strokeStyle = 'rgba(255,252,240,.16)';
   ctx.lineWidth = Math.max(0.09, px);
-  ctx.stroke(path);
+  for (const pp of path) ctx.stroke(pp);
   ctx.restore();
   // The thread
   ctx.strokeStyle = q.thread || '#EFE6D2';
   ctx.globalAlpha = ditch ? 0.35 : 0.92;
   ctx.lineWidth = Math.max(0.035, px * 0.9);
   if (k > 14) ctx.setLineDash([0.12, 0.045]);
-  ctx.stroke(path);
+  for (const pp of path) ctx.stroke(pp);
   ctx.restore();
 }
 
@@ -238,7 +342,12 @@ function drawBinding(ctx, layout, k) {
 }
 
 /** Renders the whole quilt into ctx at k px per inch (ctx untransformed). */
-function renderQuilt(ctx, k, { quilting = true } = {}) {
+function renderQuilt(ctx, k, { quilting = true, base = true } = {}) {
+  if (!base) {
+    const layout = Q.layoutQuilt(design);
+    ctx.save(); ctx.scale(k, k); drawQuilting(ctx, layout, k); ctx.restore();
+    return layout;
+  }
   const layout = Q.layoutQuilt(design);
   ctx.save();
   ctx.scale(k, k);
@@ -257,8 +366,8 @@ function renderQuilt(ctx, k, { quilting = true } = {}) {
     drawBlockLocal(ctx, block, B, inst, { seam });
     ctx.restore();
   }
-  if (quilting) drawQuilting(ctx, layout, k);
   drawBinding(ctx, layout, k);
+  if (quilting) drawQuilting(ctx, layout, k);
   // A whisper of light across the cloth.
   const g = ctx.createLinearGradient(0, 0, layout.w, layout.h);
   g.addColorStop(0, 'rgba(255,248,230,.07)');
@@ -273,10 +382,23 @@ function renderQuilt(ctx, k, { quilting = true } = {}) {
 
 const qc = $('quilt');
 const qbox = $('quiltBox');
+// Two layers: the patchwork, and the quilting stitched over it. Sewing a new
+// fabric into a patch redraws only the patchwork; the stitches (the costly
+// part on a big quilt) are redrawn only when they themselves change.
 const off = document.createElement('canvas');
+const offQ = document.createElement('canvas');
 let offK = 0;
 let offDirty = true;
 let layoutCache = null;
+let stitchedKey = ''; // what offQ holds: quilting key @ k
+let stitchedQ = ''; // ... and the quilting key alone
+let stitchTimer = 0;
+let lastStitchMs = 0;
+let hiResTimer = 0;
+let lastZoomAt = 0;
+let gestureActive = false;
+// Under iOS Safari's canvas size limit, leaving room for the export canvas.
+const MAX_SIDE = 3072;
 
 function boxSize() { return { w: qbox.clientWidth, h: qbox.clientHeight }; }
 function fitK() {
@@ -287,15 +409,44 @@ function fitK() {
 
 function renderOff(k) {
   const s = Q.quiltSize(design);
-  const maxSide = 4096;
-  k = Math.min(k, maxSide / Math.max(s.w, s.h));
+  k = Math.min(k, MAX_SIDE / Math.max(s.w, s.h));
   off.width = Math.ceil(s.w * k);
   off.height = Math.ceil(s.h * k);
   const ctx = off.getContext('2d');
   ctx.clearRect(0, 0, off.width, off.height);
-  layoutCache = renderQuilt(ctx, k);
   offK = k;
-  offDirty = false;
+  offDirty = false; // before drawing: a failure must not retry every frame
+  layoutCache = renderQuilt(ctx, k, { quilting: false });
+}
+
+function quiltingNow() {
+  const layout = layoutCache || Q.layoutQuilt(design);
+  const q = design.quilting?.pattern === 'none' ? 'none' : quiltingKey(layout);
+  return { q, key: `${q}@${offK}` };
+}
+
+function renderStitches() {
+  stitchTimer = 0;
+  if (gestureActive) { stitchTimer = setTimeout(renderStitches, 200); return; }
+  const { q, key } = quiltingNow();
+  if (stitchedKey === key) return;
+  const t0 = performance.now();
+  try {
+    offQ.width = off.width;
+    offQ.height = off.height;
+    const ctx = offQ.getContext('2d');
+    ctx.clearRect(0, 0, offQ.width, offQ.height);
+    if (q !== 'none') renderQuilt(ctx, offK, { base: false });
+  } catch (err) {
+    console.error(err);
+  } finally {
+    // Recorded even after a failure, so a bad pattern is never retried in a loop.
+    stitchedKey = key;
+    stitchedQ = q;
+    lastStitchMs = performance.now() - t0;
+    $('stitchTag').hidden = true;
+    schedule();
+  }
 }
 
 let raf = 0;
@@ -307,7 +458,10 @@ function invalidate() {
 }
 function schedule() {
   if (raf) return;
-  raf = requestAnimationFrame(() => { raf = 0; drawView(); });
+  raf = requestAnimationFrame(() => {
+    raf = 0;
+    try { drawView(); } catch (err) { console.error(err); }
+  });
 }
 
 function sizeBox() {
@@ -323,7 +477,15 @@ function drawView() {
   if (qc.width !== Math.round(w * DPR) || qc.height !== Math.round(h * DPR)) { qc.width = Math.round(w * DPR); qc.height = Math.round(h * DPR); }
   const k = fitK() * ui.z;
   const want = k * DPR;
-  if (offDirty || want > offK * 1.15 + 0.01) renderOff(Math.max(want, fitK() * DPR * 1.5));
+  const base = Math.max(want, fitK() * DPR * 1.5);
+  if (offDirty) renderOff(base);
+  else if (want > offK * 1.15 + 0.01) {
+    // Sharpen after the pinch settles, not on every step of it.
+    if (gestureActive || performance.now() - lastZoomAt < 180) {
+      clearTimeout(hiResTimer);
+      hiResTimer = setTimeout(() => { hiResTimer = 0; schedule(); }, 220);
+    } else renderOff(base);
+  }
   const s = Q.quiltSize(design);
   const ctx = qc.getContext('2d');
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
@@ -342,7 +504,17 @@ function drawView() {
   ctx.restore();
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(off, x, y, qw, qh);
-  qbox.classList.toggle('zoomed', ui.z > 1.01);
+  const now = quiltingNow();
+  // Stitches of the same pattern at another zoom are still right, just softer.
+  if (stitchedQ === now.q && now.q !== 'none' && offQ.width) ctx.drawImage(offQ, x, y, qw, qh);
+  if (stitchedKey !== now.key) {
+    if (stitchedQ !== now.q && lastStitchMs > 120) $('stitchTag').hidden = false;
+    if (!stitchTimer) stitchTimer = setTimeout(renderStitches, 30);
+  }
+  const zoomed = ui.z > 1.01;
+  qbox.classList.toggle('zoomed', zoomed);
+  $('zoomHint').textContent = zoomed ? 'Drag to look around. Fit shows the whole quilt.' : 'Pinch or double-tap to look closer.';
+  drawMini();
 }
 
 function clampPan() {
@@ -366,27 +538,29 @@ function zoomAt(f, cx, cy) {
   ui.py -= oy * (z1 / z0 - 1);
   ui.z = z1;
   if (ui.z <= 1.001) { ui.px = 0; ui.py = 0; }
+  lastZoomAt = performance.now();
+  // Looking closer means up close: stand back is a whole-quilt view.
+  if (ui.z > 1.01 && ui.view === 'back') setView('quilt');
   schedule();
 }
 
 (function quiltGestures() {
   const pts = new Map();
   let last = null;
-  let lastTap = 0;
+  let down = null; // a one-finger touch that may still be a tap
+  let lastTap = null;
   qbox.addEventListener('pointerdown', (e) => {
     pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    if (ui.z > 1.01 || pts.size > 1) qbox.setPointerCapture(e.pointerId);
+    if (ui.z > 1.01 || pts.size > 1) { try { qbox.setPointerCapture(e.pointerId); } catch { /* already gone */ } }
     last = null;
-    const now = e.timeStamp;
-    if (pts.size === 1 && now - lastTap < 300) {
-      const r = qbox.getBoundingClientRect();
-      zoomAt(ui.z > 1.5 ? 1 / ui.z : 2.5, e.clientX - r.left, e.clientY - r.top);
-      lastTap = 0;
-    } else lastTap = now;
+    gestureActive = true;
+    down = pts.size === 1 ? { t: e.timeStamp, x: e.clientX, y: e.clientY, moved: false } : null;
+    if (pts.size > 1) lastTap = null;
   });
   qbox.addEventListener('pointermove', (e) => {
     if (!pts.has(e.pointerId)) return;
     pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 10) down.moved = true;
     const arr = [...pts.values()];
     const r = qbox.getBoundingClientRect();
     if (arr.length >= 2) {
@@ -404,7 +578,23 @@ function zoomAt(f, cx, cy) {
       last = { p: a };
     }
   });
-  const end = (e) => { pts.delete(e.pointerId); last = null; };
+  const end = (e) => {
+    const had = pts.delete(e.pointerId);
+    last = null;
+    // A double tap is two real taps close together: a quick flick to scroll
+    // the page (which the browser cancels) never counts, so scrolling past
+    // the quilt can't zoom it by surprise.
+    if (e.type === 'pointerup' && had && down && !down.moved && !pts.size && e.timeStamp - down.t < 350) {
+      const tap = { t: e.timeStamp, x: e.clientX, y: e.clientY };
+      if (lastTap && tap.t - lastTap.t < 380 && Math.hypot(tap.x - lastTap.x, tap.y - lastTap.y) < 40) {
+        const r = qbox.getBoundingClientRect();
+        zoomAt(ui.z > 1.5 ? 1 / ui.z : 2.5, tap.x - r.left, tap.y - r.top);
+        lastTap = null;
+      } else lastTap = tap;
+    } else if (e.type === 'pointercancel' || (down && down.moved)) lastTap = null;
+    down = null;
+    if (!pts.size) { gestureActive = false; schedule(); }
+  };
   qbox.addEventListener('pointerup', end);
   qbox.addEventListener('pointercancel', end);
   qbox.addEventListener('wheel', (e) => {
@@ -417,16 +607,73 @@ function zoomAt(f, cx, cy) {
   $('zFit').onclick = () => { ui.z = 1; ui.px = 0; ui.py = 0; schedule(); };
 }());
 
+function setView(v) {
+  ui.view = v;
+  for (const x of $('viewSeg').children) x.setAttribute('aria-pressed', String(x.dataset.v === v));
+  qbox.classList.toggle('back', v === 'back');
+  qbox.classList.toggle('value', v === 'value');
+  $('viewTag').textContent = v === 'back' ? 'From across the room' : 'Value only: lights and darks';
+  if (v === 'back') { ui.z = 1; ui.px = 0; ui.py = 0; }
+  schedule();
+}
 $('viewSeg').addEventListener('click', (e) => {
   const b = e.target.closest('button');
-  if (!b) return;
-  ui.view = b.dataset.v;
-  for (const x of $('viewSeg').children) x.setAttribute('aria-pressed', String(x === b));
-  qbox.classList.toggle('back', ui.view === 'back');
-  qbox.classList.toggle('value', ui.view === 'value');
-  $('viewTag').textContent = ui.view === 'back' ? 'From across the room' : 'Value only: lights and darks';
-  if (ui.view === 'back') { ui.z = 1; ui.px = 0; ui.py = 0; schedule(); }
+  if (b) setView(b.dataset.v);
 });
+
+/* ------------------------------------------- the quilt, kept in view */
+
+// When the quilt scrolls out of sight (every control lives below it), a small
+// live copy docks at the bottom with Undo, so each change shows where it
+// lands. Tapping it goes back up to the quilt and the tabs.
+const dock = $('dock');
+const mini = $('mini');
+let quiltSeen = true;
+let miniFlash = 0;
+function drawMini() {
+  if (dock.hidden || !off.width) return;
+  const s = Q.quiltSize(design);
+  // As big as a phone can spare (about a seventh of the screen), so a
+  // secondary pattern from a turn or mirror can actually be seen down here.
+  const H = Math.round(Math.max(76, Math.min(124, window.innerHeight * 0.15)));
+  const W = Math.max(40, Math.min(170, Math.round((H * s.w) / s.h)));
+  document.documentElement.style.setProperty('--dockH', `${H + 14}px`);
+  const hh = Math.round(Math.min(H, (W * s.h) / s.w));
+  if (mini.width !== W * DPR || mini.height !== hh * DPR) {
+    mini.width = W * DPR; mini.height = hh * DPR;
+    mini.style.width = `${W}px`; mini.style.height = `${hh}px`;
+  }
+  const c = mini.getContext('2d');
+  c.setTransform(1, 0, 0, 1, 0, 0);
+  c.clearRect(0, 0, mini.width, mini.height);
+  c.imageSmoothingQuality = 'high';
+  c.drawImage(off, 0, 0, mini.width, mini.height);
+  if (stitchedQ === quiltingNow().q && offQ.width) c.drawImage(offQ, 0, 0, mini.width, mini.height);
+  mini.classList.toggle('value', ui.view === 'value');
+}
+function setDock(show) {
+  dock.hidden = !show;
+  document.body.classList.toggle('docked', show);
+  if (show) { $('dockCap').textContent = $('quiltCaption').textContent.split(' · ').slice(0, 2).join(' · '); drawMini(); }
+}
+function flashMini() {
+  if (dock.hidden || reduceMotion) return;
+  mini.classList.remove('flash');
+  void mini.offsetWidth;
+  mini.classList.add('flash');
+  clearTimeout(miniFlash);
+  miniFlash = setTimeout(() => mini.classList.remove('flash'), 500);
+}
+if ('IntersectionObserver' in window) {
+  new IntersectionObserver((entries) => {
+    for (const en of entries) quiltSeen = en.intersectionRatio > 0.35;
+    setDock(!quiltSeen);
+  }, { threshold: [0, 0.2, 0.35, 0.5, 1] }).observe(qbox);
+}
+$('dockQuilt').onclick = () => {
+  $('quiltCard').scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+};
+$('dockUndo').onclick = undo;
 
 function caption() {
   const s = Q.quiltSize(design);
@@ -471,6 +718,15 @@ function drawEditor() {
   ctx.strokeStyle = 'rgba(42,38,34,.35)';
   for (const u of block.units) ctx.strokeRect(u.x * cell, u.y * cell, u.w * cell, u.h * cell);
   ctx.setLineDash([]);
+  if (ui.press && block.units[ui.press.unit]) {
+    // Immediate acknowledgement under the finger, before the tap resolves.
+    const pp = K.blockPatches(block).find((q) => q.unit === ui.press.unit && q.patch === ui.press.patch);
+    if (pp) {
+      ctx.lineWidth = 3 / k;
+      ctx.strokeStyle = 'rgba(251,248,241,.95)';
+      ctx.stroke(polyPath(pp.pts.map(([x, y]) => [x * cell, y * cell])));
+    }
+  }
   if (ui.tool === 'join' && ui.joinSel >= 0 && block.units[ui.joinSel]) {
     const u = block.units[ui.joinSel];
     ctx.lineWidth = 4 / k;
@@ -501,19 +757,31 @@ function withBlock(fn, opts) {
   return true;
 }
 
-bc.addEventListener('pointerdown', (e) => {
-  const hit = hitPatch(e);
-  if (!hit) return;
-  bc.setPointerCapture(e.pointerId);
+// Touch model. The block fills most of a phone's width, so a swipe that
+// starts on it must still scroll the page: every tool acts on a tap (finger
+// down and up without travelling), Fabric also paints along a sideways drag,
+// and only Fussy (which needs to drag any way) holds the page still.
+const SLOP = 10;
+function setTool(t) {
+  ui.tool = t;
+  ui.joinSel = -1;
+  for (const x of $('toolSeg').children) x.setAttribute('aria-pressed', String(x.dataset.t === t));
+  bc.style.touchAction = t === 'fussy' ? 'none' : 'pan-y';
+  $('brushes').classList.toggle('idle', t !== 'fill');
+  toolHint();
+  brushLabel();
+  drawEditor();
+}
+
+function tapAction(hit) {
   const t = ui.tool;
-  if (t === 'fill') {
-    paintAt(hit, false);
-    pending = { mode: 'paint' };
-  } else if (t === 'shape') {
+  if (t === 'fill') paintAt(hit, false);
+  else if (t === 'shape') {
     withBlock((b) => { b.units[hit.unit] = K.nextShape(b.units[hit.unit]); return b; });
     toolHint(`${K.SHAPES[editBlock().units[hit.unit].t].name}. Tap again for the next shape.`);
   } else if (t === 'turn') {
     withBlock((b) => { b.units[hit.unit] = K.turnUnit(b.units[hit.unit]); return b; });
+    toolHint('Turned a quarter. Tap again to keep turning.');
   } else if (t === 'join') {
     const block = editBlock();
     if (ui.joinSel < 0) {
@@ -524,7 +792,7 @@ bc.addEventListener('pointerdown', (e) => {
     } else if (ui.joinSel === hit.unit) {
       const ok = withBlock((b) => K.splitUnit(b, hit.unit));
       ui.joinSel = -1;
-      toolHint(ok ? 'Split back into squares.' : 'Pick a unit, then a neighbor to join them.');
+      toolHint(ok ? 'Split back into squares.' : 'That one is a single square already. Pick a unit, then a neighbor to join them.');
       drawEditor();
     } else {
       const sel = ui.joinSel;
@@ -533,12 +801,40 @@ bc.addEventListener('pointerdown', (e) => {
       toolHint(ok ? 'Joined. Two squares side by side make a flying geese unit.' : 'Those two make an L, not a rectangle. Pick a unit, then a neighbor beside it.');
       drawEditor();
     }
-  } else if (t === 'fussy') {
-    pending = { mode: 'fussy', unit: hit.unit, patch: hit.patch, x: e.clientX, y: e.clientY, started: false };
+  }
+}
+
+bc.addEventListener('pointerdown', (e) => {
+  if (pending) return; // a second finger: ignore it
+  const hit = hitPatch(e);
+  if (!hit) return;
+  ui.press = hit;
+  drawEditor();
+  if (ui.tool === 'fussy') {
+    try { bc.setPointerCapture(e.pointerId); } catch { /* gone */ }
+    pending = { id: e.pointerId, mode: 'fussy', unit: hit.unit, patch: hit.patch, x: e.clientX, y: e.clientY, started: false };
+  } else {
+    pending = { id: e.pointerId, mode: 'tap', hit, x0: e.clientX, y0: e.clientY, mouse: e.pointerType === 'mouse' };
   }
 });
 bc.addEventListener('pointermove', (e) => {
-  if (!pending) return;
+  if (!pending || e.pointerId !== pending.id) return;
+  if (pending.mode === 'tap') {
+    const dx = e.clientX - pending.x0;
+    const dy = e.clientY - pending.y0;
+    if (Math.hypot(dx, dy) < SLOP) return;
+    if (ui.tool === 'fill' && (pending.mouse || Math.abs(dx) > Math.abs(dy))) {
+      // A sideways drag with Fabric: sew along it, as one undo step.
+      try { bc.setPointerCapture(e.pointerId); } catch { /* gone */ }
+      paintAt(pending.hit, false);
+      pending = { id: e.pointerId, mode: 'paint' };
+    } else {
+      pending = null; // the page is scrolling
+      ui.press = null;
+      drawEditor();
+      return;
+    }
+  }
   if (pending.mode === 'paint') {
     const hit = hitPatch(e);
     if (hit) paintAt(hit, true);
@@ -558,9 +854,23 @@ bc.addEventListener('pointermove', (e) => {
     if (first) commit(d); else { offDirty = true; drawEditor(); schedule(); }
   }
 });
-const endEdit = () => { if (pending?.mode === 'fussy' && pending.started) { saveStore(); invalidate(); } pending = null; };
-bc.addEventListener('pointerup', endEdit);
-bc.addEventListener('pointercancel', endEdit);
+bc.addEventListener('pointerup', (e) => {
+  const p = pending;
+  if (!p || e.pointerId !== p.id) return;
+  pending = null;
+  ui.press = null;
+  try {
+    if (p.mode === 'tap') tapAction(p.hit);
+    else if (p.mode === 'fussy' && p.started) { saveStore(); invalidate(); }
+  } finally { drawEditor(); }
+});
+bc.addEventListener('pointercancel', (e) => {
+  if (pending && e.pointerId !== pending.id) return;
+  if (pending?.mode === 'fussy' && pending.started) { saveStore(); invalidate(); }
+  pending = null;
+  ui.press = null;
+  drawEditor();
+});
 
 function paintAt(hit, dragging) {
   const block = editBlock();
@@ -577,22 +887,27 @@ function paintAt(hit, dragging) {
 }
 
 const TOOL_HINTS = {
-  fill: 'Tap or drag across patches to sew in the fabric you picked.',
+  fill: 'Tap a patch to sew in the fabric you picked, or drag sideways across a row.',
   shape: 'Tap a unit to change its shape: square, half-square triangle, quarter-square, and more.',
   turn: 'Tap a unit to give it a quarter turn.',
-  join: 'Tap a unit, then a neighbor, to join them into one bigger piece.',
-  fussy: 'Drag inside a patch to slide the fabric, so the motif you love lands in the middle.',
+  join: 'Tap a unit, then a neighbor, to join them into one bigger piece. Tap a joined unit twice to split it.',
+  fussy: 'Fussy cut: drag inside a patch to slide the fabric, so the motif you love lands in the middle. The page holds still while this tool is on.',
 };
 function toolHint(t) { $('toolHint').textContent = t || TOOL_HINTS[ui.tool]; }
 
+/** Says, in words, which fabric a tap sews (the chips alone are just colors). */
+function brushLabel() {
+  const el = $('brushLabel');
+  const role = K.ROLES.includes(ui.brush);
+  const name = `${role ? `${K.ROLE_NAMES[ui.brush]}: ` : ''}${fabricName(ui.brush)}`;
+  el.innerHTML = '';
+  if (ui.tool === 'fill') el.append('Sewing with ', Object.assign(document.createElement('b'), { textContent: name }));
+  else el.append(`${$('toolSeg').querySelector('[aria-pressed="true"]')?.textContent || ''} tool on. Pick a fabric to sew again.`);
+}
+
 $('toolSeg').addEventListener('click', (e) => {
   const b = e.target.closest('button');
-  if (!b) return;
-  ui.tool = b.dataset.t;
-  ui.joinSel = -1;
-  for (const x of $('toolSeg').children) x.setAttribute('aria-pressed', String(x === b));
-  toolHint();
-  drawEditor();
+  if (b) setTool(b.dataset.t);
 });
 $('whichSeg').addEventListener('click', (e) => {
   const b = e.target.closest('button');
@@ -629,11 +944,29 @@ function brushChip(fill, label) {
   if (label) { const s = document.createElement('span'); s.className = 'badge'; s.textContent = label; b.append(s); }
   b.onclick = () => {
     ui.brush = fill;
-    if (ui.tool !== 'fill') { ui.tool = 'fill'; for (const x of $('toolSeg').children) x.setAttribute('aria-pressed', String(x.dataset.t === 'fill')); }
+    if (ui.tool !== 'fill') setTool('fill');
     toolHint(`${label ? K.ROLE_NAMES[fill] + ' — ' : ''}${fabricName(fill)}. Tap a patch to sew it in.`);
     renderBrushes();
+    brushLabel();
   };
   return b;
+}
+
+/** When every fabric has been let go: say so, and offer the way back. */
+function emptyStash() {
+  const box = el('div', { class: 'note' }, el('p', { style: 'margin:0 0 6px', text: 'Your stash is empty, so the quilt shows plain stand-ins. Dye some fabrics, or bring the starter fabrics back.' }));
+  const row = el('div', { class: 'row' });
+  if (typeof Stash.restoreStarters === 'function') {
+    row.append(el('button', { class: 'btn small', text: 'Bring back the starters', onclick: async () => {
+      Stash.restoreStarters();
+      try { await loadFabrics(); } catch (err) { console.error(err); }
+      invalidate();
+      toast('The starter fabrics are back in your stash.');
+    } }));
+  }
+  row.append(el('a', { class: 'linkbtn', href: '../dye/', text: 'Dye fabrics →' }));
+  box.append(row);
+  return box;
 }
 
 function renderBrushes() {
@@ -644,18 +977,24 @@ function renderBrushes() {
   const sep = document.createElement('span'); sep.className = 'chip sep'; el.append(sep);
   for (const f of stash) el.append(brushChip(f.id, ''));
   el.scrollLeft = sl;
+  el.classList.toggle('idle', ui.tool !== 'fill');
 }
 
 function renderBlockPanel() {
+  // Block 2 only exists in the quilt with "Every other block: Block 2";
+  // never leave the editor on a block the quilt doesn't show.
+  if (design.alt !== 'block2' && ui.edit !== 0) { ui.edit = 0; ui.joinSel = -1; }
   const b = editBlock();
   $('blockName').textContent = b.name;
   const cell = design.size / b.n;
   $('blockMeta').textContent = `${b.n} × ${b.n} grid · ${design.size}" block · ${C.fmtFrac(cell)}" units`;
-  $('undoBtn').setAttribute('aria-disabled', String(!history.length));
+  syncUndo();
   const ws = $('whichSeg');
   ws.hidden = design.alt !== 'block2';
   for (const x of ws.children) x.setAttribute('aria-pressed', String(Number(x.dataset.w) === ui.edit));
   renderBrushes();
+  brushLabel();
+  $('stashNote').replaceChildren(...(stash.length ? [] : [emptyStash()]));
   renderGridSeg();
   drawEditor();
 }
@@ -685,12 +1024,18 @@ function sheetHead(inner, title, sub) {
   inner.append(h);
 }
 
+/** Runs fn with another design in place (for drawing previews), then puts yours back. */
+function withDesign(d, fn) {
+  const keep = design;
+  design = d;
+  refreshResolver();
+  try { return fn(); } finally { design = keep; refreshResolver(); }
+}
+
 function openLibrary() {
   openSheet((inner) => {
-    sheetHead(inner, 'Block library', 'Traditional blocks, shown with your Light, Medium, Dark and Accent fabrics.');
-    const grid = document.createElement('div');
-    grid.className = 'libgrid';
-    for (const item of K.LIBRARY) {
+    sheetHead(inner, 'Block library', 'Traditional blocks in your Light, Medium, Dark and Accent fabrics. Undo brings back the block you had.');
+    const blockCard = (item) => {
       const b = document.createElement('button');
       const cv = document.createElement('canvas');
       cv.width = cv.height = 220;
@@ -701,6 +1046,7 @@ function openLibrary() {
       const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = item.name;
       b.append(cv, nm);
       b.title = item.note;
+      b.setAttribute('aria-label', `${item.name}: ${item.note}`);
       b.onclick = () => {
         const d = clone(design);
         d.blocks[ui.edit] = K.libraryBlock(item.id);
@@ -709,6 +1055,29 @@ function openLibrary() {
         closeSheet();
         toast(`${item.name}: ${item.note}`);
       };
+      return b;
+    };
+    for (const g of K.GROUPS) {
+      inner.append(el('h4', { class: 'libh', text: g.name }));
+      const grid = el('div', { class: 'libgrid' });
+      for (const id of g.ids) { const item = K.LIBRARY.find((x) => x.id === id); if (item) grid.append(blockCard(item)); }
+      inner.append(grid);
+    }
+    if (ui.edit !== 0) return; // layouts change the whole quilt, so only from the first block
+    inner.append(el('h4', { class: 'libh', text: 'Whole-quilt layouts' }));
+    inner.append(el('p', { class: 'hint', style: 'margin:0 0 8px', text: 'These set the blocks, the setting and the size together. Your fabrics and borders stay; Undo brings back your quilt.' }));
+    const grid = el('div', { class: 'libgrid' });
+    for (const pre of Q.LAYOUT_PRESETS) {
+      const d = Q.applyPreset(design, pre.id);
+      const thumb = { ...d, borders: [] };
+      const cv = document.createElement('canvas');
+      const s = Q.quiltSize(thumb);
+      const k = 220 / Math.max(s.w, s.h);
+      cv.width = Math.ceil(s.w * k); cv.height = Math.ceil(s.h * k);
+      try { withDesign(thumb, () => renderQuilt(cv.getContext('2d'), k, { quilting: false })); } catch (err) { console.error(err); }
+      const b = el('button', { 'aria-label': `${pre.name}: ${pre.note}`, title: pre.note, onclick: () => {
+        if (commit(d)) { ui.edit = 0; closeSheet(); toast(`${pre.name}: ${pre.note}`); $('quiltCard').scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' }); }
+      } }, el('span', { class: 'lthumb' }, cv), el('span', { class: 'nm', text: pre.name }));
       grid.append(b);
     }
     inner.append(grid);
@@ -793,19 +1162,23 @@ function renderLayout() {
   const straight = d.setting === 'straight';
   p.append(el('h2', { text: 'Set the blocks' }));
   p.append(setting('Setting', seg([['straight', 'Straight'], ['onpoint', 'On point']], d.setting, (v) => change((x) => { x.setting = v; }), 'Setting')));
-  p.append(el('div', { class: 'setting col' }, el('span', { class: 'lbl', text: 'Finished block size' }),
-    seg(Q.BLOCK_SIZES.map((s) => [s, `${s}"`]), d.size, (v) => change((x) => { x.size = v; }), 'Block size', true)));
+  p.append(el('p', { class: 'hint tip', text: straight ? 'Straight: blocks in rows and columns. On point turns them 45° into diamonds, with setting triangles filling the edges.' : 'On point: blocks turned 45° into diamonds; setting triangles fill the sides and corner triangles the corners.' }));
+  const si = Q.BLOCK_SIZES.indexOf(d.size);
+  p.append(el('div', { class: 'setting' }, el('span', { class: 'lbl', text: 'Finished block size' }),
+    stepper(d.size, (st) => change((x) => { const i = si < 0 ? Q.BLOCK_SIZES.indexOf(12) : si; x.size = Q.BLOCK_SIZES[Math.max(0, Math.min(Q.BLOCK_SIZES.length - 1, i + st))]; }), 'inches', (v) => `${v}"`)));
+  p.append(el('p', { class: 'hint tip', text: 'Finished size, as sewn into the quilt; the cutting list adds the seam allowances.' }));
   p.append(setting(straight ? 'Blocks across' : 'Blocks across (on point)', stepper(d.cols, (s) => change((x) => { x.cols = Math.max(1, Math.min(16, x.cols + s)); }), 'columns')));
   p.append(setting(straight ? 'Blocks down' : 'Blocks down (on point)', stepper(d.rows, (s) => change((x) => { x.rows = Math.max(1, Math.min(16, x.rows + s)); }), 'rows')));
   p.append(el('div', { class: 'setting col' }, el('span', { class: 'lbl', text: 'Every other block' }),
-    seg([['none', 'Same block'], ['plain', 'Plain'], ['block2', 'Second block']], d.alt, (v) => change((x) => { x.alt = v; }), 'Alternate blocks', true)));
+    seg([['none', 'Same block'], ['plain', 'Plain'], ['block2', 'Block 2']], d.alt, (v) => change((x) => { x.alt = v; }), 'Alternate blocks', true)));
   if (d.alt === 'plain') p.append(setting('Plain block fabric', fabButton(d.altFill, (f) => change((x) => { x.altFill = f; }), 'Plain blocks')));
   if (d.alt === 'block2') {
     p.append(setting('Second block', el('button', { class: 'btn small', text: `${d.blocks[1].name} — change`, onclick: () => { ui.edit = 1; showTab('block'); openLibrary(); } })));
   }
   if (straight) {
     p.append(el('div', { class: 'setting col' }, el('span', { class: 'lbl', text: 'Sashing' }),
-      seg(Q.SASH_WIDTHS.map((w) => [w, w ? `${C.fmtFrac(w)}"` : 'None']), d.sash.w, (v) => change((x) => { x.sash.w = v; }), 'Sashing width', true)));
+      seg(Q.SASH_WIDTHS.map((w) => [w, w ? `${C.fmtFrac(w)}"` : 'None']), d.sash.w, (v) => change((x) => { x.sash.w = v; }), 'Sashing width', true),
+      el('span', { class: 'hint', text: 'Strips sewn between the blocks. Cornerstones are the small squares where they cross.' })));
     if (d.sash.w) {
       p.append(setting('Sashing', fabButton(d.sash.fill, (f) => change((x) => { x.sash.fill = f; }), 'Sashing')));
       p.append(setting('Cornerstones', fabButton(d.sash.stone, (f) => change((x) => { x.sash.stone = f; }), 'Cornerstones')));
@@ -817,8 +1190,12 @@ function renderLayout() {
 
   p.append(el('h2', { text: 'Secondary patterns', style: 'margin-top:14px' }));
   p.append(el('p', { class: 'hint', style: 'margin:0 0 6px', text: 'Turn or mirror every other block. Watch the corners where four blocks meet: new stars, chains and pinwheels appear.' }));
-  p.append(el('div', { class: 'setting col' }, el('span', { class: 'lbl', text: 'Turn' }),
-    seg([['none', 'None'], ['alt', 'Every other'], ['quad', 'Four ways']], d.rotate, (v) => change((x) => { x.rotate = v; }), 'Turn blocks', true)));
+  const turn = el('div', { class: 'seg grid3', role: 'group', 'aria-label': 'Turn blocks' });
+  for (const [v, text] of [['none', 'None'], ['alt', 'Every other'], ['quad', 'Four ways'], ['barn', 'Barn raising'], ['furrows', 'Furrows'], ['lightning', 'Lightning']]) {
+    turn.append(el('button', { 'aria-pressed': String(d.rotate === v), text, onclick: () => change((x) => { x.rotate = v; }) }));
+  }
+  p.append(el('div', { class: 'setting col' }, el('span', { class: 'lbl', text: 'Turn' }), turn,
+    el('span', { class: 'hint', text: 'Barn raising, straight furrows and streak of lightning are the classic ways to turn half-square triangles (and log cabins).' })));
   p.append(el('div', { class: 'setting col' }, el('span', { class: 'lbl', text: 'Mirror' }),
     seg([['none', 'None'], ['cols', 'Columns'], ['rows', 'Rows'], ['both', 'Both']], d.mirror, (v) => change((x) => { x.mirror = v; }), 'Mirror blocks', true)));
 
@@ -830,11 +1207,12 @@ function renderLayout() {
       el('div', { class: 'row' },
         stepper(b.w, (s) => change((x) => { const j = Math.max(0, Math.min(Q.BORDER_WIDTHS.length - 1, (wi < 0 ? 3 : wi) + s)); x.borders[i].w = Q.BORDER_WIDTHS[j]; }), 'inches', (v) => `${C.fmtFrac(v)}"`),
         fabButton(b.fill, (f) => change((x) => { x.borders[i].fill = f; }), `Border ${i + 1}`),
-        el('button', { class: 'linkbtn', text: 'Remove', onclick: () => change((x) => { x.borders.splice(i, 1); }) }))));
+        el('button', { class: 'linkbtn', text: 'Remove', onclick: () => { change((x) => { x.borders.splice(i, 1); }); toast(`Border ${i + 1} removed. Undo brings it back.`); } }))));
   });
   p.append(el('div', { class: 'row', style: 'margin:8px 0' }, el('button', { class: 'btn small', text: d.borders.length ? 'Add another border' : 'Add a border',
     onclick: () => change((x) => { x.borders.push({ w: x.borders.length ? 4 : 2, fill: x.borders.length ? 'D' : 'L' }); }) })));
   p.append(setting('Binding', fabButton(d.binding, (f) => change((x) => { x.binding = f; }), 'Binding')));
+  p.append(el('p', { class: 'hint tip', text: 'Binding is the narrow strip folded over the raw edge to finish the quilt.' }));
 }
 
 function renderFabrics() {
@@ -878,16 +1256,21 @@ function renderFabrics() {
   p.append(el('div', { class: 'row' }, el('button', { class: 'btn small primary', text: 'Swap them everywhere', onclick: () => {
     commit(Q.swapFabrics(design, ui.swapA, ui.swapB));
     [ui.swapA, ui.swapB] = [ui.swapB, ui.swapA];
-    toast('Swapped. Undo on the Block tab swaps them back.');
+    toast('Swapped. Undo swaps them back.');
   } })));
 
-  p.append(el('h2', { text: 'Scrappy', style: 'margin-top:16px' }));
-  p.append(el('p', { class: 'hint', style: 'margin:0 0 6px', text: 'Each block draws its own fabric from the same color family in your stash, the way a scrap quilt comes together.' }));
+  p.append(el('h2', { text: 'How the fabrics fall', style: 'margin-top:16px' }));
+  const mode = d.rings ? 'rings' : d.scrappy.on ? 'scrappy' : 'planned';
+  p.append(el('p', { class: 'hint', style: 'margin:0 0 6px', text: mode === 'rings'
+    ? 'Rings: every block takes one fabric by its ring around the center (Dark, Accent, Medium, Accent 2, Light, and round again), as in Trip Around the World.'
+    : mode === 'scrappy' ? 'Scrappy: each block draws its own fabric from the same color family in your stash, the way a scrap quilt comes together.'
+      : 'Planned: every block uses the fabrics as you placed them.' }));
   p.append(el('div', { class: 'row' },
-    seg([[false, 'Planned'], [true, 'Scrappy']], !!d.scrappy.on, (v) => change((x) => { x.scrappy.on = v; }), 'Scrappy'),
+    seg([['planned', 'Planned'], ['scrappy', 'Scrappy'], ['rings', 'Rings']], mode, (v) => change((x) => { x.scrappy.on = v === 'scrappy'; x.rings = v === 'rings'; if (v === 'rings') x.setting = 'straight'; }), 'How the fabrics fall'),
     d.scrappy.on ? el('button', { class: 'btn small', text: 'Shuffle the scraps', onclick: () => change((x) => { x.scrappy.seed = (x.scrappy.seed || 1) + 1; }) }) : null));
 
   p.append(el('h2', { text: 'Your stash', style: 'margin-top:16px' }));
+  if (!stash.length) p.append(emptyStash());
   const g = el('div', { class: 'stashgrid' });
   for (const f of stash) {
     g.append(el('div', { style: 'text-align:center' }, el('i', { class: 'sw', style: `display:block;background-image:url(${f.img})` }),
@@ -897,21 +1280,97 @@ function renderFabrics() {
   p.append(el('p', { html: '<a href="../dye/">Dye your own fabrics &rarr;</a> New fabrics show up here as soon as they are out of the dye pot.', class: 'hint', style: 'margin-top:10px' }));
 }
 
+/* A small picture of each quilting design over four of your blocks, so the
+   choice is made by eye (and at the density chosen), not from names. */
+const qThumbs = new Map();
+function quiltingThumb(pattern, sp, border = 'same', withBorder = false, onlyCached = false) {
+  const geo = JSON.stringify([design.size, design.blocks[0].n, design.blocks[0].units.map((u) => [u.x, u.y, u.w, u.h, u.t, u.rot, u.f[0]])]);
+  const key = `${pattern}|${sp}|${border}|${withBorder}|${geo}|${design.palette.L}|${design.palette.D}|${design.quilting.thread}`;
+  if (qThumbs.has(key)) return qThumbs.get(key);
+  if (onlyCached) return null;
+  const mini = Q.normalizeDesign({ ...clone(design), rows: 2, cols: 2, setting: 'straight', alt: 'none', rotate: 'none', mirror: 'none', rings: false,
+    sash: { ...design.sash, w: 0 }, borders: withBorder ? [{ w: Math.max(3, design.size / 3), fill: 'D' }] : [], quilting: { pattern, spacing: sp, border } });
+  const L = Q.layoutQuilt(mini);
+  const S = 72;
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = S * DPR;
+  const c = cv.getContext('2d');
+  const k = (S * DPR) / Math.max(L.w, L.h);
+  c.scale(k, k);
+  c.fillStyle = '#F7F1E4';
+  c.fillRect(0, 0, L.w, L.h);
+  c.globalAlpha = 0.45;
+  for (const p of [...Q.quiltPatches(mini, L), ...L.pieces]) {
+    c.fillStyle = fabricById(Q.resolveRole(mini, p.fill))?.color || MISSING;
+    c.fill(polyPath(p.pts));
+  }
+  c.globalAlpha = 1;
+  const l = P.quiltingLayers(mini, L, mini.quilting);
+  c.strokeStyle = '#2A2622';
+  c.lineWidth = Math.max(0.06, 1.1 / k);
+  c.lineJoin = 'round';
+  if (pattern !== 'none') for (const pp of [...toPath(l.center).path, ...toPath(l.border).path]) c.stroke(pp);
+  const url = cv.toDataURL('image/png');
+  if (qThumbs.size > 120) qThumbs.clear();
+  qThumbs.set(key, url);
+  return url;
+}
+
+function nearestDensity(sp) {
+  return P.DENSITIES.reduce((b, d) => (Math.abs(d.sp - sp) < Math.abs(b.sp - sp) ? d : b)).sp;
+}
+
 function renderQuiltingPanel() {
   const p = $('panel-quilting');
   p.innerHTML = '';
   const q = design.quilting;
+  const sp = q.spacing;
+  const cur = P.PATTERNS.find((x) => x.id === q.pattern) || P.PATTERNS[0];
   p.append(el('h2', { text: 'Quilting design' }));
-  const g = el('div', { class: 'pgrid' });
-  for (const pat of P.PATTERNS) {
-    g.append(el('button', { 'aria-pressed': String(q.pattern === pat.id), onclick: () => change((x) => { x.quilting.pattern = pat.id; }) },
-      el('b', { text: pat.name }), el('span', { text: pat.note })));
+  p.append(el('p', { class: 'hint tip', html: '' }, el('b', { text: cur.name }), document.createTextNode(`: ${cur.note}`)));
+  // Pictures not drawn yet are filled in a few at a time after the panel
+  // shows, so a tap here answers at once.
+  const later = [];
+  const card = (pat) => {
+    const img = el('img', { alt: '' });
+    const url = quiltingThumb(pat.id, sp, 'same', false, true);
+    if (url) img.src = url; else later.push([img, pat.id]);
+    return el('button', { 'aria-pressed': String(q.pattern === pat.id), 'aria-label': `${pat.name}: ${pat.note}`, onclick: () => change((x) => { x.quilting.pattern = pat.id; }) },
+      img, el('span', { text: pat.name }));
+  };
+  const fill = () => {
+    const t0 = performance.now();
+    while (later.length && performance.now() - t0 < 40) {
+      const [img, id] = later.shift();
+      if (img.isConnected) { try { img.src = quiltingThumb(id, sp); } catch (err) { console.error(err); } }
+    }
+    if (later.length) setTimeout(fill, 16);
+  };
+  setTimeout(fill, 30);
+  const top = el('div', { class: 'qgrid' }, card(P.PATTERNS[0]));
+  p.append(top);
+  for (const g of P.PATTERN_GROUPS) {
+    p.append(el('h3', { class: 'qh', text: g.name }));
+    const grid = el('div', { class: 'qgrid' });
+    for (const pat of P.PATTERNS.filter((x) => x.group === g.id)) grid.append(card(pat));
+    p.append(grid);
   }
-  p.append(g);
   if (q.pattern !== 'none' && q.pattern !== 'ditch') {
-    const sp = q.spacing;
-    p.append(setting(q.pattern === 'meander' || q.pattern === 'stipple' ? 'Scale' : 'Spacing',
-      stepper(sp, (s) => change((x) => { x.quilting.spacing = Math.max(0.5, Math.min(4, x.quilting.spacing + s * 0.5)); }), 'spacing', (v) => `${C.fmtFrac(q.pattern === 'grid' || q.pattern === 'crosshatch' ? v * 1.5 : v)}"`)));
+    p.append(el('div', { class: 'setting col' }, el('span', { class: 'lbl', text: 'Density' }),
+      seg(P.DENSITIES.map((d) => [d.sp, d.name]), nearestDensity(sp), (v) => change((x) => { x.quilting.spacing = v; }), 'Quilting density', true),
+      el('span', { class: 'hint', text: `Lines about ${C.fmtFrac(nearestDensity(sp))}" apart. Denser quilting is flatter and stiffer; airy quilting stays soft.` })));
+  }
+  if (q.pattern !== 'none' && design.borders.length) {
+    const bp = el('div', { class: 'seg grid3', role: 'group', 'aria-label': 'Border quilting' });
+    for (const b of P.BORDER_PATTERNS) {
+      bp.append(el('button', { 'aria-pressed': String((q.border || 'same') === b.id), onclick: () => change((x) => { x.quilting.border = b.id; }) },
+        el('span', { text: b.id === 'same' ? 'Same' : b.name })));
+    }
+    p.append(el('div', { class: 'setting col' }, el('span', { class: 'lbl', text: 'Borders' }), bp,
+      el('span', { class: 'hint', text: q.border && q.border !== 'same' ? 'The center design stops at the borders, and the borders get their own.' : 'The center design runs right across the borders, edge to edge.' })));
+  }
+  if (P.quiltingLoosened(design, Q.layoutQuilt(design), q)) {
+    p.append(el('p', { class: 'note', text: 'On a quilt this big the preview draws this pattern a little looser than you asked, so the page stays quick. Your stitching can be as dense as you like.' }));
   }
   p.append(el('h2', { text: 'Thread', style: 'margin-top:12px' }));
   const t = el('div', { class: 'threads' });
@@ -966,6 +1425,8 @@ function renderSaved() {
   const name = el('input', { type: 'text', value: design.name || '', 'aria-label': 'Quilt name', maxlength: '60' });
   name.addEventListener('change', () => { design.name = name.value.trim() || 'My quilt'; saveStore(); });
   p.append(name);
+  const pic = el('button', { class: 'btn small', id: 'picBtn', text: exporting ? 'Making the picture…' : 'Save a picture', onclick: exportPng });
+  if (exporting) pic.setAttribute('aria-disabled', 'true');
   p.append(el('div', { class: 'row', style: 'margin-top:8px' },
     el('button', { class: 'btn small primary', text: 'Save to my quilts', onclick: () => {
       design.name = name.value.trim() || 'My quilt';
@@ -975,56 +1436,109 @@ function renderSaved() {
       const item = { id: existing >= 0 ? store.saved[existing].id : `q-${Date.now().toString(36)}`, name: design.name, size: `${C.fmtFrac(s.w)} × ${C.fmtFrac(s.h)}"`, design: clone(design), thumb, at: Date.now() };
       if (existing >= 0) store.saved.splice(existing, 1);
       store.saved.unshift(item);
+      ui.removed = null;
       saveStore();
       renderSaved();
-      toast(`Saved “${design.name}”.`);
+      toast(existing >= 0 ? `Updated “${design.name}” in My quilts.` : `Saved “${design.name}”.`);
     } }),
-    el('button', { class: 'btn small', text: 'Download a picture', onclick: exportPng }),
+    pic,
     el('button', { class: 'btn small', text: 'Start from the sample', onclick: () => { commit(Q.normalizeDesign(Q.defaultDesign())); toast('The Ohio Star sample is back. Undo returns your quilt.'); } })));
+  p.append(el('p', { class: 'hint tip', text: 'Saving under a name you already used updates that quilt.' }));
   p.append(el('h2', { text: 'My quilts', style: 'margin-top:16px' }));
+  if (ui.removed) {
+    const r = ui.removed;
+    p.append(el('div', { class: 'note row', style: 'justify-content:space-between' }, el('span', { text: `“${r.item.name}” is out of My quilts.` }),
+      el('button', { class: 'btn small', text: 'Put it back', onclick: () => {
+        store.saved.splice(Math.min(r.index, store.saved.length), 0, r.item);
+        ui.removed = null;
+        saveStore();
+        renderSaved();
+        toast(`“${r.item.name}” is back.`);
+      } })));
+  }
   if (!store.saved.length) { p.append(el('p', { class: 'hint', text: 'Quilts you save show up here, ready to pick up again.' })); return; }
   const g = el('div', { class: 'gallery' });
-  for (const it of store.saved) {
+  store.saved.forEach((it, index) => {
     g.append(el('div', { class: 'item' },
-      el('button', { class: 'open', 'aria-label': `Open ${it.name}`, onclick: () => { commit(Q.normalizeDesign(clone(it.design))); ui.edit = 0; toast(`Opened “${it.name}”.`); window.scrollTo({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' }); } },
-        el('img', { src: it.thumb, alt: '' }), el('b', { text: it.name }), el('span', { text: it.size || '' })),
-      el('button', { class: 'linkbtn', text: 'Remove', onclick: () => { store.saved = store.saved.filter((x) => x.id !== it.id); saveStore(); renderSaved(); } })));
-  }
+      el('button', { class: 'open', 'aria-label': `Open ${it.name}`, onclick: () => {
+        let d = null;
+        try { d = Q.normalizeDesign(clone(it.design)); } catch { d = null; }
+        if (!d || !commit(d)) { toast(`“${it.name}” could not be opened.`); return; }
+        ui.edit = 0;
+        toast(`Opened “${it.name}”. Undo goes back to the quilt you had.`);
+        $('quiltCard').scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+      } },
+      el('img', { src: it.thumb, alt: '' }), el('b', { text: it.name }), el('span', { text: it.size || '' })),
+      el('button', { class: 'linkbtn', text: 'Remove', 'aria-label': `Remove ${it.name}`, onclick: () => {
+        store.saved = store.saved.filter((x) => x.id !== it.id);
+        ui.removed = { item: it, index };
+        saveStore();
+        renderSaved();
+      } })));
+  });
   p.append(g);
 }
 
 function thumbnail() {
-  const s = Q.quiltSize(design);
-  const k = 220 / Math.max(s.w, s.h);
-  const cv = document.createElement('canvas');
-  cv.width = Math.ceil(s.w * k); cv.height = Math.ceil(s.h * k);
-  renderQuilt(cv.getContext('2d'), k, { quilting: false });
-  return cv.toDataURL('image/jpeg', 0.82);
+  try {
+    const s = Q.quiltSize(design);
+    const k = 220 / Math.max(s.w, s.h);
+    const cv = document.createElement('canvas');
+    cv.width = Math.ceil(s.w * k); cv.height = Math.ceil(s.h * k);
+    renderQuilt(cv.getContext('2d'), k, { quilting: false });
+    return cv.toDataURL('image/jpeg', 0.82);
+  } catch { return ''; }
 }
 
-function exportPng() {
-  const s = Q.quiltSize(design);
-  const k = Math.min(24, 3200 / Math.max(s.w, s.h));
-  const cv = document.createElement('canvas');
-  cv.width = Math.ceil(s.w * k); cv.height = Math.ceil(s.h * k);
-  renderQuilt(cv.getContext('2d'), k);
-  cv.toBlob((blob) => {
-    if (!blob) return;
+let exporting = false;
+const nextPaint = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+async function exportPng() {
+  if (exporting) return;
+  exporting = true;
+  if (ui.tab === 'saved') renderSaved();
+  try {
+    await nextPaint(); // let "Making the picture…" show before the work starts
+    const s = Q.quiltSize(design);
+    const k = Math.min(24, 2800 / Math.max(s.w, s.h));
+    const cv = document.createElement('canvas');
+    cv.width = Math.ceil(s.w * k); cv.height = Math.ceil(s.h * k);
+    renderQuilt(cv.getContext('2d'), k);
+    const blob = await new Promise((r) => cv.toBlob(r, 'image/png'));
+    cv.width = cv.height = 0; // hand the memory back (iOS counts it)
+    if (!blob) { toast('The picture did not come out this time. Try again in a moment.'); return; }
+    const fname = `${(design.name || 'quilt').replace(/[^\w\- ]+/g, '').trim() || 'quilt'}.png`;
+    // On a phone, the share sheet is where "Save Image" (to Photos) lives.
+    const file = typeof File === 'function' ? new File([blob], fname, { type: 'image/png' }) : null;
+    if (file && navigator.canShare?.({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: design.name || 'My quilt' }); return; } catch (err) {
+        if (err?.name === 'AbortError') return; // she closed the sheet
+        // Not allowed here (e.g. the tap was too long ago): download instead.
+      }
+    }
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `${(design.name || 'quilt').replace(/[^\w\- ]+/g, '').trim() || 'quilt'}.png`;
+    a.download = fname;
     document.body.append(a);
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 4000);
     toast('Your quilt picture is downloading.');
-  }, 'image/png');
+  } catch (err) {
+    console.error(err);
+    toast('The picture did not come out this time. Try again in a moment.');
+  } finally {
+    exporting = false;
+    if (ui.tab === 'saved') renderSaved();
+  }
 }
 
 /* ---------------------------------------------------------------- tabs */
 
 function showTab(t) {
+  if (!document.getElementById(`panel-${t}`)) t = 'block';
+  if (t !== 'saved') ui.removed = null;
   ui.tab = t;
+  saveSession();
   for (const b of document.querySelectorAll('.tabs button')) b.setAttribute('aria-selected', String(b.dataset.tab === t));
   for (const p of document.querySelectorAll('.panel')) p.hidden = p.id !== `panel-${t}`;
   renderPanels();
@@ -1035,14 +1549,16 @@ document.querySelector('.tabs').addEventListener('click', (e) => {
 });
 
 function renderPanels() {
-  caption();
+  // A panel that fails to draw must not take the rest of the page with it.
+  try { caption(); } catch (err) { console.error(err); }
+  syncUndo();
   const t = ui.tab;
-  if (t === 'block') renderBlockPanel();
-  if (t === 'layout') renderLayout();
-  if (t === 'fabrics') renderFabrics();
-  if (t === 'quilting') renderQuiltingPanel();
-  if (t === 'cutting') renderCutting();
-  if (t === 'saved') renderSaved();
+  const fn = { block: renderBlockPanel, layout: renderLayout, fabrics: renderFabrics, quilting: renderQuiltingPanel, cutting: renderCutting, saved: renderSaved }[t];
+  try { fn?.(); } catch (err) {
+    console.error(err);
+    $(`panel-${t}`).append(el('p', { class: 'note', text: 'This panel could not be drawn for this quilt. Undo, or try another tab.' }));
+  }
+  if (!dock.hidden) $('dockCap').textContent = $('quiltCaption').textContent.split(' · ').slice(0, 2).join(' · ');
 }
 
 let toastT = 0;
@@ -1051,7 +1567,7 @@ function toast(msg) {
   t.textContent = msg;
   t.classList.add('show');
   clearTimeout(toastT);
-  toastT = setTimeout(() => t.classList.remove('show'), 2600);
+  toastT = setTimeout(() => t.classList.remove('show'), Math.max(2600, msg.length * 55));
 }
 
 /* ---------------------------------------------------------------- boot */
@@ -1068,17 +1584,30 @@ function hint() {
 }
 
 async function boot() {
-  ensureStarters();
-  loadStore();
-  await loadFabrics();
-  refreshResolver();
-  hint();
-  toolHint();
-  showTab('block');
-  schedule();
-  saveStore();
+  try {
+    try { ensureStarters(); } catch (err) { console.error(err); }
+    loadStore();
+    try { await loadFabrics(); } catch (err) { console.error(err); }
+    refreshResolver();
+    hint();
+    setTool('fill');
+    showTab(ui.tab);
+    schedule();
+    saveStore();
+    if (ui.notice) toast(ui.notice);
+  } catch (err) {
+    // Whatever happened, leave a working page: the sample quilt and every control.
+    console.error(err);
+    design = Q.defaultDesign();
+    history = [];
+    try { refreshResolver(); showTab('block'); schedule(); } catch { /* nothing more to do */ }
+    toast('The designer started fresh with the sample quilt.');
+  }
   window.addEventListener('resize', () => { offDirty = true; schedule(); drawEditor(); });
-  onStashChange(async () => { await loadFabrics(); invalidate(); });
+  onStashChange(async () => {
+    try { await loadFabrics(); } catch (err) { console.error(err); }
+    invalidate();
+  });
   document.documentElement.dataset.ready = '1';
 }
 
@@ -1086,6 +1615,7 @@ async function boot() {
 window.__quilt = {
   get design() { return design; },
   set(d) { commit(Q.normalizeDesign(d)); },
+  get stitchMs() { return lastStitchMs; },
   ui, showTab, openLibrary, renderQuilt, Q, K, C, P,
 };
 

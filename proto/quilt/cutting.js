@@ -14,6 +14,7 @@
 //   square in a square            center at finished ÷ √2 + ½" (rounded up to ⅛", trim),
 //                                 corners from finished/2 + ⅞" squares cut once diagonally
 //   snowball                      stitch-and-flip: base finished + ½", corners corner + ½"
+//   flipped corner (bow tie)      stitch-and-flip: base finished + ½", corner square half the unit + ½"
 //   on-point setting triangles    squares at block diagonal + 1¼", cut twice diagonally;
 //                                 corner triangles at diagonal/2 + ⅞", cut once diagonally
 //   borders, binding              strips across the width of fabric (WOF), joined
@@ -173,7 +174,14 @@ function unitCuts(unit, cell, fills, t) {
       if (!square) { for (const x of f) tmpl(x, cw + 0.5, ch + 0.5, 'snowball pieces'); return; }
       rect(f[0], cw + 0.5, cw + 0.5, 'squares (snowball base)');
       const cs = roundUp8(cw * SNOW_C + 0.5);
-      for (const x of f.slice(1)) rect(x, cs, cs, 'squares for snowball corners (stitch-and-flip)');
+      // A corner in the base fabric is not sewn at all.
+      for (const x of f.slice(1)) if (x !== f[0]) rect(x, cs, cs, 'squares for snowball corners (stitch-and-flip)');
+      return;
+    }
+    case 'corner': {
+      if (!square) { for (const x of f) tmpl(x, cw + 0.5, ch + 0.5, 'flipped-corner pieces'); return; }
+      rect(f[0], cw + 0.5, cw + 0.5, 'squares (flipped-corner base)');
+      if (f[1] !== f[0]) rect(f[1], roundUp8(cw / 2 + 0.5), roundUp8(cw / 2 + 0.5), 'squares for flipped corners (stitch-and-flip)');
       return;
     }
     case 'strips2':

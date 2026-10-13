@@ -3,9 +3,9 @@
 // All measurements are finished inches. Coordinates: origin at the top-left
 // of the finished quilt (outer edge of the last border), y down.
 
-import { ROLES, blockPatches, transformPoint, libraryBlock, cloneBlock } from './blocks.js';
+import { ROLES, blockPatches, transformPoint, libraryBlock, sanitizeBlock } from './blocks.js';
 
-export const BLOCK_SIZES = [6, 8, 9, 10, 12, 14, 16];
+export const BLOCK_SIZES = [3, 4, 5, 6, 8, 9, 10, 12, 14, 16];
 export const SASH_WIDTHS = [0, 1, 1.5, 2, 2.5, 3];
 export const BORDER_WIDTHS = [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8];
 export const SQRT2 = Math.SQRT2;
@@ -26,10 +26,11 @@ export function defaultDesign() {
     sash: { w: 2, fill: 'starter-4', stone: 'A', outer: true },
     borders: [{ w: 5, fill: 'starter-8' }],
     binding: 'A',
-    rotate: 'none', // 'none' | 'alt' | 'quad'
+    rotate: 'none', // 'none' | 'alt' | 'quad' | 'barn' | 'furrows' | 'lightning'
+    rings: false, // color each block by its ring around the center (Trip Around the World)
     mirror: 'none', // 'none' | 'cols' | 'rows' | 'both'
     scrappy: { on: false, seed: 1 },
-    quilting: { pattern: 'meander', spacing: 1.5, thread: '#EFE6D2' },
+    quilting: { pattern: 'meander', spacing: 1.5, thread: '#EFE6D2', border: 'same' },
   };
 }
 
@@ -38,19 +39,35 @@ export function normalizeDesign(d) {
   const base = defaultDesign();
   if (!d || typeof d !== 'object') return base;
   const out = { ...base, ...d };
-  out.palette = { ...base.palette, ...(d.palette || {}) };
-  out.blocks = Array.isArray(d.blocks) && d.blocks.length ? d.blocks.map(cloneBlock) : base.blocks;
-  if (out.blocks.length < 2) out.blocks.push(base.blocks[1]);
-  out.sash = { ...base.sash, ...(d.sash || {}) };
-  out.borders = Array.isArray(d.borders) ? d.borders.map((b) => ({ w: Number(b.w) || 2, fill: b.fill || 'D' })) : base.borders;
-  out.scrappy = { ...base.scrappy, ...(d.scrappy || {}) };
-  out.quilting = { ...base.quilting, ...(d.quilting || {}) };
+  out.palette = { ...base.palette, ...(isObj(d.palette) ? d.palette : {}) };
+  // A block that cannot be trusted (a damaged save) is replaced, never drawn.
+  const blocks = Array.isArray(d.blocks) ? d.blocks.slice(0, 2) : [];
+  out.blocks = [0, 1].map((i) => sanitizeBlock(blocks[i]) || base.blocks[i]);
+  out.palette = Object.fromEntries(Object.entries(out.palette).map(([k, v]) => [k, typeof v === 'string' && v ? v : base.palette[k] || 'starter-0']));
+  out.sash = { ...base.sash, ...(isObj(d.sash) ? d.sash : {}) };
+  out.sash.w = SASH_WIDTHS.includes(Number(out.sash.w)) ? Number(out.sash.w) : base.sash.w;
+  out.borders = Array.isArray(d.borders) ? d.borders.filter(isObj).slice(0, 6).map((b) => ({ w: Math.max(0.5, Math.min(12, Number(b.w) || 2)), fill: typeof b.fill === 'string' && b.fill ? b.fill : 'D' })) : base.borders;
+  out.scrappy = { ...base.scrappy, ...(isObj(d.scrappy) ? d.scrappy : {}) };
+  out.quilting = { ...base.quilting, ...(isObj(d.quilting) ? d.quilting : {}) };
+  out.quilting.spacing = Math.max(0.5, Math.min(4, Number(out.quilting.spacing) || base.quilting.spacing));
+  if (typeof out.quilting.pattern !== 'string') out.quilting.pattern = base.quilting.pattern;
+  if (!['same', 'feather', 'cable', 'lines', 'none'].includes(out.quilting.border)) out.quilting.border = 'same';
   out.rows = clampInt(out.rows, 1, 16);
   out.cols = clampInt(out.cols, 1, 16);
   if (!(Number(out.size) > 0 && Number(out.size) <= 30)) out.size = 12;
+  out.size = Number(out.size);
+  if (!['straight', 'onpoint'].includes(out.setting)) out.setting = base.setting;
+  if (!['none', 'plain', 'block2'].includes(out.alt)) out.alt = base.alt;
+  if (!ROTATIONS.includes(out.rotate)) out.rotate = base.rotate;
+  out.rings = out.rings === true;
+  if (!['none', 'cols', 'rows', 'both'].includes(out.mirror)) out.mirror = base.mirror;
+  for (const k of ['altFill', 'settingFill', 'binding']) if (typeof out[k] !== 'string' || !out[k]) out[k] = base[k];
+  for (const k of ['fill', 'stone']) if (typeof out.sash[k] !== 'string' || !out.sash[k]) out.sash[k] = base.sash[k];
+  if (typeof out.name !== 'string') out.name = base.name;
   return out;
 }
 
+const isObj = (x) => !!x && typeof x === 'object' && !Array.isArray(x);
 function clampInt(v, lo, hi) { return Math.max(lo, Math.min(hi, Math.round(Number(v) || lo))); }
 
 export function bordersTotal(design) { return design.borders.reduce((s, b) => s + b.w, 0); }
@@ -88,11 +105,34 @@ export function sizeName(w, h) {
   return 'King';
 }
 
+export const ROTATIONS = ['none', 'alt', 'quad', 'barn', 'furrows', 'lightning'];
 const odd = (v) => ((v % 2) + 2) % 2;
-function rotFor(design, r, c) {
-  if (design.rotate === 'alt') return odd(r + c) ? 1 : 0;
-  if (design.rotate === 'quad') return [[0, 1], [3, 2]][odd(r)][odd(c)];
-  return 0;
+/**
+ * Quarter turns for the block at (r, c). The last three are the classic
+ * half-square-triangle settings (with the dark half of an unturned HST at
+ * top left):
+ *   barn     Barn Raising: concentric diamonds of dark and light from the center
+ *   furrows  Straight Furrows: wide diagonal bands, dark then light
+ *   lightning  Streak of Lightning: the diagonals zigzag down each column, and
+ *              alternate columns put the dark on opposite sides, so the
+ *              darks join into zigzag bands
+ */
+export function rotFor(design, r, c) {
+  switch (design.rotate) {
+    case 'alt': return odd(r + c) ? 1 : 0;
+    case 'quad': return [[0, 1], [3, 2]][odd(r)][odd(c)];
+    case 'furrows': return odd(r + c) ? 0 : 2;
+    case 'lightning': return odd(c) ? (odd(r) ? 1 : 2) : (odd(r) ? 3 : 0);
+    case 'barn': {
+      const dr = r - (design.rows - 1) / 2;
+      const dc = c - (design.cols - 1) / 2;
+      // Which quadrant: the dark half faces out (rot below) on odd rings.
+      const outer = dr <= 0 ? (dc <= 0 ? 0 : 1) : (dc <= 0 ? 3 : 2);
+      const ring = Math.floor(Math.abs(dr) + Math.abs(dc) + 1e-9);
+      return odd(ring) ? outer : (outer + 2) % 4;
+    }
+    default: return 0;
+  }
 }
 function mirrorFor(design, r, c) {
   const m = design.mirror;
@@ -312,7 +352,9 @@ export function makeResolver(design, stash = []) {
     if (!fam.has(k)) fam.set(k, []);
     fam.get(k).push(f.id);
   }
+  const ringRole = ringRoles(design);
   return (fill, inst = -1) => {
+    if (ringRole && inst >= 0) return resolveRole(design, ringRole(inst));
     const id = resolveRole(design, fill);
     if (!design.scrappy?.on || inst < 0) return id;
     const f = byId.get(id);
@@ -321,6 +363,63 @@ export function makeResolver(design, stash = []) {
     if (group.length < 2) return id;
     return group[Math.floor(hash3(design.scrappy.seed, inst, id) * group.length)];
   };
+}
+
+/** The order rings take their fabric in: dark at the center, then out. */
+export const RING_ORDER = ['D', 'A', 'M', 'B', 'L'];
+
+/**
+ * Trip Around the World (Sunshine and Shadow): every block takes one fabric
+ * by its ring, the diamond-shaped distance from the center. Straight settings
+ * only. Returns (instIndex) -> role, or null when rings are off.
+ */
+export function ringRoles(design) {
+  if (!design.rings || design.setting === 'onpoint') return null;
+  const R = design.rows;
+  const C = design.cols;
+  return (i) => {
+    const r = Math.floor(i / C);
+    const c = i % C;
+    const ring = Math.floor(Math.abs(r - (R - 1) / 2) + Math.abs(c - (C - 1) / 2) + 1e-9);
+    return RING_ORDER[ring % RING_ORDER.length];
+  };
+}
+
+/* ------------------------------------------------------- whole-quilt layouts */
+
+/**
+ * Traditional whole-quilt layouts. Each takes a design and returns a new one
+ * with the blocks and setting the layout needs (fabrics and borders stay).
+ */
+export const LAYOUT_PRESETS = [
+  { id: 'barn-raising', name: 'Barn Raising', note: 'Half-square triangles in concentric diamonds from the center.',
+    apply: (d) => hstLayout(d, 'barn') },
+  { id: 'straight-furrows', name: 'Straight Furrows', note: 'Half-square triangles in wide diagonal bands, like a plowed field.',
+    apply: (d) => hstLayout(d, 'furrows') },
+  { id: 'streak-of-lightning', name: 'Streak of Lightning', note: 'Half-square triangle rows turned against each other so the seams zigzag.',
+    apply: (d) => hstLayout(d, 'lightning') },
+  { id: 'single-irish-chain', name: 'Single Irish Chain', note: 'Nine patches alternating with plain blocks: chains of dark squares cross the quilt.',
+    apply: (d) => ({ ...plainSet(d), blocks: [libraryBlock('nine-patch'), d.blocks[1]], alt: 'plain', altFill: 'L', size: 9, rows: 7, cols: 5 }) },
+  { id: 'double-irish-chain', name: 'Double Irish Chain', note: 'A pieced chain block alternating with a plain one: two-color chains on the diagonal.',
+    apply: (d) => ({ ...plainSet(d), blocks: [libraryBlock('irish-chain-a'), libraryBlock('irish-chain-b')], alt: 'block2', size: 10, rows: 7, cols: 5 }) },
+  { id: 'trip-around-the-world', name: 'Trip Around the World', note: 'Squares in rings of color around the center. The Amish call it Sunshine and Shadow.',
+    apply: (d) => ({ ...plainSet(d), blocks: [libraryBlock('plain-square'), d.blocks[1]], size: 3, rows: 15, cols: 13, rings: true }) },
+];
+
+function plainSet(d) {
+  return { ...JSON.parse(JSON.stringify(d)), setting: 'straight', alt: 'none', rotate: 'none', mirror: 'none', rings: false,
+    sash: { ...d.sash, w: 0 }, scrappy: { ...d.scrappy, on: false } };
+}
+function hstLayout(d, rotate) {
+  return { ...plainSet(d), blocks: [libraryBlock('hst'), d.blocks[1]], size: 6, rows: 8, cols: 8, rotate };
+}
+
+export function applyPreset(design, id) {
+  const p = LAYOUT_PRESETS.find((x) => x.id === id);
+  if (!p) return design;
+  const out = p.apply(design);
+  out.name = p.name;
+  return normalizeDesign(out);
 }
 
 /** Swaps two fabrics (ids or roles) everywhere in a design. Returns a new design. */
