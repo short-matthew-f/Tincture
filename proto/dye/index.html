@@ -36,18 +36,26 @@ button { font: inherit; color: inherit; }
 .chip canvas { width: 32px; height: 32px; border-radius: 50%; background: #eee5d2; }
 .chip[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
 
-.stage { position: relative; width: 100%; aspect-ratio: 1 / 1; max-height: 56vh; margin: 0 auto; border-radius: 14px; overflow: hidden; background: var(--table); box-shadow: inset 0 0 0 1px rgba(42,38,34,.08); touch-action: none; user-select: none; -webkit-user-select: none; }
+.stage { position: relative; width: 100%; aspect-ratio: 1 / 1; max-height: 56vh; margin: 0 auto; border-radius: 14px; overflow: hidden; background: var(--table); box-shadow: inset 0 0 0 1px rgba(42,38,34,.08); touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 @supports not (aspect-ratio: 1 / 1) { .stage { height: 0; padding-bottom: 100%; } }
 .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .stageWrap { display: flex; justify-content: center; }
 .stageWrap .stage { max-width: 56vh; }
-.tag { position: absolute; left: 8px; bottom: 8px; background: rgba(251,248,241,.9); border-radius: 999px; padding: 3px 10px; font-size: 12px; font-weight: 600; color: var(--ink-soft); pointer-events: none; }
-.say { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); background: rgba(42,38,34,.86); color: var(--paper); border-radius: 999px; padding: 6px 14px; font-size: 13px; font-weight: 600; pointer-events: none; white-space: nowrap; max-width: calc(100% - 20px); overflow: hidden; text-overflow: ellipsis; opacity: 0; transition: opacity .25s; }
+.stageFoot { position: absolute; left: 8px; right: 8px; bottom: 8px; display: flex; flex-wrap: wrap-reverse; justify-content: space-between; align-items: flex-end; gap: 6px; pointer-events: none; }
+.stageBtns { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin-left: auto; }
+.stageBtns .btn { pointer-events: auto; background: rgba(251,248,241,.95); }
+.stageBtns .btn[hidden] { display: none; }
+.tag { background: rgba(251,248,241,.9); border-radius: 999px; padding: 3px 10px; font-size: 12px; font-weight: 600; color: var(--ink-soft); pointer-events: none; }
+.say { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); background: rgba(42,38,34,.88); color: var(--paper); border-radius: 16px; padding: 6px 14px; font-size: 14px; font-weight: 600; line-height: 1.3; pointer-events: none; width: max-content; max-width: calc(100% - 20px); text-align: center; opacity: 0; transition: opacity .25s; }
 .say.on { opacity: 1; }
 
 .bar { display: flex; gap: 6px; align-items: center; margin: 8px 0 12px; flex-wrap: wrap; }
 .bar .grow { flex: 1 1 auto; }
 .bar .btn { padding: 0 10px; }
+/* ordinary controls are 44 px tall here (shared.css makes .small 36 px) */
+.wrap .btn.small, #sheet .btn.small { min-height: 44px; }
+#keepBtn.ready { box-shadow: 0 0 0 3px var(--gold), 0 2px 0 rgba(42,38,34,.14); }
+.undoRow { display: flex; align-items: center; justify-content: space-between; gap: 8px; background: var(--paper); border-radius: 12px; padding: 6px 6px 6px 12px; margin: 8px 0; font-size: 14px; }
 
 .card { margin: 0 0 12px; }
 .card h2 { font: 700 12px var(--font-ui); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-soft); margin: 0 0 8px; }
@@ -56,6 +64,10 @@ button { font: inherit; color: inherit; }
 .step .h { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
 .step .n { flex: 0 0 auto; width: 22px; height: 22px; border-radius: 50%; background: var(--paper); border: 1.5px solid var(--line-strong); font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; transform: translateY(3px); }
 .step .t { font-weight: 700; font-size: 15px; }
+.step .now-tag { font-size: 12px; font-weight: 700; color: var(--accent); }
+.step.now .n { background: var(--gold); border-color: var(--accent); }
+.step.now .now-tag { background: var(--glow); border: 1.5px solid var(--gold); border-radius: 999px; padding: 0 8px; color: var(--ink); }
+.step.alt .n { border-color: var(--gold); }
 .step .d { color: var(--ink-soft); font-size: 13px; margin: -2px 0 8px; }
 .step .body { margin-left: 0; }
 .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
@@ -80,7 +92,7 @@ button { font: inherit; color: inherit; }
 .pot { flex: 0 0 auto; border: 0; background: none; padding: 2px; display: flex; flex-direction: column; align-items: center; gap: 1px; min-height: 44px; min-width: 48px; cursor: pointer; }
 .pot i { position: relative; width: 40px; height: 40px; border-radius: 50%; display: block; box-shadow: inset 0 0 0 4px #8d8578, inset 0 0 0 5px rgba(0,0,0,.25), 0 2px 0 rgba(42,38,34,.18); }
 .pot i::after { content: ''; position: absolute; left: 10px; top: 9px; width: 11px; height: 6px; border-radius: 50%; background: rgba(255,255,255,.35); transform: rotate(-25deg); }
-.pot span { font-size: 11px; color: var(--ink-soft); font-weight: 600; }
+.pot span { font-size: 12px; color: var(--ink-soft); font-weight: 600; }
 .pot[aria-pressed="true"] i { outline: 2.5px solid var(--ink); outline-offset: 2px; }
 .pot[aria-pressed="true"] span { color: var(--ink); }
 
@@ -89,7 +101,7 @@ button { font: inherit; color: inherit; }
 .seg button:last-child { border-right: 0; }
 .seg button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
 
-.hold { position: relative; overflow: hidden; min-height: 52px; padding: 0 18px; border-radius: 14px; font-size: 16px; touch-action: none; -webkit-user-select: none; user-select: none; }
+.hold { position: relative; overflow: hidden; min-height: 52px; padding: 0 18px; border-radius: 14px; font-size: 16px; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .hold .fill { position: absolute; left: 0; bottom: 0; height: 100%; width: 0; background: rgba(255,255,255,.18); pointer-events: none; }
 .hold .sw { width: 22px; height: 22px; border-radius: 50%; box-shadow: inset 0 0 0 2px rgba(255,255,255,.6); flex: 0 0 auto; }
 .hold span { position: relative; }
@@ -126,6 +138,20 @@ button { font: inherit; color: inherit; }
 .toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom)); transform: translate(-50%, 20px); background: var(--glow); border: 2px solid var(--gold); color: var(--ink); border-radius: 14px; padding: 10px 14px; font-weight: 600; font-size: 14px; z-index: 25; opacity: 0; transition: opacity .3s, transform .3s; width: max-content; max-width: calc(100vw - 32px); text-align: center; pointer-events: none; }
 .toast.on { opacity: 1; transform: translate(-50%, 0); }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+/* phone on its side: a compact dock, so it doesn't cover the cloth or Keep it */
+@media (orientation: landscape) and (max-height: 520px) {
+  .sub { display: none; }
+  .pot span { display: none; } /* the chosen dye still reads in the dock label */
+  .dock { padding-top: 4px; }
+  .pots { padding: 2px 10px; }
+  .hold, .dock .act .btn { min-height: 44px !important; }
+  /* two columns: the cloth stays on the left (sticky) while the steps scroll on the right */
+  .wrap { max-width: 1000px; display: grid; grid-template-columns: minmax(0, calc(100vh - 142px)) minmax(0, 1fr); column-gap: 14px; align-items: start; }
+  .wrap > * { grid-column: 2; }
+  .wrap > .stageWrap { grid-column: 1; grid-row: 1 / span 9; position: sticky; top: 8px; margin-top: 8px; }
+  .stageWrap .stage { max-height: calc(100vh - 142px); max-width: none; }
+  body { padding-bottom: calc(120px + env(safe-area-inset-bottom)); }
+}
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 </style>
 </head>
@@ -142,8 +168,14 @@ button { font: inherit; color: inherit; }
 
   <div class="stageWrap"><div class="stage" id="stage">
     <canvas id="view" aria-label="Your cloth"></canvas>
-    <div class="tag" id="tag"></div>
     <div class="say" id="say" aria-live="polite"></div>
+    <div class="stageFoot">
+      <div class="tag" id="tag"></div>
+      <span class="stageBtns">
+        <button class="btn small" id="keptBtn" hidden>In your stash &rarr;</button>
+        <button class="btn small" id="backBtn" hidden>&larr; Back to my piece</button>
+      </span>
+    </div>
   </div></div>
 
   <div class="bar">

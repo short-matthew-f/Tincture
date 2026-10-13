@@ -79,7 +79,15 @@ export function crackle(N, seed) {
     const ang = rng() * Math.PI, ca = Math.cos(ang), sa = Math.sin(ang);
     const stretch = 1.5 + rng() * 0.6;
     const s = seed * 7 + li * 101;
-    const cellPt = (cx, cy) => [cx + 0.1 + 0.8 * nz(cx * 1.37, cy * 1.91, s), cy + 0.1 + 0.8 * nz(cx * 2.11, cy * 1.13, s + 9)];
+    // Feature points are looked up 9 times per pixel but there are only a few hundred cells:
+    // compute each once (same values, about 4x faster, so crumpling doesn't freeze a phone).
+    const cells = new Map();
+    const cellPt = (cx, cy) => {
+      const key = cx * 65536 + cy;
+      let q = cells.get(key);
+      if (!q) { q = [cx + 0.1 + 0.8 * nz(cx * 1.37, cy * 1.91, s), cy + 0.1 + 0.8 * nz(cx * 2.11, cy * 1.13, s + 9)]; cells.set(key, q); }
+      return q;
+    };
     for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
       // wobble the cracks, then rotate + stretch so they run mostly one way like real crumples
       const wx = x + 6 * k * (fbm(x / (40 * k), y / (40 * k), s + 3, 2) - 0.5);

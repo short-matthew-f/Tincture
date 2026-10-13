@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createPiece, applyOp, replay, resistMap, composite, mixSubtractive, dyeAbsorb, makeName, dominantColor, mainDyes,
-  iceComponents, tileInfo, POTS, R,
+  iceComponents, tileInfo, POTS, R, clonePiece, packOps, unpackOps, nextSteps,
 } from '../proto/dye/dyecore.js';
 import { weaveField, shadeCloth, absorbOf, hexRgb, BASES, DYES, PRINTS, mulberry32, noiseField } from '../proto/fabric/textures.js';
 
@@ -248,4 +248,102 @@ test('stash: add, get, rename, remove, and the cap on dyed fabrics', async () =>
   st.removeFabric('x10');
   assert.equal(st.getFabric('x10'), null);
   delete globalThis.localStorage;
+});
+
+// ------------------------------------------------------------------ undo checkpoints, saving, next step
+test('a cloned piece is untouched by ops on the original (undo checkpoints)', () => {
+  const p = createPiece('linen', 3, N);
+  applyOp(p, { t: 'wax', tool: 'tjanting', pts: [0.2, 0.5, 0.8, 0.5], r: 0.01, seed: 2 });
+  applyOp(p, { t: 'dip', dye: 'weld', s: 0.7, mottle: 0.2, seed: 1 });
+  const c = clonePiece(p);
+  const A = Float32Array.from(p.A), wax = Float32Array.from(p.wax), usage = JSON.stringify(p.usage);
+  applyOp(p, { t: 'crackle', seed: 4 });
+  applyOp(p, { t: 'dip', dye: 'indigo', s: 1, mottle: 0.2, seed: 2 });
+  applyOp(p, { t: 'boil' });
+  assert.deepEqual(c.A, A); assert.deepEqual(c.wax, wax); assert.equal(JSON.stringify(c.usage), usage);
+  assert.equal(c.meta.crackle, false);
+  // and carrying on from the clone gives what a replay gives
+  applyOp(c, { t: 'dip', dye: 'madder', s: 0.5, mottle: 0.2, seed: 9 });
+  const r = replay('linen', 3, [
+    { t: 'wax', tool: 'tjanting', pts: [0.2, 0.5, 0.8, 0.5], r: 0.01, seed: 2 },
+    { t: 'dip', dye: 'weld', s: 0.7, mottle: 0.2, seed: 1 },
+    { t: 'dip', dye: 'madder', s: 0.5, mottle: 0.2, seed: 9 }], N);
+  for (let i = 0; i < r.A.length; i++) assert.ok(Math.abs(r.A[i] - c.A[i]) < 1e-6, `A[${i}]`);
+});
+
+test('a bound piece clones with its own section colors', () => {
+  const p = createPiece('quilting-cotton', 2, N);
+  applyOp(p, { t: 'bind', kind: 'tie-spiral', opts: { n: 4 }, seed: 2 });
+  const c = clonePiece(p);
+  applyOp(p, { t: 'squirt', k: 1, dye: 'madder', s: 1, seed: 3 });
+  assert.deepEqual(c.sectionA[1], [0, 0, 0]);
+  assert.ok(p.sectionA[1].some((v) => v > 0));
+});
+
+test('ops survive the trip through sessionStorage', () => {
+  const ops = [
+    { t: 'wax', tool: 'tjanting', pts: [0.123456, 0.5, 0.876543, 0.51], r: 0.0046, seed: 2 },
+    { t: 'dip', dye: 'weld', s: 0.7, mottle: 0.15, seed: 1 },
+    { t: 'crackle', seed: 4 },
+    { t: 'marble', delta: new Float32Array(12), dyes: ['madder'], bath: [{ color: '#B5482F', pts: [1, 2, 3, 4] }], mseed: 7, base: 'linen' },
+  ];
+  const back = unpackOps(JSON.parse(JSON.stringify(packOps(ops))));
+  assert.equal(back.length, 4);
+  assert.deepEqual(back[0].pts, [0.1235, 0.5, 0.8765, 0.51]);
+  assert.deepEqual(back[1], ops[1]);
+  assert.equal(back[3].delta, undefined, 'the big delta is rebuilt from the bath, not saved');
+  assert.deepEqual(back[3].bath, ops[3].bath);
+  assert.equal(ops[3].delta.length, 12, 'packing leaves the live op alone');
+  assert.equal(unpackOps([{ t: 'nonsense' }]), null);
+  assert.equal(unpackOps('x'), null);
+  // rounding the wax path doesn't visibly move the wax
+  const a = replay('batik-cotton', 1, ops.slice(0, 2), N), b = replay('batik-cotton', 1, back.slice(0, 2), N);
+  let d = 0; for (let i = 0; i < a.wax.length; i++) d = Math.max(d, Math.abs(a.wax[i] - b.wax[i]));
+  assert.ok(d < 0.05, `wax moved by ${d}`);
+});
+
+test('crackle is deterministic (and cached replays agree)', () => {
+  const a = replay('batik-cotton', 1, [{ t: 'tjap', block: 'kawung', x: 0.5, y: 0.5, size: 0.8, seed: 1 }, { t: 'crackle', seed: 5 }], N);
+  const b = replay('batik-cotton', 1, [{ t: 'tjap', block: 'kawung', x: 0.5, y: 0.5, size: 0.8, seed: 1 }, { t: 'crackle', seed: 5 }], N);
+  assert.deepEqual(a.veins, b.veins);
+  assert.ok(a.veins.some((v) => v > 0.5));
+});
+
+test('the next step follows the piece through every technique', () => {
+  const n = (tech, ops, st) => { const r = nextSteps(tech, ops, st); return [r.steps.map((x) => `${x.n}${x.label[0]}`).join(' '), r.done]; };
+  const wax = { t: 'wax' }, dip = { t: 'dip' };
+  // batik: wax, dye, then boil (or another round, or crackle), then done
+  assert.deepEqual(n('batik', []), ['2N', false]);
+  assert.deepEqual(n('batik', [wax]), ['3N', false]);
+  assert.deepEqual(n('batik', [wax, dip]), ['6N 4O 5O', false]);
+  assert.deepEqual(n('batik', [wax, dip, { t: 'crackle' }]), ['3N', false], 'after crumpling, dye into the cracks');
+  assert.deepEqual(n('batik', [wax, dip, wax]), ['3N', false], 'the second round');
+  assert.deepEqual(n('batik', [wax, dip, { t: 'boil' }]), ['2M', true]);
+  assert.deepEqual(n('batik', [{ t: 'tjap' }]), ['3N', false]);
+  // solid and ombré
+  assert.deepEqual(n('solid', []), ['2N', false]);
+  assert.deepEqual(n('solid', [dip]), ['2M', true]);
+  assert.deepEqual(n('ombre', [], { lineSet: false }), ['2N', false]);
+  assert.deepEqual(n('ombre', [], { lineSet: true }), ['3N', false]);
+  assert.deepEqual(n('ombre', [dip]), ['2M', true]);
+  // shibori: bind, dip, open
+  const bind = { t: 'bind', kind: 'kumo' }, unbind = { t: 'unbind' };
+  assert.deepEqual(n('shibori', []), ['2N', false]);
+  assert.deepEqual(n('shibori', [bind]), ['3N', false]);
+  assert.deepEqual(n('shibori', [bind, dip]), ['4N 3O', false]);
+  assert.deepEqual(n('shibori', [bind, dip, unbind]), ['2M', true]);
+  // tie-dye and ice
+  const tie = { t: 'bind', kind: 'tie-spiral' };
+  assert.deepEqual(n('tiedye', [tie]), ['3N', false]);
+  assert.deepEqual(n('tiedye', [tie, { t: 'squirt' }]), ['4N 3O', false]);
+  assert.deepEqual(n('tiedye', [tie, { t: 'squirt' }, unbind]), ['2M', true]);
+  assert.deepEqual(n('ice', [{ t: 'bind', kind: 'ice' }]), ['3N', false]);
+  assert.deepEqual(n('ice', [{ t: 'bind', kind: 'ice' }, { t: 'ice' }]), ['4N 3O', false]);
+  // marbling: float, lay, and the bath is ready for another layer
+  assert.deepEqual(n('marbling', [], { bathOpen: true, bathInks: 0 }), ['2N', false]);
+  assert.deepEqual(n('marbling', [], { bathOpen: true, bathInks: 3 }), ['3N 2O', false]);
+  assert.deepEqual(n('marbling', [{ t: 'marble' }], { bathOpen: false, bathInks: 0 }), ['2M', true]);
+  // block print
+  assert.deepEqual(n('block', []), ['3N', false]);
+  assert.deepEqual(n('block', [{ t: 'stamp' }]), ['3M', true]);
 });

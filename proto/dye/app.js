@@ -2,10 +2,11 @@
 // ../fabric/textures.js (weave). This file is the hands: pointers, pots, animations, the stash.
 
 import { BASES, DYES, weaveField, shadeCloth, absorbOf, colorOfAbsorb, lookOf, drawBase, mulberry32, tileDataURL, hexRgb, rgbHex, REF } from '../fabric/textures.js';
-import { ensureStarters, fabrics, addFabric, removeFabric, renameFabric, onStashChange, newId } from '../fabric/stash.js';
+import { ensureStarters, fabrics, addFabric, removeFabric, renameFabric, onStashChange, newId, STASH_MAX } from '../fabric/stash.js';
 import {
   N_DEFAULT, POTS, BASE_DYE, createPiece, replay, applyOp, composite, dipAmount, dyeOf, dyeAbsorb, OXIDIZING, VAT_GREEN,
   bundleColor, sectionColor, dominantColor, mixSubtractive, mainDyes, makeName, tileInfo, iceComponents, waxStroke, R,
+  clonePiece, packOps, unpackOps, nextSteps,
 } from './dyecore.js';
 import * as M from '../marbling/marble.js';
 
@@ -65,6 +66,11 @@ const S = {
   dispA: null, // absorbance override while animating
   reveal: null, // { kind, t, from }
   lastKept: null,
+  snaps: new Map(), // op index -> the piece just before that op (cheap undo; see checkpoint())
+  setAside: null, // the piece she was making before Start over / Surprise me, so it can come back
+  lineSet: false, // ombré: she has set the dye line for the next dip
+  keptKey: null, // the piece as it was when she last kept it (so Keep doesn't make duplicates)
+  demo: false,
 };
 if (!TECHS.some((t) => t.id === S.tech)) S.tech = 'batik';
 if (!BASES.some((b) => b.id === S.base)) S.base = 'batik-cotton';
@@ -132,13 +138,17 @@ function viewMode() {
 
 function rebuild() {
   S.piece = replay(S.base, S.seed, S.ops, N);
+  S.snaps.clear();
   S.wf = weaveField(S.base, N, 1);
+  pieceChanged();
+}
+function pieceChanged() {
   scrunchCanvas = null;
   if (S.piece.bind) {
     // the outside of the bundle is the cloth as it was when it was tied
     let i = S.ops.length - 1;
     while (i >= 0 && S.ops[i].t !== 'bind') i--;
-    const pre = replay(S.base, S.seed, S.ops.slice(0, Math.max(0, i)), N);
+    const pre = S.snaps.get(i) || replay(S.base, S.seed, S.ops.slice(0, Math.max(0, i)), N);
     const d = new ImageData(N, N);
     composite(d.data, pre, S.wf);
     bundleBase().getContext('2d').putImageData(d, 0, 0);
@@ -146,11 +156,45 @@ function rebuild() {
   renderComp();
   refresh();
 }
+// Undo used to replay every op from a blank cloth: over a second on a laptop once crackle was
+// in the history, several seconds on a phone. Keep the piece as it was before each of the
+// last few ops instead, so Undo is instant.
+const SNAP_KEEP = 6;
+function checkpoint() {
+  S.snaps.set(S.ops.length, clonePiece(S.piece));
+  for (const k of S.snaps.keys()) if (k < S.ops.length - SNAP_KEEP) S.snaps.delete(k);
+}
+function undo() {
+  if (S.busy) return busyNote();
+  if (viewMode() === 'bath' && S.bathUndo.length) { M.restore(S.bath, S.bathUndo.pop()); refresh(); return; }
+  if (!S.ops.length) { if (S.setAside) bringBack(); return; }
+  const i = S.ops.length - 1;
+  const snap = S.snaps.get(i);
+  S.ops.pop();
+  if (snap) { S.snaps.delete(i); S.piece = snap; pieceChanged(); } else rebuild();
+}
+
+// Whatever happens inside, the studio is never left busy (a throw used to leave S.busy set for
+// good: "the wax won't boil off"). Nested calls (the demos) keep the outer busy flag.
+async function withBusy(fn) {
+  const prev = S.busy;
+  S.busy = true;
+  try { return await fn(); } catch (e) { console.error(e); } finally {
+    S.busy = prev;
+    if (!prev) { S.overlay = null; S.reveal = null; S.dispA = null; }
+    refresh();
+  }
+}
+function busyNote() {
+  if (S.demo) say('Tap “Skip to the end” to take over', 2200);
+}
 let _bb = null;
 function bundleBase() { if (!_bb) { _bb = document.createElement('canvas'); _bb.width = _bb.height = N; } return _bb; }
 
 function pushOp(op, { applied = false } = {}) {
   if (op.t === 'bind') bundleBase().getContext('2d').drawImage(comp, 0, 0);
+  if (!applied) checkpoint();
+  if (!S.demo) S.asideTouched = true;
   S.ops.push(op);
   if (applied) return {};
   const res = applyOp(S.piece, op);
@@ -159,15 +203,55 @@ function pushOp(op, { applied = false } = {}) {
 }
 
 function refresh() {
-  $('#undoBtn').setAttribute('aria-disabled', S.ops.length || (viewMode() === 'bath' && S.bathUndo.length) ? 'false' : 'true');
+  $('#undoBtn').setAttribute('aria-disabled', S.ops.length || S.setAside || (viewMode() === 'bath' && S.bathUndo.length) ? 'false' : 'true');
   const b = BASES.find((x) => x.id === S.base);
   const p = S.piece;
   const bits = [b.name];
-  if (p.meta.waxed && p.wax.some((v) => v > 0.05)) bits.push('wax on');
-  if (p.bind) bits.push(p.bindKind === 'ice' ? 'on the ice' : 'bound');
-  $('#tag').textContent = bits.join(' · ');
+  if (viewMode() === 'bath') bits.splice(0, 1, 'Marbling bath');
+  else {
+    if (p.meta.waxed && p.wax.some((v) => v > 0.05)) bits.push('wax on');
+    if (p.bind) bits.push(p.bindKind === 'ice' ? 'on the ice' : 'bound');
+  }
+  $('#tag').textContent = S.loupe ? 'Touch the cloth to look closer' : bits.join(' · ');
+  // offered while the new piece is untouched (or is the demo's); once she works on the new one,
+  // the old one is still there behind Undo
+  $('#backBtn').hidden = !(S.setAside && (!S.ops.length || !S.asideTouched));
   updatePanelState();
+  savePieceSoon();
   requestDraw();
+}
+
+// ---- the piece in progress survives a reload (sessionStorage: its own quota, so it can never
+// crowd the stash out of localStorage)
+const SAVE_KEY = 'tincture.proto.dye.piece';
+const plainBath = (bath) => bath.inks.map((i) => ({ color: i.color, pts: Array.from(i.pts, (v) => Math.round(v * 10) / 10) }));
+let saveTimer = 0;
+function savePieceSoon() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(savePiece, 400);
+}
+function savePiece() {
+  try {
+    sessionStorage.setItem(SAVE_KEY, JSON.stringify({
+      v: 1, tech: S.tech, base: S.base, seed: S.seed, opSeed, ops: packOps(S.ops),
+      bath: S.bath.inks.length ? plainBath(S.bath) : null, bathOpen: S.bathOpen, keptKey: S.keptKey,
+    }));
+  } catch { /* private mode or full: the piece just won't survive a reload */ }
+}
+function loadPiece() {
+  try {
+    const d = JSON.parse(sessionStorage.getItem(SAVE_KEY) || 'null');
+    if (!d || d.v !== 1) return false;
+    const ops = unpackOps(d.ops);
+    if (!ops || !TECHS.some((t) => t.id === d.tech) || !BASES.some((b) => b.id === d.base)) return false;
+    S.tech = d.tech; S.base = d.base; S.seed = d.seed | 0 || S.seed; opSeed = d.opSeed | 0 || opSeed;
+    for (const op of ops) if (op.t === 'marble' && op.bath) op.delta = marbleDelta(op.bath, op.mseed, op.base);
+    S.ops = ops;
+    if (Array.isArray(d.bath)) M.restore(S.bath, d.bath);
+    S.bathOpen = S.tech === 'marbling' && !!d.bathOpen;
+    S.keptKey = d.keptKey || null;
+    return ops.length > 0 || S.bath.inks.length > 0;
+  } catch (e) { console.error(e); return false; }
 }
 
 let sayTimer = 0;
@@ -562,38 +646,36 @@ async function unbindWithReveal() {
   const bindOp = [...S.ops].reverse().find((o) => o.t === 'bind');
   const snap = document.createElement('canvas'); snap.width = snap.height = W;
   drawBundle(snap.getContext('2d'));
-  pushOp({ t: 'unbind' });
-  renderComp();
-  S.reveal = { kind, t: 0, folds: bindOp && bindOp.opts && bindOp.opts.folds, bundle: snap };
-  S.busy = true;
-  say(kind === 'ice' ? 'Rinsing out the ice water…' : kind.startsWith('tie') ? 'Rinse, cut the bands, open it out…' : 'Unbinding…', 2200);
-  await anim(kind === 'itajime' ? 1700 : 1300, (t) => { S.reveal.t = t; draw(); });
-  S.reveal = null; S.busy = false;
-  refresh();
+  return withBusy(async () => {
+    pushOp({ t: 'unbind' });
+    renderComp();
+    S.reveal = { kind, t: 0, folds: bindOp && bindOp.opts && bindOp.opts.folds, bundle: snap };
+    say(kind === 'ice' ? 'Rinsing out the ice water…' : kind.startsWith('tie') ? 'Rinse, cut the bands, open it out…' : 'Unbinding…', 2200);
+    await anim(kind === 'itajime' ? 1700 : 1300, (t) => { S.reveal.t = t; draw(); });
+    S.reveal = null;
+  });
 }
 
 // ---- ice melting: blooms appear as the ice goes
 async function melt() {
   const p = S.piece;
   if (!p.bind || p.bindKind !== 'ice') return;
-  if (!p.sprinkles.length) { say('Sprinkle some dye on the ice first'); return; }
-  const before = Float32Array.from(p.A);
+  if (!p.sprinkles.length) { say('Pick a color below and tap the ice to sprinkle dye first'); return; }
   // the dye is already in p.A; show it arriving
-  S.busy = true;
-  say('The ice is melting…', 2400);
-  const disp = new Float32Array(p.A.length);
-  S.dispA = disp;
-  pushOp({ t: 'unbind' });
-  const bundle = document.createElement('canvas'); bundle.width = bundle.height = W;
-  await anim(1800, (t) => {
-    const k = ease(t);
-    // blooms grow from their strongest parts outward
-    for (let i = 0; i < disp.length; i++) { const v = p.A[i]; disp[i] = v * Math.min(1, k * (1 + v)); }
-    renderComp(); draw();
+  return withBusy(async () => {
+    say('The ice is melting…', 2400);
+    const disp = new Float32Array(p.A.length);
+    S.dispA = disp;
+    pushOp({ t: 'unbind' });
+    await anim(1800, (t) => {
+      const k = ease(t);
+      // blooms grow from their strongest parts outward
+      for (let i = 0; i < disp.length; i++) { const v = p.A[i]; disp[i] = v * Math.min(1, k * (1 + v)); }
+      renderComp(); draw();
+    });
+    S.dispA = null;
+    renderComp();
   });
-  S.dispA = null; S.busy = false;
-  renderComp(); refresh();
-  void before;
 }
 
 // ---- marbling bath
@@ -608,12 +690,12 @@ function edgeColor(hex) {
   const [r, g, b] = hexRgb(hex);
   return `rgba(${Math.round(r * 0.72 + 8)},${Math.round(g * 0.72 + 6)},${Math.round(b * 0.72 + 3)},.7)`;
 }
-function paintBath(ctx, px, bg = true) {
+function paintBath(ctx, px, bg = true, inks = S.bath.inks) {
   const k = px / M.BATH_SIZE;
   if (bg) { ctx.fillStyle = M.BATH_COLOR; ctx.fillRect(0, 0, px, px); }
   ctx.lineJoin = 'round';
   ctx.lineWidth = Math.max(1, px / 520);
-  for (const ink of S.bath.inks) {
+  for (const ink of inks) {
     bathPath(ctx, ink.pts, k);
     ctx.fillStyle = ink.color; ctx.fill();
     ctx.strokeStyle = edgeColor(ink.color); ctx.stroke();
@@ -639,15 +721,17 @@ function bathPoint(e) {
 }
 function bathSnapshot() { S.bathUndo.push(M.snapshot(S.bath)); if (S.bathUndo.length > 14) S.bathUndo.shift(); }
 
-function marbleDelta() {
+// inks: the bath as it was laid (plain {color, pts} list); mseed and base as they were, so a
+// reload can rebuild the same print.
+function marbleDelta(inks, mseed, base) {
   const c = document.createElement('canvas'); c.width = c.height = N;
   const x = c.getContext('2d');
-  paintBath(x, N, false);
+  paintBath(x, N, false, inks);
   const d = x.getImageData(0, 0, N, N).data;
   const delta = new Float32Array(N * N * 3);
   const lut = [0, 1, 2].map((k) => Float32Array.from({ length: 256 }, (_, v) => Math.max(0, -Math.log(Math.max(4, v) / REF[k]))));
-  const bd = BASE_DYE[S.base] || BASE_DYE['quilting-cotton'];
-  const rng = mulberry32(nextSeed());
+  const bd = BASE_DYE[base] || BASE_DYE['quilting-cotton'];
+  const rng = mulberry32(mseed);
   for (let p = 0; p < N * N; p++) {
     const a = d[p * 4 + 3] / 255;
     if (!a) continue;
@@ -658,8 +742,8 @@ function marbleDelta() {
 }
 
 async function layCloth() {
-  if (!S.bath.inks.length) { say('Float some colors on the bath first'); return; }
-  S.busy = true;
+  if (!S.bath.inks.length) { openBath(); say('Hold a finger on the bath to float a drop of ink first'); return; }
+  return withBusy(async () => {
   const dyes = [...new Set(S.bath.inks.map((i) => marbleColors.get(i.color)).filter(Boolean))];
   say('Laying the cloth on the bath…', 1800);
   await anim(900, (t) => {
@@ -674,8 +758,9 @@ async function layCloth() {
     };
     draw();
   });
-  const delta = marbleDelta();
-  pushOp({ t: 'marble', delta, dyes });
+  const bath = plainBath(S.bath), mseed = nextSeed();
+  const delta = marbleDelta(bath, mseed, S.base);
+  pushOp({ t: 'marble', delta, dyes, bath, mseed, base: S.base });
   renderComp();
   S.bath = M.createBath(); S.bathUndo = []; S.bathOpen = false;
   S.overlay = null;
@@ -684,9 +769,9 @@ async function layCloth() {
     S.overlay = (ctx) => { ctx.fillStyle = `rgba(233,224,205,${1 - t})`; ctx.fillRect(0, 0, W, W); };
     draw();
   });
-  S.overlay = null; S.busy = false;
-  say('Lifted! The bath is skimmed clean for another layer.', 2600);
-  refresh(); renderPanel();
+  S.overlay = null;
+  say('Lifted! Keep it, or float more colors for another layer.', 3200);
+  });
 }
 
 // ---- block printing
@@ -756,11 +841,10 @@ async function stampAt(u, v, quick = false) {
 }
 
 async function stampAllOver() {
-  S.busy = true;
-  const pos = blockPositions();
-  for (const [x, y] of pos) { await stampAt(x, y, true); draw(); await wait(70); }
-  S.busy = false;
-  refresh();
+  return withBusy(async () => {
+    const pos = blockPositions();
+    for (const [x, y] of pos) { await stampAt(x, y, true); draw(); await wait(70); }
+  });
 }
 
 // ---- tjap (copper wax stamp) and the tjanting
@@ -783,10 +867,10 @@ async function tjapAt(u, v) {
   refresh();
 }
 async function tjapAllOver() {
-  S.busy = true;
-  const pos = R.repeatGrid(0.25, 'halfdrop');
-  for (const [x, y] of pos) { pushOp({ t: 'tjap', block: S.tjap, x, y, size: 0.24, rot: 0, seed: nextSeed() }); renderComp(); draw(); await wait(60); }
-  S.busy = false; refresh();
+  return withBusy(async () => {
+    const pos = R.repeatGrid(0.25, 'halfdrop');
+    for (const [x, y] of pos) { pushOp({ t: 'tjap', block: S.tjap, x, y, size: 0.24, rot: 0, seed: nextSeed() }); renderComp(); draw(); await wait(60); }
+  });
 }
 
 // ------------------------------------------------------------------ dipping
@@ -800,9 +884,19 @@ function dipOp() {
   if (S.tech === 'ombre') { op.depth = S.depth; op.lift = S.lift; }
   return op;
 }
+// When she holds the dip button while scrolled down to the steps, the cloth is off-screen:
+// bring it back so she sees it go into the pot.
+function showStage() {
+  const r = stage.getBoundingClientRect();
+  const dockTop = $('#dock').getBoundingClientRect().top;
+  const visible = Math.min(r.bottom, dockTop) - Math.max(r.top, 0);
+  if (visible < r.height * 0.6) window.scrollTo({ top: Math.max(0, scrollY + r.top - 8), behavior: reduceMQ.matches ? 'auto' : 'smooth' });
+}
 function startDip(force = false) {
-  if ((S.busy && !force) || dip) return;
-  if (viewMode() === 'bath') return;
+  if (S.busy && !force) return busyNote();
+  if (dip) return;
+  if (viewMode() === 'bath') { say('In marbling the bath prints the cloth: tap “Lay the cloth”'); return; }
+  if (!force) showStage();
   const op = dipOp();
   const absorb = dyeAbsorb(op.dye);
   const bound = !!S.piece.bind;
@@ -812,32 +906,38 @@ function startDip(force = false) {
   say(OXIDIZING.has(op.dye) ? 'In the vat… hold for a deeper blue' : 'Soaking… hold for a deeper shade', 0);
   const loop = (now) => {
     if (!dip) return;
-    const ms = reduceMQ.matches ? 1500 : now - dip.t0;
+    // How long she holds always sets the depth, reduced motion or not (it used to be fixed at
+    // 1.5 s with reduced motion, so every dip came out the same).
+    const ms = now - dip.t0;
     const s = soak(ms);
+    const wave = reduceMQ.matches ? 0 : now / 1000;
     dip.s = s;
     const level = Math.min(1, ms / 260);
     if (dip.bound) {
       const extra = absorb.map((v) => v * s);
-      S.overlay = (ctx) => { drawBundle(ctx, extra); drawLiquid(ctx, (op.depth ?? 1) * level + 0.06, dyeOf(op.dye).hex, now / 1000); };
+      S.overlay = (ctx) => { drawBundle(ctx, extra); drawLiquid(ctx, (op.depth ?? 1) * level + 0.06, dyeOf(op.dye).hex, wave); };
     } else {
       const A = S.piece.A, u = dip.unit, d = dip.disp;
       for (let p = 0; p < u.length; p++) { const v = u[p] * s; const q = p * 3; d[q] = A[q] + v * absorb[0]; d[q + 1] = A[q + 1] + v * absorb[1]; d[q + 2] = A[q + 2] + v * absorb[2]; }
       S.dispA = d; renderComp(); S.dispA = null;
-      S.overlay = (ctx) => drawLiquid(ctx, ((op.depth ?? 1) >= 1 ? 1.05 : op.depth) * level, dyeOf(op.dye).hex, now / 1000);
+      S.overlay = (ctx) => drawLiquid(ctx, ((op.depth ?? 1) >= 1 ? 1.05 : op.depth) * level, dyeOf(op.dye).hex, wave);
     }
     updateHoldFill(s);
     draw();
-    dip.raf = requestAnimationFrame(loop);
+    dip.raf = requestAnimationFrame(loopSafe);
   };
-  dip.raf = requestAnimationFrame(loop);
+  // a frame that throws must not leave the cloth in the pot
+  const loopSafe = (now) => { try { loop(now); } catch (e) { console.error(e); endDip(); } };
+  dip.raf = requestAnimationFrame(loopSafe);
 }
 async function endDip() {
   if (!dip) return;
   const d = dip; dip = null;
   cancelAnimationFrame(d.raf);
-  const s = d.s || soak(reduceMQ.matches ? 1500 : performance.now() - d.t0);
+  const s = d.s || soak(performance.now() - d.t0);
   const op = { ...d.op, s: Math.round(s * 1000) / 1000 };
-  S.busy = true;
+  S.lineSet = false;
+  return withBusy(async () => {
   const res = pushOp(op);
   updateHoldFill(0);
   // the pot drains away
@@ -861,8 +961,7 @@ async function endDip() {
   } else if (OXIDIZING.has(op.dye) && d.bound && !reduceMQ.matches && !S.fast) {
     say('Green in the vat, blue in the air', 2000);
   } else say('');
-  S.busy = false;
-  refresh();
+  });
 }
 let holdFills = [];
 function updateHoldFill(s) {
@@ -874,7 +973,7 @@ async function demoDip(opts, ms) {
   if (opts.dye) pickDye(opts.dye);
   startDip(true);
   await wait(ms);
-  if (dip && (reduceMQ.matches || S.fast)) dip.s = soak(ms);
+  if (dip) dip.s = soak(ms);
   await endDip();
 }
 
@@ -886,10 +985,12 @@ function stagePoint(e) {
   return [(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height];
 }
 stage.addEventListener('pointerdown', (e) => {
-  if (S.busy || dip) return;
+  if (S.busy) return busyNote();
+  if (dip || gesture) return;
   stage.setPointerCapture(e.pointerId);
   const [u, v] = stagePoint(e);
   if (S.loupe && viewMode() === 'cloth') { loupe = { u, v }; requestDraw(); gesture = { kind: 'loupe' }; return; }
+  setLoupe(false);
   const mode = viewMode();
   if (mode === 'bath') return bathDown(e);
   if (mode === 'bundle') {
@@ -912,6 +1013,7 @@ stage.addEventListener('pointerdown', (e) => {
   if (S.tech === 'batik') {
     if (S.waxTool === 'tjap') { tjapAt(u, v); return; }
     const op = { t: 'wax', tool: S.waxTool === 'brush' ? 'brush' : 'tjanting', pts: [u, v], r: WAX_R[S.waxTool], seed: nextSeed() };
+    checkpoint();
     gesture = { kind: 'wax', op };
     const rect = waxStroke(S.piece, op.pts, op.r, op.seed, op.tool, 0);
     renderComp(rect); requestDraw();
@@ -920,7 +1022,14 @@ stage.addEventListener('pointerdown', (e) => {
   }
   if (S.tech === 'ombre') { gesture = { kind: 'line' }; S.depth = Math.min(0.97, Math.max(0.05, 1 - v)); requestDraw(); return; }
   if (S.tech === 'block') { stampAt(u, v); return; }
-  say(S.tech === 'solid' ? 'Choose a pot below and hold to dip' : 'Follow the steps below');
+  // Taps that don't change the cloth say what will.
+  say({
+    solid: 'Choose a pot below, then hold “Hold to dip”',
+    shibori: 'Bind it first for a pattern, or hold to dip for a plain color',
+    tiedye: 'Tie it first (step 2), then squirt dye on the bundle',
+    ice: 'Scrunch it and pile on ice first (step 2)',
+    marbling: 'Tap “Float more colors” below for another layer',
+  }[S.tech] || 'Follow the steps below', 2600);
 });
 stage.addEventListener('pointermove', (e) => {
   if (!gesture) return;
@@ -945,10 +1054,12 @@ stage.addEventListener('pointermove', (e) => {
 function endGesture() {
   if (!gesture) return;
   const g = gesture; gesture = null;
-  if (g.kind === 'loupe') { loupe = null; requestDraw(); return; }
+  // "Closer" is one look: lift the finger and the next touch draws again (it used to stay on,
+  // so wax and stamps silently stopped working until she found the button again).
+  if (g.kind === 'loupe') { loupe = null; setLoupe(false); requestDraw(); return; }
   if (g.kind === 'bath') return bathUp();
   if (g.kind === 'wax') { pushOp(g.op, { applied: true }); refresh(); }
-  if (g.kind === 'line') refresh();
+  if (g.kind === 'line') { S.lineSet = true; refresh(); }
 }
 stage.addEventListener('pointerup', endGesture);
 stage.addEventListener('pointercancel', endGesture);
@@ -973,7 +1084,8 @@ function bathDown(e) {
     const grow = () => {
       if (!gesture || gesture.tool !== 'drop') return;
       const ms = performance.now() - gesture.t0;
-      const r = reduceMQ.matches ? 80 : 40 + 120 * (1 - Math.exp(-ms / 700));
+      // the longer she holds, the bigger the drop, with reduced motion too
+      const r = 40 + 120 * (1 - Math.exp(-ms / 700));
       M.growDrop(S.bath, dropH, r);
       draw();
       gesture.raf = requestAnimationFrame(grow);
@@ -1047,11 +1159,34 @@ function seg(options, value, onChange, label) {
   }
   return s;
 }
+let stepEls = [];
+// a step's main button is dark only while that step is the next one (one strongest action)
+const main = (b) => { b.dataset.main = '1'; return b; };
 function step(n, title, desc, ...body) {
-  return el('div', { class: 'step' },
-    el('div', { class: 'h' }, el('span', { class: 'n' }, String(n)), el('span', { class: 't' }, title)),
+  const e = el('div', { class: 'step', 'data-n': n },
+    el('div', { class: 'h' }, el('span', { class: 'n' }, String(n)), el('span', { class: 't' }, title), el('span', { class: 'now-tag', 'aria-hidden': 'true' })),
     desc ? el('div', { class: 'd' }, desc) : null,
     el('div', { class: 'body' }, ...body));
+  stepEls[n] = e;
+  return e;
+}
+// Mark the step that comes next (and any alternatives), so the next round is never hidden in
+// a paragraph: "Wax more, dye darker" lights up as soon as the first dip is done.
+function markSteps() {
+  const nx = nextSteps(S.tech, S.ops, { bathInks: S.bath.inks.length, bathOpen: S.bathOpen, lineSet: S.lineSet });
+  stepEls.forEach((e, n) => {
+    if (!e) return;
+    const m = nx.steps.find((x) => x.n === n);
+    e.classList.toggle('now', !!m && m.label === 'Next');
+    e.classList.toggle('alt', !!m && m.label !== 'Next');
+    e.querySelector('.now-tag').textContent = m ? { Next: 'Next', Or: 'or this', More: 'if you like' }[m.label] : '';
+    for (const b of e.querySelectorAll('[data-main]')) b.classList.toggle('primary', !!m && m.label === 'Next');
+  });
+  const kept = S.keptKey === pieceKey();
+  const k = $('#keepBtn');
+  k.classList.toggle('ready', nx.done && !kept && !S.busy);
+  k.textContent = kept && S.ops.length ? 'Kept ✓' : 'Keep it';
+  $('#keptBtn').hidden = !(kept && S.ops.length);
 }
 function renderPots() {
   const g = $('#pots');
@@ -1067,7 +1202,8 @@ function pickDye(id) {
   for (const x of document.querySelectorAll('.pot')) x.setAttribute('aria-pressed', String(x.dataset.dye === id));
   for (const sw of document.querySelectorAll('.hold .sw')) sw.style.background = dyeOf(id).hex;
   updateDockDye();
-  if (S.tech === 'marbling') openBath();
+  // (Picking an ink used to flip the stage from her marbled cloth to an empty bath without a
+  // word. Only "Float more colors" opens the bath now.)
 }
 function updateDockDye() {
   const d = dyeOf(S.dye);
@@ -1082,10 +1218,13 @@ function renderDock() {
   act.textContent = '';
   holdFills = holdFills.filter((f) => f.isConnected);
   const t = S.tech, p = S.piece;
+  // The main button is only dark (primary) once it is the natural next step: "Rinse and open"
+  // before any dye is on the bundle reads as the next thing to do, and isn't.
+  const dyedBundle = p.bind && (p.sectionA ? p.sectionA.some((a) => a[0] + a[1] + a[2] > 0) : p.sprinkles.length > 0);
   if (t === 'solid' || t === 'ombre' || t === 'batik' || t === 'shibori') act.append(holdButton('Hold to dip'));
-  else if (t === 'tiedye') act.append(p.bind ? action('Rinse and open', unbindWithReveal, 'btn primary') : action('Tie it', tieUp, 'btn primary'));
-  else if (t === 'ice') act.append(p.bind ? action('Let it melt', melt, 'btn primary') : action('Scrunch it and pile on ice', iceUp, 'btn primary'));
-  else if (t === 'marbling') act.append(S.bathOpen ? action('Lay the cloth', layCloth, 'btn primary') : action('Float more colors', async () => { openBath(); renderDock(); }, 'btn'));
+  else if (t === 'tiedye') act.append(p.bind ? action('Rinse and open', unbindWithReveal, dyedBundle ? 'btn primary' : 'btn') : action('Tie it', tieUp, 'btn primary'));
+  else if (t === 'ice') act.append(p.bind ? action('Let it melt', melt, dyedBundle ? 'btn primary' : 'btn') : action('Scrunch it and pile on ice', iceUp, 'btn primary'));
+  else if (t === 'marbling') act.append(S.bathOpen ? action('Lay the cloth', layCloth, S.bath.inks.length ? 'btn primary' : 'btn') : action('Float more colors', async () => { openBath(); say('Hold a finger on the bath to float a drop', 2200); }, 'btn'));
   else if (t === 'block') act.append(action('Stamp all over', stampAllOver, 'btn primary'));
   if (t === 'shibori' && p.bind) act.append(action('Open it', unbindWithReveal, 'btn'));
   for (const b of act.querySelectorAll('.btn')) b.style.minHeight = '48px';
@@ -1101,6 +1240,8 @@ function holdButton(label) {
   b.addEventListener('pointerdown', (e) => { e.preventDefault(); b.setPointerCapture(e.pointerId); startDip(); });
   b.addEventListener('pointerup', () => endDip());
   b.addEventListener('pointercancel', () => endDip());
+  // if the button is re-rendered or the page hides mid-hold, lift the cloth out anyway
+  b.addEventListener('lostpointercapture', () => endDip());
   b.addEventListener('keydown', (e) => { if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) { e.preventDefault(); startDip(); } });
   b.addEventListener('keyup', (e) => { if (e.key === ' ' || e.key === 'Enter') endDip(); });
   b.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -1108,7 +1249,7 @@ function holdButton(label) {
 }
 function action(label, fn, cls = 'btn') {
   return el('button', { class: cls, onclick: async () => {
-    if (S.busy) return;
+    if (S.busy) return busyNote();
     // Bring the cloth into view first, so she sees what the step does to it.
     const v = document.getElementById('view');
     const r = v && v.getBoundingClientRect();
@@ -1193,6 +1334,7 @@ function renderPanel() {
   P.textContent = '';
   holdFills = [];
   panelRefs = {};
+  stepEls = [];
   const t = S.tech;
   let n = 1;
   P.append(step(n++, 'Choose the cloth', null, clothRow()));
@@ -1213,7 +1355,7 @@ function renderPanel() {
     P.append(step(n++, 'Dye', 'Pick a pot below and hold to dip. Light colors first, darker over them: each dip mixes with the last.'));
     P.append(step(n++, 'Wax more, dye darker', 'Repeat 2 and 3 as often as you like.'));
     P.append(step(n++, 'Crackle (if you like)', 'Crumple the waxed cloth; the dye seeps into the cracks.', action('Crumple the cloth', crumpleFx)));
-    P.append(step(n++, 'Boil off the wax', null, action('Boil it off', boilFx, 'btn primary')));
+    P.append(step(n++, 'Boil off the wax', null, main(action('Boil it off', boilFx))));
   } else if (t === 'shibori') {
     const k = S.shib.kind;
     const items = R.SHIBORI.map((s) => ({ ...s, canvas: thumb('shib-' + s.id, [{ t: 'bind', kind: s.id, opts: {}, seed: 2 }, { t: 'dip', dye: 'indigo', s: 1, seed: 1 }]) }));
@@ -1222,38 +1364,38 @@ function renderPanel() {
         el('div', { class: 'row' }, seg([['circle', 'Circle'], ['square', 'Square'], ['corner', 'Corner'], ['bars', 'Sticks']], S.shib.clamp, (v) => { S.shib.clamp = v; }, 'Clamp')))
       : k === 'kumo' ? el('div', { class: 'row' }, seg([['one', 'One'], ['few', 'A few'], ['many', 'Many']], S.shib.count, (v) => { S.shib.count = v; }, 'Points'))
       : k === 'mokume' ? el('div', { class: 'row' }, seg([['18', 'Close rows'], ['13', 'Medium'], ['9', 'Wide rows']], String(S.shib.rows), (v) => { S.shib.rows = +v; }, 'Rows')) : null;
-    const bindBtn = action(BIND_VERB[k], bindShibori, 'btn primary');
+    const bindBtn = main(action(BIND_VERB[k], bindShibori));
     panelRefs.bindBtn = bindBtn;
     P.append(step(n++, 'Bind', R.SHIBORI.find((s) => s.id === k).note,
       picks(items, k, (v) => { S.shib.kind = v; renderPanel(); }, 'Binding'), opts ? el('div', { style: 'margin-top:8px' }, opts) : null, el('div', { class: 'row', style: 'margin-top:8px' }, bindBtn)));
     P.append(step(n++, 'Dip', 'Pick a vat below and hold to dip. Indigo is the classic; several short dips build a deeper blue.'));
-    const open = action('Unbind and open', unbindWithReveal, 'btn primary');
+    const open = main(action('Unbind and open', unbindWithReveal));
     panelRefs.openBtn = open;
     P.append(step(n++, 'Open it up', null, open));
   } else if (t === 'tiedye') {
     const items = R.TIES.map((s) => ({ ...s, canvas: thumb('tie-' + s.id, [{ t: 'bind', kind: 'tie-' + s.id, opts: { n: 4 }, seed: 2 }, ...[0, 1, 2, 3].map((k) => ({ t: 'squirt', k, dye: ['madder', 'weld', 'woad', 'cochineal'][k], s: 1, seed: k }))]) }));
-    const tieBtn = action('Tie it', tieUp, 'btn primary');
+    const tieBtn = main(action('Tie it', tieUp));
     panelRefs.bindBtn = tieBtn;
     P.append(step(n++, 'Fold and tie', R.TIES.find((s) => s.id === S.tie).note, picks(items, S.tie, (v) => { S.tie = v; renderPanel(); }, 'Fold'),
       el('div', { class: 'row', style: 'margin-top:8px' }, seg([['3', '3'], ['4', '4'], ['5', '5'], ['6', '6']], String(S.tieN), (v) => { S.tieN = +v; }, 'Sections'), el('span', { class: 'fine' }, 'sections'), tieBtn)));
     P.append(step(n++, 'Squirt the dye', 'Pick a color below, then tap a section of the bundle. Neighbouring colors bleed together.'));
-    const open = action('Rinse and open', unbindWithReveal, 'btn primary');
+    const open = main(action('Rinse and open', unbindWithReveal));
     panelRefs.openBtn = open;
     P.append(step(n++, 'Rinse and open', null, open));
   } else if (t === 'ice') {
-    const pile = action('Scrunch it and pile on ice', iceUp, 'btn primary');
+    const pile = main(action('Scrunch it and pile on ice', iceUp));
     panelRefs.bindBtn = pile;
     P.append(step(n++, 'Scrunch and ice', 'The cloth goes on a rack in loose folds, ice on top.', pile));
     P.append(step(n++, 'Sprinkle dye powder', 'Pick a color below and tap the ice. Each powder splits into the colors it is made of as the ice melts.'));
-    const m = action('Let it melt', melt, 'btn primary');
+    const m = main(action('Let it melt', melt));
     panelRefs.openBtn = m;
     P.append(step(n++, 'Let it melt, then rinse', null, m));
   } else if (t === 'marbling') {
-    const tools = seg([['drop', 'Drop'], ['stylus', 'Stylus'], ['comb', 'Comb']], S.mtool, (v) => { S.mtool = v; openBath(); }, 'Marbling tool');
+    const tools = seg([['drop', 'Drop'], ['stylus', 'Stylus'], ['comb', 'Comb']], S.mtool, (v) => { S.mtool = v; }, 'Marbling tool');
     const pats = el('div', { class: 'row' }, ...M.STARTERS.map((st) => action(st.name, async () => { openBath(); bathSnapshot(); M.runStarter(S.bath, st.id, mulberry32(nextSeed()), 24); refresh(); }, 'btn small')));
-    P.append(step(n++, 'Float the colors', 'Hold to drop ink (longer = bigger), then pull a stylus or comb through.', el('div', { class: 'row' }, tools), el('div', { class: 'row' }, el('span', { class: 'fine' }, 'Or start from'), pats),
-      el('div', { class: 'row' }, action('Skim the bath clean', () => { bathSnapshot(); S.bath = M.createBath(); refresh(); }, 'btn small'))));
-    P.append(step(n++, 'Lay the cloth', 'One smooth roll, then lift. Each lay takes the whole bath.', action('Lay the cloth', layCloth, 'btn primary')));
+    P.append(step(n++, 'Float the colors', 'Pick an ink below, then hold a finger on the bath to drop it (longer = bigger). Then pull a stylus or comb through.', el('div', { class: 'row' }, tools), el('div', { class: 'row' }, el('span', { class: 'fine' }, 'Or start from'), pats),
+      el('div', { class: 'row' }, action('Skim the bath clean', () => { openBath(); bathSnapshot(); S.bath = M.createBath(); refresh(); }, 'btn small'))));
+    P.append(step(n++, 'Lay the cloth', 'One smooth roll, then lift. Each lay takes the whole bath.', main(action('Lay the cloth', layCloth))));
   } else if (t === 'block') {
     const items = R.BLOCKS.map((b) => ({ ...b, canvas: thumb('blk-' + b.id, [{ t: 'stamp', block: b.id, x: 0.5, y: 0.5, size: 0.86, dye: 'madder', seed: 2 }]) }));
     P.append(step(n++, 'Choose a carved block', null, picks(items, S.block, (v) => { S.block = v; }, 'Block')));
@@ -1273,8 +1415,10 @@ function updatePanelState() {
   const bound = !!p.bind;
   if (panelRefs.bindBtn) panelRefs.bindBtn.setAttribute('aria-disabled', String(bound));
   if (panelRefs.openBtn) panelRefs.openBtn.setAttribute('aria-disabled', String(!bound));
-  const key = S.tech + '|' + bound + '|' + S.bathOpen;
+  const dyedBundle = bound && (p.sectionA ? p.sectionA.some((a) => a[0] + a[1] + a[2] > 0) : p.sprinkles.length > 0);
+  const key = [S.tech, bound, S.bathOpen, dyedBundle, S.bath.inks.length > 0].join('|');
   if (key !== updatePanelState.key) { updatePanelState.key = key; renderDock(); }
+  markSteps();
 }
 
 function renderTechs() {
@@ -1298,6 +1442,18 @@ function renderTechs() {
     if (t.id === 'marbling') { c = el('canvas', { width: 64, height: 64 }); paintMarbleThumb(c); } else c = thumb('tech-' + t.id, thumbs[t.id], 'quilting-cotton', 32);
     row.append(el('button', { class: 'chip', 'aria-pressed': String(t.id === S.tech), 'data-id': t.id, onclick: () => setTech(t.id) }, c, t.name));
   }
+  showActiveChip();
+}
+// The chip row scrolls sideways; keep the technique she is in visible (on first open the
+// default, Batik, sat off the right edge at 360 px, so nothing said which technique this was).
+function showActiveChip() {
+  if (S.demo) return; // the row stays put during a demo, so "Skip to the end" doesn't slide away
+  const row = $('#techs'), c = row.querySelector('.chip[aria-pressed="true"]');
+  if (!c) return;
+  // scroll as little as possible, so "Surprise me" at the start stays in sight when it can
+  const left = c.offsetLeft - row.offsetLeft, right = left + c.offsetWidth;
+  if (left < row.scrollLeft) row.scrollTo({ left: Math.max(0, left - 24), behavior: 'auto' });
+  else if (right > row.scrollLeft + row.clientWidth) row.scrollTo({ left: right - row.clientWidth + 24, behavior: 'auto' });
 }
 function paintMarbleThumb(c) {
   const b = M.createBath();
@@ -1308,8 +1464,8 @@ function paintMarbleThumb(c) {
   for (const ink of b.inks) { bathPath(x, ink.pts, k); x.fillStyle = ink.color; x.fill(); }
 }
 
-async function setTech(id) {
-  if (S.busy) return;
+async function setTech(id, { quiet = false } = {}) {
+  if (S.busy) return busyNote();
   if (S.piece.bind) {
     const k = S.piece.bindKind;
     const keepBound = (id === 'shibori' && R.SHIBORI.some((s) => s.id === k)) || (id === 'tiedye' && k.startsWith('tie-')) || (id === 'ice' && k === 'ice');
@@ -1317,14 +1473,17 @@ async function setTech(id) {
   }
   S.tech = id; store.set('tech', id);
   for (const b of document.querySelectorAll('#techs .chip[data-id]')) b.setAttribute('aria-pressed', String(b.dataset.id === id));
+  showActiveChip();
   if (id === 'marbling') S.bathOpen = true;
+  setLoupe(false);
   updatePanelState.key = null;
   renderPanel();
   refresh();
+  if (quiet) return;
   const hints = {
     solid: 'Pick a pot, then hold to dip', ombre: 'Drag on the cloth to set the dye line', batik: 'Drag on the cloth to draw with hot wax',
     shibori: 'Choose a binding, then bind the cloth', tiedye: 'Choose a fold, then tie it', ice: 'Scrunch the cloth and pile on ice',
-    marbling: 'Tap and hold the bath to float a drop of ink', block: 'Tap the cloth to stamp',
+    marbling: 'Hold a finger on the bath to float a drop of ink', block: 'Tap the cloth to stamp',
   };
   say(hints[id]);
 }
@@ -1335,24 +1494,24 @@ async function bindShibori() {
   if (S.piece.bind) { say('Open this one up first'); return; }
   const k = S.shib.kind;
   const opts = k === 'itajime' ? { fold: S.shib.fold, clamp: S.shib.clamp, folds: 4 } : k === 'kumo' ? { count: S.shib.count } : k === 'mokume' ? { rows: S.shib.rows } : {};
-  S.busy = true;
-  say({ itajime: 'Folding it up and clamping the boards…', arashi: 'Wrapping it round the pole…', kumo: 'Pinching up points and binding them…', mokume: 'Stitching rows and pulling them tight…' }[k], 1800);
-  await anim(500, (t) => { S.overlay = (ctx) => { ctx.fillStyle = `rgba(233,224,205,${t})`; ctx.fillRect(0, 0, W, W); }; draw(); });
-  pushOp({ t: 'bind', kind: k, opts, seed: nextSeed() });
-  await anim(400, (t) => { S.overlay = (ctx) => { ctx.fillStyle = `rgba(233,224,205,${1 - t})`; ctx.fillRect(0, 0, W, W); }; draw(); });
-  S.overlay = null; S.busy = false;
-  refresh();
+  return withBusy(async () => {
+    say({ itajime: 'Folding it up and clamping the boards…', arashi: 'Wrapping it round the pole…', kumo: 'Pinching up points and binding them…', mokume: 'Stitching rows and pulling them tight…' }[k], 1800);
+    await anim(500, (t) => { S.overlay = (ctx) => { ctx.fillStyle = `rgba(233,224,205,${t})`; ctx.fillRect(0, 0, W, W); }; draw(); });
+    pushOp({ t: 'bind', kind: k, opts, seed: nextSeed() });
+    await anim(400, (t) => { S.overlay = (ctx) => { ctx.fillStyle = `rgba(233,224,205,${1 - t})`; ctx.fillRect(0, 0, W, W); }; draw(); });
+    S.overlay = null;
+  });
 }
 async function tieUp() {
   if (S.piece.bind) { say('Rinse and open this one first'); return; }
-  S.busy = true;
-  say({ spiral: 'Pinch, twist, twist, twist… and band it', bullseye: 'Pull up the middle and band it into rings', crumple: 'Scrunch it into a lump and band it' }[S.tie], 1800);
-  await anim(450, (t) => { S.overlay = (ctx) => { ctx.fillStyle = `rgba(233,224,205,${t})`; ctx.fillRect(0, 0, W, W); }; draw(); });
-  pushOp({ t: 'bind', kind: 'tie-' + S.tie, opts: { n: S.tieN }, seed: nextSeed() });
-  await anim(350, (t) => { S.overlay = (ctx) => { ctx.fillStyle = `rgba(233,224,205,${1 - t})`; ctx.fillRect(0, 0, W, W); }; draw(); });
-  S.overlay = null; S.busy = false;
-  refresh();
-  say('Now tap a section to squirt dye on it', 2400);
+  await withBusy(async () => {
+    say({ spiral: 'Pinch, twist, twist, twist… and band it', bullseye: 'Pull up the middle and band it into rings', crumple: 'Scrunch it into a lump and band it' }[S.tie], 1800);
+    await anim(450, (t) => { S.overlay = (ctx) => { ctx.fillStyle = `rgba(233,224,205,${t})`; ctx.fillRect(0, 0, W, W); }; draw(); });
+    pushOp({ t: 'bind', kind: 'tie-' + S.tie, opts: { n: S.tieN }, seed: nextSeed() });
+    await anim(350, (t) => { S.overlay = (ctx) => { ctx.fillStyle = `rgba(233,224,205,${1 - t})`; ctx.fillRect(0, 0, W, W); }; draw(); });
+    S.overlay = null;
+  });
+  say('Now pick a color below and tap a section to squirt it on', 2800);
 }
 async function iceUp() {
   if (S.piece.bind) return;
@@ -1361,8 +1520,8 @@ async function iceUp() {
   say('Now pick a color and tap the ice', 2400);
 }
 async function crumpleFx() {
-  if (!S.piece.meta.waxed || !S.piece.wax.some((v) => v > 0.3)) { say('Crackle needs wax on the cloth first'); return; }
-  S.busy = true;
+  if (!S.piece.meta.waxed || !S.piece.wax.some((v) => v > 0.3)) { say('Draw some wax on the cloth first, then crumple it'); return; }
+  return withBusy(async () => {
   say('Crumple, crumple… the cold wax cracks', 1800);
   await anim(700, (t) => {
     S.overlay = (ctx) => {
@@ -1377,13 +1536,12 @@ async function crumpleFx() {
   S.overlay = null;
   pushOp({ t: 'crackle', seed: nextSeed() });
   renderComp();
-  S.busy = false;
-  refresh();
-  say('Cracked. Dye it now and the color runs into the veins', 2600);
+  say('Cracked! Dye it now and the color runs into the veins', 3000);
+  });
 }
 async function boilFx() {
-  if (!S.piece.meta.waxed || !S.piece.wax.some((v) => v > 0.02)) { say('No wax on the cloth right now'); return; }
-  S.busy = true;
+  if (!S.piece.meta.waxed || !S.piece.wax.some((v) => v > 0.02)) { say('The cloth is wax-free already: keep it, or draw more wax'); return; }
+  return withBusy(async () => {
   say('Into the boiling water… the wax floats away', 2000);
   const before = document.createElement('canvas'); before.width = before.height = N;
   before.getContext('2d').drawImage(comp, 0, 0);
@@ -1398,29 +1556,55 @@ async function boilFx() {
     };
     draw();
   });
-  S.overlay = null; S.busy = false;
-  refresh();
-  say('There it is!', 1600);
+  S.overlay = null;
+  say('There it is! Keep it, or wax and dye another round', 3000);
+  });
 }
 
 // ------------------------------------------------------------------ undo / reset / keep
-$('#undoBtn').addEventListener('click', () => {
-  if (S.busy) return;
-  if (viewMode() === 'bath' && S.bathUndo.length) { M.restore(S.bath, S.bathUndo.pop()); refresh(); return; }
-  if (!S.ops.length) return;
-  S.ops.pop();
-  rebuild();
-});
+$('#undoBtn').addEventListener('click', undo);
+// Start over and Surprise me never throw her work away: the piece is set aside, and Undo (or
+// "Back to my piece") brings it back.
+const pieceKey = () => `${S.base}|${S.seed}|${S.ops.length}|${S.ops.length ? S.ops[S.ops.length - 1].seed ?? S.ops[S.ops.length - 1].t : ''}`;
+function setAsidePiece() {
+  if (!S.ops.length || S.keptKey === pieceKey()) return false;
+  S.setAside = { tech: S.tech, base: S.base, seed: S.seed, ops: S.ops, snaps: S.snaps, piece: S.piece };
+  // from here on nothing may touch the set-aside piece (a demo unbinds whatever is current)
+  S.snaps = new Map(); S.ops = []; S.piece = replay(S.base, S.seed, [], N);
+  S.asideTouched = false;
+  return true;
+}
+async function bringBack() {
+  const a = S.setAside;
+  if (!a || S.busy) return;
+  S.setAside = null;
+  if (S.tech !== a.tech) await setTech(a.tech, { quiet: true });
+  S.base = a.base; store.set('base', a.base); S.seed = a.seed; S.ops = a.ops; S.snaps = a.snaps;
+  S.piece = a.piece; S.wf = weaveField(S.base, N, 1);
+  S.bath = M.createBath(); S.bathUndo = []; S.bathOpen = false;
+  renderPanel(); pieceChanged();
+  say('Your piece is back', 1800);
+}
+$('#backBtn').addEventListener('click', bringBack);
+$('#backBtn').addEventListener('pointerdown', (e) => e.stopPropagation()); // it sits on the stage
 $('#resetBtn').addEventListener('click', () => {
-  if (S.busy) return;
+  if (S.busy) return busyNote();
+  const aside = setAsidePiece();
   S.ops = []; S.seed = 1 + ((S.seed * 7 + 13) % 9973);
   S.bath = M.createBath(); S.bathUndo = []; S.bathOpen = S.tech === 'marbling';
   rebuild();
-  say('A fresh piece of cloth', 1400);
+  say(aside ? 'A fresh piece. Undo brings the last one back' : 'A fresh piece of cloth', 2400);
 });
+function setLoupe(on) {
+  if (S.loupe === on) return;
+  S.loupe = on;
+  $('#loupeBtn').setAttribute('aria-pressed', String(on));
+  refresh();
+}
 $('#loupeBtn').addEventListener('click', () => {
-  S.loupe = !S.loupe;
-  $('#loupeBtn').setAttribute('aria-pressed', String(S.loupe));
+  if (S.busy) return busyNote();
+  if (!S.loupe && viewMode() !== 'cloth') { say(viewMode() === 'bath' ? 'Lay the cloth first, then look closer' : 'Open it up first, then look closer'); return; }
+  setLoupe(!S.loupe);
   say(S.loupe ? 'Touch the cloth to look at the threads' : '', 2000);
 });
 
@@ -1437,10 +1621,13 @@ function tileCanvas() {
   return t;
 }
 
-$('#keepBtn').addEventListener('click', () => keep());
+$('#keepBtn').addEventListener('click', () => keep().catch((e) => { console.error(e); say('That one didn’t save. Try Keep it again', 2600); }));
 async function keep() {
-  if (S.busy) return;
+  if (S.busy) return busyNote();
+  if (S.tech === 'marbling' && S.bathOpen && S.bath.inks.length) await layCloth(); // print what's floating first
   if (S.piece.bind) { if (S.piece.bindKind === 'ice') await melt(); else await unbindWithReveal(); }
+  if (!S.ops.length) { say(S.tech === 'marbling' ? 'Float some colors and lay the cloth first' : 'Put some color on it first, then keep it', 2600); return; }
+  if (S.keptKey === pieceKey()) { say('This one is in your stash already. Change it to keep another', 2600); return; }
   const tech = TECHS.find((t) => t.id === S.tech);
   const p = S.piece;
   const t0 = performance.now();
@@ -1451,16 +1638,24 @@ async function keep() {
   const kind = tech.kind;
   const name = makeName({ kind, base: S.base, dyes, shibori: p.meta.shibori, tie: p.meta.tie, block: p.meta.block, crackle: p.meta.crackle }, fabrics().map((f) => f.name));
   const { repeat, inches } = tileInfo(kind);
+  const full = fabrics().filter((x) => !x.starter).length >= STASH_MAX;
   const f = addFabric({
     id: newId('dye'), name, base: S.base, kind, color, colors: dyes.length ? dyes.map((id) => dyeOf(id).hex) : [color],
     img: tileDataURL(tile, 0.86), inches, repeat, starter: false, createdAt: Date.now(),
   });
+  // stash.js quietly drops the oldest dyed piece at the cap, or when storage is full: say so
+  if (!fabrics().some((x) => x.id === f.id)) { say('Your stash is out of room. Remove a piece, then keep this one', 3600); return; }
   S.lastKept = f.id;
+  S.keptKey = pieceKey();
   window.__lastTileMs = performance.now() - t0;
   flyToStash(f.img);
   renderStashButton();
-  toast(`In your stash: ${name}`);
+  refresh();
+  // said on the cloth, not in a toast over the buttons (at 360 px the toast covered Start over)
+  say(full ? `In your stash: ${name}. The oldest piece made room for it` : `In your stash: ${name}`, 3200);
 }
+$('#keptBtn').addEventListener('click', () => { detailId = S.lastKept; openSheet(true); });
+$('#keptBtn').addEventListener('pointerdown', (e) => e.stopPropagation()); // it sits on the stage
 
 function flyToStash(src) {
   const from = stage.getBoundingClientRect(), to = $('#stashBtn').getBoundingClientRect();
@@ -1487,6 +1682,7 @@ function renderStashButton() {
   $('#stashBtn').setAttribute('aria-label', `Your stash, ${fs.length} fabrics`);
 }
 let detailId = null;
+let removed = null; // the fabric she just removed, so the sheet can offer it back
 function renderSheet() {
   const inner = $('#sheetInner');
   inner.textContent = '';
@@ -1495,29 +1691,52 @@ function renderSheet() {
   const starters = fs.filter((f) => f.starter);
   inner.append(el('div', { class: 'sheetTop' }, el('h3', {}, 'Your stash'), el('button', { class: 'btn small', onclick: closeSheet }, 'Done')));
   inner.append(el('p', { class: 'hint' }, mine.length ? `${mine.length} dyed by you, ${starters.length} from the starter bundle. Tap one to rename it.` : 'Everything you keep from the studio lands here. The starter bundle is here to begin with.'));
+  // Removing is one tap, so bringing it back is one tap too.
+  if (removed) {
+    const f = removed;
+    inner.append(el('div', { class: 'undoRow' }, el('span', {}, `${f.name} put away.`),
+      el('button', { class: 'btn small', onclick: () => { addFabric(f); removed = null; S.lastKept = f.id; renderSheet(); renderStashButton(); } }, 'Bring it back')));
+  }
   if (detailId) {
     const f = fs.find((x) => x.id === detailId);
     if (f) {
-      const input = el('input', { type: 'text', value: f.name, 'aria-label': 'Fabric name', maxlength: 60 });
+      const save = () => { renameFabric(f.id, input.value.trim() || f.name); detailId = null; renderSheet(); renderStashButton(); };
+      const input = el('input', { type: 'text', value: f.name, 'aria-label': 'Fabric name', maxlength: 60, enterkeyhint: 'done', onkeydown: (e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } } });
       const base = BASES.find((b) => b.id === f.base);
       inner.append(el('div', { class: 'detail' }, el('img', { src: f.img, alt: f.name }),
         el('div', { class: 'meta' }, input,
           el('div', { class: 'fine' }, `${base ? base.name : f.base} · ${f.kind} · ${f.inches} in tile${f.repeat ? ', repeats' : ', one-off'}`),
           el('div', { class: 'row' },
-            el('button', { class: 'btn small primary', onclick: () => { renameFabric(f.id, input.value.trim() || f.name); detailId = null; renderSheet(); renderStashButton(); } }, 'Save name'),
-            el('button', { class: 'btn small', onclick: () => { removeFabric(f.id); detailId = null; renderSheet(); renderStashButton(); toast(`${f.name} put away`); } }, f.starter ? 'Hide' : 'Remove'),
+            el('button', { class: 'btn small primary', onclick: save }, 'Save name'),
+            el('button', { class: 'btn small', onclick: () => { removed = f; removeFabric(f.id); detailId = null; renderSheet(); renderStashButton(); } }, f.starter ? 'Hide' : 'Remove'),
             el('button', { class: 'btn small', onclick: () => { detailId = null; renderSheet(); } }, 'Close')))));
     }
   }
   const grid = (list) => el('div', { class: 'swatches' }, ...list.map((f) => el('button', { class: 'swatch' + (f.id === S.lastKept ? ' new' : ''), onclick: () => { detailId = f.id; renderSheet(); $('#sheet').scrollTop = 0; } },
     el('img', { src: f.img, alt: '', loading: 'lazy' }), el('b', {}, f.name), el('small', {}, (BASES.find((b) => b.id === f.base) || { name: '' }).name))));
-  if (mine.length) inner.append(grid(mine));
+  // the way on to the Quilt Designer sits at the top, where it can't scroll out of sight
   inner.append(el('a', { class: 'quiltLink', href: '../quilt/' }, 'Use them in the Quilt Designer →'));
+  if (mine.length) inner.append(grid(mine));
   if (starters.length) { inner.append(el('h2', { class: 'fine', style: 'margin:16px 0 0;text-transform:uppercase;letter-spacing:.08em;font-weight:700' }, 'Starter bundle')); inner.append(grid(starters)); }
 }
-function openSheet() { detailId = null; renderSheet(); $('#sheet').classList.add('open'); $('#overlay').classList.add('open'); }
-function closeSheet() { $('#sheet').classList.remove('open'); $('#overlay').classList.remove('open'); }
-$('#stashBtn').addEventListener('click', openSheet);
+let sheetReturn = null;
+function openSheet(keepDetail = false) {
+  if (keepDetail !== true) detailId = null;
+  removed = null;
+  sheetReturn = document.activeElement;
+  renderSheet();
+  $('#sheet').classList.add('open'); $('#overlay').classList.add('open');
+  $('#sheet').scrollTop = 0;
+  const done = $('#sheet .sheetTop .btn');
+  if (done) done.focus({ preventScroll: true });
+}
+function closeSheet() {
+  if (!$('#sheet').classList.contains('open')) return;
+  $('#sheet').classList.remove('open'); $('#overlay').classList.remove('open');
+  removed = null;
+  if (sheetReturn && sheetReturn.focus) sheetReturn.focus({ preventScroll: true });
+}
+$('#stashBtn').addEventListener('click', () => openSheet());
 $('#overlay').addEventListener('click', closeSheet);
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheet(); });
 onStashChange(() => { renderStashButton(); if ($('#sheet').classList.contains('open')) renderSheet(); });
@@ -1533,6 +1752,7 @@ function wavy(y, amp, freq, phase = 0, x0 = 0.04, x1 = 0.96) {
 }
 async function drawWaxAnimated(pts, tool = 'tjanting') {
   const op = { t: 'wax', tool: tool === 'brush' ? 'brush' : 'tjanting', pts: pts.slice(0, 2), r: WAX_R[tool], seed: nextSeed() };
+  checkpoint();
   waxStroke(S.piece, op.pts, op.r, op.seed, op.tool, 0);
   const n = pts.length / 2;
   const per = Math.max(1, Math.round(n / 40));
@@ -1545,14 +1765,15 @@ async function drawWaxAnimated(pts, tool = 'tjanting') {
   renderComp(); draw();
 }
 
+const surpriseLabels = (text) => { $('#surpriseChip').lastChild.textContent = text; $('#surpriseBtn').textContent = text; };
 async function surprise() {
   if (S.busy && S.demo) { S.fast = true; return; }
   if (S.busy) return;
   closeSheet();
   const which = DEMOS[demoIx];
   demoIx = (demoIx + 1) % DEMOS.length; store.set('demo', demoIx);
-  const chip = $('#surpriseChip');
-  chip.lastChild.textContent = 'Skip to the end';
+  const aside = setAsidePiece();
+  surpriseLabels('Skip to the end');
   S.demo = true;
   const startClean = async (tech, base) => {
     S.busy = false;
@@ -1628,23 +1849,33 @@ async function surprise() {
       pickDye('cochineal');
       for (const [d, ms] of [[0.9, 500], [0.65, 700], [0.42, 900], [0.2, 1300]]) { S.depth = d; draw(); await wait(250); await demoDip({ dye: 'cochineal', depth: d }, ms); }
     }
-  } finally {
-    S.demo = false; S.fast = false; S.busy = false;
-    chip.lastChild.textContent = 'Surprise me';
-    renderPanel(); refresh();
+  } catch (e) { console.error(e); } finally {
+    S.demo = false; S.fast = false; S.busy = false; S.overlay = null; S.reveal = null; S.dispA = null;
+    surpriseLabels('Surprise me');
+    renderPanel(); refresh(); showActiveChip();
   }
-  say('Like it? Tap Keep it to add it to your stash', 3200);
+  say(aside ? 'Like it? Keep it, or tap “Back to my piece”' : 'Like it? Tap Keep it to add it to your stash', 3600);
 }
+$('#surpriseBtn').addEventListener('click', () => surprise());
+
+// If the dip button is re-rendered mid-hold, its capture (and its pointerup) are lost with it:
+// any finger lifting anywhere takes the cloth out of the pot.
+addEventListener('pointerup', () => { if (dip) endDip(); });
+addEventListener('pointercancel', () => { if (dip) endDip(); });
+// a hold or drag that is still going when the page hides (an incoming call, the app switcher)
+document.addEventListener('visibilitychange', () => { if (document.hidden) { endDip(); endGesture(); savePiece(); } });
 
 // ------------------------------------------------------------------ start
 ensureStarters();
+const restored = loadPiece();
 renderPots();
 renderStashButton();
 renderTechs();
 rebuild();
 renderPanel();
 resize();
-say({ batik: 'Drag on the cloth to draw with hot wax' }[S.tech] || 'Tap Surprise me to watch a piece get made', 3600);
+if (restored) say('Here is the piece you were making', 2600);
+else say({ batik: 'Drag on the cloth to draw with hot wax' }[S.tech] || 'Tap Surprise me to watch a piece get made', 3600);
 
 // for tests and the curious
-window.__dye = { S, rebuild, renderComp, keep, surprise, setTech, startDip, endDip, pushOp, refresh, renderPanel, draw, unbindWithReveal, melt, layCloth, stampAllOver, tjapAllOver, boilFx, crumpleFx, bindShibori, tieUp, iceUp, drawWaxAnimated, openSheet, M };
+window.__dye = { S, rebuild, undo, bringBack, savePiece, renderComp, keep, surprise, setTech, startDip, endDip, pushOp, refresh, renderPanel, draw, unbindWithReveal, melt, layCloth, stampAllOver, tjapAllOver, boilFx, crumpleFx, bindShibori, tieUp, iceUp, drawWaxAnimated, openSheet, M };

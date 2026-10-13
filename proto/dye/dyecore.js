@@ -252,6 +252,19 @@ function cachedMask(kind, id, S) {
   return m;
 }
 
+// Crackle is the slowest op; undo and reload replay it, so remember the last few.
+const CRACKS = new Map();
+function cachedCrackle(N, seed) {
+  const key = `${N}|${seed}`;
+  let v = CRACKS.get(key);
+  if (!v) {
+    v = R.crackle(N, seed);
+    CRACKS.set(key, v);
+    if (CRACKS.size > 3) CRACKS.delete(CRACKS.keys().next().value);
+  }
+  return v;
+}
+
 // ------------------------------------------------------------------ ops
 /**
  * applyOp(piece, op) mutates the piece. Returns what changed, for the UI to animate:
@@ -282,7 +295,7 @@ export function applyOp(piece, op) {
       return { rect: [0, 0, N, N] };
     }
     case 'crackle': {
-      const v = R.crackle(N, op.seed);
+      const v = cachedCrackle(N, op.seed);
       for (let p = 0; p < N * N; p++) if (v[p] > piece.veins[p] && piece.wax[p] > 0.1) piece.veins[p] = v[p];
       piece.meta.crackle = true;
       return { rect: [0, 0, N, N] };
@@ -478,6 +491,89 @@ export function makeName(info, existing = []) {
 export function tileInfo(kind) {
   if (kind === 'solid' || kind === 'block') return { repeat: true, inches: 8 };
   return { repeat: false, inches: 8 };
+}
+
+/**
+ * A copy of a piece that later ops can't touch, for cheap undo checkpoints. The binding's maps
+ * and the uptake field are never written after they are made, so they are shared.
+ */
+export function clonePiece(p) {
+  return {
+    ...p,
+    A: Float32Array.from(p.A), wax: Float32Array.from(p.wax), veins: Float32Array.from(p.veins),
+    bundleA: [...p.bundleA], sectionA: p.sectionA ? p.sectionA.map((a) => [...a]) : null,
+    sprinkles: p.sprinkles.map((x) => ({ ...x })), usage: p.usage.map((u) => ({ ...u })), meta: { ...p.meta },
+  };
+}
+
+// ------------------------------------------------------------------ saving a piece in progress
+const r4 = (v) => Math.round(v * 1e4) / 1e4;
+/**
+ * Ops as plain JSON for sessionStorage (so a reload doesn't lose her piece). Wax paths are
+ * rounded to 1/10000 of the cloth; a marbling op drops its big delta and keeps the bath it was
+ * printed from (op.bath), which the page turns back into a delta when it loads.
+ */
+export function packOps(ops) {
+  return ops.map((op) => {
+    if (op.t === 'marble') { const { delta, ...rest } = op; return rest; }
+    if (op.t === 'wax') return { ...op, pts: Array.from(op.pts, r4) };
+    return op;
+  });
+}
+/** Validates packed ops; returns null if they don't look like ours. */
+export function unpackOps(list) {
+  const KNOWN = new Set(['dip', 'wax', 'tjap', 'crackle', 'boil', 'bind', 'unbind', 'squirt', 'ice', 'marble', 'stamp']);
+  if (!Array.isArray(list) || !list.every((o) => o && KNOWN.has(o.t))) return null;
+  return list.map((o) => (o.t === 'wax' ? { ...o, pts: Array.from(o.pts) } : { ...o }));
+}
+
+// ------------------------------------------------------------------ what to do next
+/**
+ * Which numbered step in the panel is the natural next one, from the ops so far. Mirrors the
+ * step numbers in app.js renderPanel (1 is always "Choose the cloth").
+ *   st: { bathInks, bathOpen, lineSet } for marbling and ombré.
+ * Returns { steps: [{ n, label }], done } — label 'Next' for the main one, 'Or' for an
+ * alternative, 'More' for an optional extra once the piece could be kept (done = true).
+ */
+export function nextSteps(tech, ops, st = {}) {
+  const last = (pred) => { for (let i = ops.length - 1; i >= 0; i--) if (pred(ops[i])) return i; return -1; };
+  const has = (t) => ops.some((o) => o.t === t);
+  const lastBind = last((o) => o.t === 'bind'), lastUnbind = last((o) => o.t === 'unbind');
+  const bound = lastBind > lastUnbind;
+  const after = (i, ...ts) => ops.some((o, j) => j > i && ts.includes(o.t));
+  const dyed = ops.some((o) => ['dip', 'squirt', 'ice', 'marble', 'stamp'].includes(o.t));
+  const S = (n, label = 'Next') => ({ n, label });
+  switch (tech) {
+    case 'solid': return dyed ? { steps: [S(2, 'More')], done: true } : { steps: [S(2)], done: false };
+    case 'ombre':
+      if (!has('dip')) return { steps: [S(st.lineSet ? 3 : 2)], done: false };
+      return { steps: [S(2, 'More')], done: true };
+    case 'batik': {
+      const lastBoil = last((o) => o.t === 'boil');
+      const lastWax = last((o) => o.t === 'wax' || o.t === 'tjap');
+      const waxOn = lastWax > lastBoil;
+      if (!waxOn) return lastBoil >= 0 ? { steps: [S(2, 'More')], done: true } : { steps: [S(2)], done: false };
+      const lastCrack = last((o) => o.t === 'crackle');
+      if (!after(Math.max(lastWax, lastCrack), 'dip')) return { steps: [S(3)], done: false };
+      return { steps: [S(6), S(4, 'Or'), S(5, 'Or')], done: false };
+    }
+    case 'shibori':
+      if (!bound) return lastUnbind >= 0 ? { steps: [S(2, 'More')], done: true } : { steps: [S(2)], done: false };
+      return after(lastBind, 'dip') ? { steps: [S(4), S(3, 'Or')], done: false } : { steps: [S(3)], done: false };
+    case 'tiedye':
+    case 'ice': {
+      const t = tech === 'ice' ? 'ice' : 'squirt';
+      const kind = (o) => o.t === 'bind' && (tech === 'ice' ? o.kind === 'ice' : String(o.kind).startsWith('tie-'));
+      if (!bound || !kind(ops[lastBind])) return lastUnbind >= 0 && dyed ? { steps: [S(2, 'More')], done: true } : { steps: [S(2)], done: false };
+      return after(lastBind, t) ? { steps: [S(4), S(3, 'Or')], done: false } : { steps: [S(3)], done: false };
+    }
+    case 'marbling':
+      if (st.bathOpen && st.bathInks) return { steps: [S(3), S(2, 'Or')], done: false };
+      if (has('marble')) return { steps: [S(2, 'More')], done: !st.bathInks };
+      return { steps: [S(2)], done: false };
+    case 'block': return has('stamp') ? { steps: [S(3, 'More')], done: true } : { steps: [S(3)], done: false };
+    default: return { steps: [], done: dyed };
+  }
 }
 
 export { BASES, DYES, R };
