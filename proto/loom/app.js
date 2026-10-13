@@ -1,7 +1,11 @@
 // Floor-loom prototype UI. All drafting math lives in draft.js (pure).
 import * as D from './draft.js';
+import * as Z from './puzzles.js';
+import * as W from './wif.js';
 
 const STORE_KEY = 'tincture.proto.loom';
+const PUZZLE_KEY = 'tincture.proto.loom.puzzles';
+const LIBRARY_KEY = 'tincture.proto.loom.library';
 const $ = (id) => document.getElementById(id);
 const INK = '#2A2622';
 const CARD = '#FBF8F1';
@@ -21,7 +25,15 @@ const ui = {
   weftColor: '#B8433A',
   shown: 0, // picks visible in the weave-mode cloth
   dir: 1, // shuttle direction, alternates
+  floatOn: false,
+  floatLimit: 4,
+  selecting: false,
+  sel: null, // { kind: 'ends'|'picks', a, b, done }
+  puzzle: null, // { id, target, solved }
 };
+let studio = null; // the studio draft stashed while a puzzle is open
+let puzzleStore = { solved: {}, drafts: {}, hints: {} };
+let library = [];
 let history = [];
 
 function load() {
@@ -35,14 +47,26 @@ function load() {
       cell: Math.max(16, Math.min(44, Number(raw.ui?.cell) || 28)),
       brush: /^#[0-9a-f]{6}$/i.test(raw.ui?.brush) ? raw.ui.brush : ui.brush,
       weftColor: /^#[0-9a-f]{6}$/i.test(raw.ui?.weftColor) ? raw.ui.weftColor : ui.weftColor,
+      floatOn: !!raw.ui?.floatOn,
+      floatLimit: Math.max(1, Math.min(12, Number(raw.ui?.floatLimit) || 4)),
     });
   } catch { /* storage unavailable or corrupt: start from the default draft */ }
 }
+function loadStores() {
+  try { const p = JSON.parse(localStorage.getItem(PUZZLE_KEY) || 'null'); if (p) puzzleStore = { solved: {}, drafts: {}, hints: {}, ...p }; } catch { /* ignore */ }
+  try { const l = JSON.parse(localStorage.getItem(LIBRARY_KEY) || '[]'); if (Array.isArray(l)) library = l.filter((x) => x && x.draft); } catch { /* ignore */ }
+}
+function saveLibrary() { try { localStorage.setItem(LIBRARY_KEY, JSON.stringify(library)); } catch { /* ignore */ } }
 function save() {
+  if (ui.puzzle) {
+    puzzleStore.drafts[ui.puzzle.id] = draft;
+    try { localStorage.setItem(PUZZLE_KEY, JSON.stringify(puzzleStore)); } catch { /* ignore */ }
+    return;
+  }
   try {
     localStorage.setItem(STORE_KEY, JSON.stringify({
       v: 1, draft,
-      ui: { view: ui.view, side: ui.side, cell: ui.cell, brush: ui.brush, weftColor: ui.weftColor },
+      ui: { view: ui.view, side: ui.side, cell: ui.cell, brush: ui.brush, weftColor: ui.weftColor, floatOn: ui.floatOn, floatLimit: ui.floatLimit },
     }));
   } catch { /* ignore */ }
 }
@@ -230,7 +254,24 @@ function drawClothRows(ctx, d, dd, opts) {
   if (clip) ctx.restore();
 }
 
+/** Soft marks over cells of a boolean [pick][end] matrix (pick 0 at the bottom). */
+function overlayCells(ctx, mat, { x0, y0, cell, E, P, back, fill, ring = false }) {
+  ctx.save();
+  for (let p = 0; p < P; p++) {
+    for (let e = 0; e < E; e++) {
+      if (!mat[p]?.[e]) continue;
+      const x = x0 + (back ? e : E - 1 - e) * cell;
+      const y = y0 + (P - 1 - p) * cell;
+      rr(ctx, x + 1, y + 1, cell - 2, cell - 2, Math.max(2, cell * 0.25));
+      ctx.fillStyle = fill; ctx.fill();
+      if (ring) { ctx.strokeStyle = 'rgba(140,101,18,.55)'; ctx.lineWidth = 1; ctx.stroke(); }
+    }
+  }
+  ctx.restore();
+}
+
 function drawCloth() {
+  if (ui.puzzle) { drawPuzzle(); return; }
   const canvas = $('cloth');
   const d = draft;
   const dd = D.drawdown(d);
@@ -247,13 +288,14 @@ function drawCloth() {
   const rows = [];
   for (let p = 0; p < P; p++) rows.push({ p, y: 8 + (P - 1 - p) * cell });
   drawClothRows(ctx, d, dd, { x0, cell, rows, view: ui.view, back: ui.side === 'back' });
+  if (ui.floatOn) overlayCells(ctx, D.floatCells(d, ui.floatLimit, ui.side), { x0, y0: 8, cell, E, P, back: ui.side === 'back', fill: 'rgba(226,176,74,.55)', ring: true });
   const f = D.floats(d);
   $('clothCaption').textContent = (ui.side === 'back'
     ? 'The back: every crossing is the reverse of the face, turned over like a page. '
     : 'The face, from above. ')
     + 'Pick 1 is at the bottom and the cloth grows upward.'
     + (ui.view === 'grid' ? ' Dark squares are warp on top.' : '')
-    + (f.face.weft + f.face.warp === 0 ? '' : '');
+    + (ui.floatOn ? ` Golden marks show floats longer than ${ui.floatLimit}.` : '');
 }
 
 /* ------------------------------------------------------------ draft canvas */
@@ -356,6 +398,26 @@ function drawDraft() {
   for (let p = 4; p < P; p += 4) { const y = L.yDraw + (P - p) * cell; ctx.moveTo(L.x0, y); ctx.lineTo(L.x0 + E * cell, y); }
   ctx.stroke();
 
+  if (ui.floatOn) overlayCells(ctx, D.floatCells(d, ui.floatLimit, 'face'), { x0: L.x0, y0: L.yDraw, cell, E, P, back: false, fill: 'rgba(226,176,74,.6)' });
+  if (ui.sel) {
+    const s = ui.sel;
+    const lo = Math.min(s.a, s.b);
+    const hi = Math.max(s.a, s.b);
+    ctx.fillStyle = 'rgba(226,176,74,.22)';
+    ctx.strokeStyle = '#C99A2E';
+    ctx.lineWidth = 2;
+    if (s.kind === 'ends') {
+      const x = L.x0 + (E - 1 - hi) * cell;
+      const w = (hi - lo + 1) * cell;
+      ctx.fillRect(x, L.yChip, w, L.yDraw + P * cell - L.yChip);
+      ctx.strokeRect(x, L.yChip, w, L.yDraw + P * cell - L.yChip);
+    } else {
+      const y = L.yDraw + (P - 1 - hi) * cell;
+      const h = (hi - lo + 1) * cell;
+      ctx.fillRect(L.gut - 4, y, L.xw + cell - L.gut + 4, h);
+      ctx.strokeRect(L.gut - 4, y, L.xw + cell - L.gut + 4, h);
+    }
+  }
   // paint strips sit over the color chips so a drag there paints, while other drags still scroll
   const ws = $('warpStrip');
   Object.assign(ws.style, { left: `${L.x0}px`, top: `${L.yChip - 3}px`, width: `${E * cell}px`, height: `${L.chipH + 6}px` });
@@ -447,8 +509,20 @@ function initDraftInput() {
   strip($('weftStrip'), 'weft');
 }
 
+function selTap(kind, i) {
+  const s = ui.sel;
+  if (!s || s.kind !== kind || s.done) ui.sel = { kind, a: i, b: i, done: false };
+  else { s.b = i; s.done = true; }
+  renderAll();
+}
+
 function tapDraft(h) {
   if (!h) return;
+  if (ui.selecting) {
+    if (h.area === 'thread' || h.area === 'warpchip') selTap('ends', h.end);
+    else if (h.area === 'tread' || h.area === 'lift' || h.area === 'weftchip') selTap('picks', h.pick);
+    return;
+  }
   if (h.area === 'thread') commit(D.toggleThreading(draft, h.end, h.shaft));
   else if (h.area === 'tie') commit(D.toggleTieup(draft, h.shaft, h.treadle));
   else if (h.area === 'tread') commit(D.toggleTreadling(draft, h.pick, h.treadle));
@@ -595,7 +669,7 @@ function bindControls() {
   $('presetsBtn').onclick = openPresets;
   $('undoBtn').onclick = undo;
   $('wUndo').onclick = undo;
-  $('paintBtn').onclick = () => { ui.painting = !ui.painting; renderAll(); };
+  $('paintBtn').onclick = () => { ui.painting = !ui.painting; if (ui.painting) { ui.selecting = false; ui.sel = null; } renderAll(); };
   $('weaveBtn').onclick = () => setWeaving(true);
   $('doneBtn').onclick = () => setWeaving(false);
   $('curColor').onclick = () => openPalette('Weft color', (hex) => { ui.weftColor = hex; save(); renderAll(); }, ui.weftColor);
@@ -609,6 +683,15 @@ function bindControls() {
   $('mirThread').onclick = () => commit(D.mirrorThreading(draft));
   $('mirTread').onclick = () => commit(D.mirrorTreadling(draft));
   $('clearBtn').onclick = openClear;
+  $('tromp').onclick = () => commit(D.trompAsWrit(draft));
+  $('puzzlesBtn').onclick = openPuzzleList;
+  $('libraryBtn').onclick = openLibrary;
+  $('wifBtn').onclick = openWif;
+  $('selectBtn').onclick = () => { ui.selecting = !ui.selecting; if (ui.selecting) ui.painting = false; else ui.sel = null; renderAll(); };
+  $('floatBtn').onclick = () => { ui.floatOn = !ui.floatOn; save(); renderAll(); };
+  $('floatStep').querySelectorAll('button').forEach((b) => { b.onclick = () => { ui.floatLimit = Math.max(1, Math.min(12, ui.floatLimit + Number(b.dataset.d))); save(); renderAll(); }; });
+  bindPuzzleCard();
+  bindSelBar();
 
   const steps = { treadles: D.setTreadles, ends: D.setEnds, picks: D.setPicks };
   const keyOf = { treadles: (d) => d.treadles, ends: (d) => d.threading.length, picks: (d) => d.treadling.length };
@@ -644,6 +727,11 @@ function renderControls() {
   const d = draft;
   document.body.classList.toggle('painting', ui.painting);
   document.body.classList.toggle('weaving', ui.weaving);
+  document.body.classList.toggle('puzzling', !!ui.puzzle);
+  $('floatBtn').setAttribute('aria-pressed', String(ui.floatOn));
+  $('floatBtn').classList.toggle('on', ui.floatOn);
+  $('floatStep').style.display = ui.floatOn ? 'inline-flex' : 'none';
+  $('floatVal').textContent = `>${ui.floatLimit}`;
   $('paintBtn').setAttribute('aria-pressed', String(ui.painting));
   $('paintBtn').classList.toggle('on', ui.painting);
   $('undoBtn').setAttribute('aria-disabled', String(!history.length));
@@ -914,6 +1002,291 @@ function drawStage(t, idle) {
 
 }
 
+/* ------------------------------------------------------------ puzzles */
+
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function enterPuzzle(id) {
+  const pz = Z.getPuzzle(id);
+  if (!pz) return;
+  if (ui.puzzle) save(); else studio = { draft, history, shown: ui.shown };
+  finishAnim();
+  draft = puzzleStore.drafts[id] ? D.normalizeDraft(puzzleStore.drafts[id]) : Z.startDraft(pz);
+  history = [];
+  ui.puzzle = { id, target: Z.targetOf(pz), match: null };
+  ui.sel = null; ui.selecting = false; ui.painting = false; ui.weaving = false;
+  closeSheet();
+  renderAll();
+  window.scrollTo(0, 0);
+}
+function leavePuzzle() {
+  if (!ui.puzzle) return;
+  save();
+  ui.puzzle = null;
+  if (studio) { draft = studio.draft; history = studio.history; ui.shown = studio.shown; studio = null; }
+  ui.sel = null; ui.selecting = false;
+  renderAll();
+}
+function nextPuzzleId() {
+  const i = Z.PUZZLES.findIndex((p) => p.id === ui.puzzle.id);
+  return Z.PUZZLES[(i + 1) % Z.PUZZLES.length].id;
+}
+
+function renderPuzzleCard() {
+  const card = $('puzzleCard');
+  if (!ui.puzzle) { card.replaceChildren(); return; }
+  const pz = Z.getPuzzle(ui.puzzle.id);
+  const hints = puzzleStore.hints[pz.id] || 0;
+  const stages = Z.hintStages(pz);
+  const m = Z.bestMatch(draft, ui.puzzle.target, { structureOnly: pz.structureOnly });
+  ui.puzzle.match = m;
+  const pct = Math.floor(Z.progress(draft, ui.puzzle.target, { structureOnly: pz.structureOnly }) * 100);
+  const solved = m.score >= 1;
+  if (solved && !puzzleStore.solved[pz.id]) { puzzleStore.solved[pz.id] = true; save(); }
+  const hintLabel = hints < stages.length ? `Hint: show the ${stages[hints]}` : 'All hints shown';
+  card.innerHTML = `
+    <h2>Match the cloth &middot; puzzle ${pz.level} of ${Z.PUZZLES.length}</h2>
+    <div class="pz-title">${esc(pz.title)}</div>
+    <p class="pz-customer">&ldquo;${esc(pz.customer)}&rdquo;</p>
+    <p class="caption" style="margin:0">Your loom: <b>${pz.shafts}</b> shafts, <b>${pz.treadles}</b> treadles &middot; <b>${pz.ends}</b> ends &times; <b>${pz.picks}</b> picks &middot; ${pz.structureOnly ? 'any colors will do' : 'the colors matter here'}</p>
+    <div class="pz-cloths">
+      <figure><canvas id="pzTarget" aria-label="The cloth ordered"></canvas><figcaption>The order</figcaption></figure>
+      <figure class="mine${solved ? ' glow' : ''}"><canvas id="pzMine" aria-label="Your cloth"></canvas><figcaption>Your cloth</figcaption></figure>
+    </div>
+    <div class="meter" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><div class="fill" style="width:${Math.max(3, pct)}%"></div></div>
+    <p class="caption">${solved ? 'Every cell matches.' : `${pct}% of the way there. Matching areas glow softly.`}</p>
+    <div class="seg" id="pzView" role="group" aria-label="Cloth view" style="margin-bottom:8px">
+      ${['cloth', 'grid', 'color'].map((v) => `<button data-act="view" data-v="${v}" aria-pressed="${ui.view === v}">${{ cloth: 'Cloth', grid: 'Grid', color: 'Colors' }[v]}</button>`).join('')}
+    </div>
+    ${solved ? `<div class="solved"><b>It matches!</b>The ${esc(pz.title.toLowerCase())} is just what they hoped for. Thank you, weaver.<div class="row"><button class="btn primary" data-act="next">Next puzzle</button><button class="btn" data-act="list">All puzzles</button></div></div>` : ''}
+    <div class="row" style="margin-top:10px">
+      <button class="btn" data-act="hint" ${hints >= stages.length ? 'aria-disabled="true"' : ''}>${hintLabel}</button>
+      <button class="btn" data-act="list">Puzzles</button>
+      <button class="btn" data-act="reset">Start over</button>
+      <button class="btn" data-act="leave">Back to my studio</button>
+    </div>`;
+  drawPuzzle();
+}
+
+function drawPuzzle() {
+  const tc = $('pzTarget');
+  const mc = $('pzMine');
+  if (!tc || !mc || !ui.puzzle) return;
+  const pz = Z.getPuzzle(ui.puzzle.id);
+  const W0 = Math.floor(tc.parentElement.clientWidth || 160);
+  const t = ui.puzzle.target;
+  const draw = (cv, d, mask) => {
+    const E = d.threading.length;
+    const P = d.treadling.length;
+    const cell = Math.max(3, Math.min(W0 / E, 170 / P, 20));
+    const w = Math.ceil(E * cell);
+    const h = Math.ceil(P * cell);
+    const ctx = fit(cv, w, h);
+    const rows = [];
+    for (let p = 0; p < P; p++) rows.push({ p, y: (P - 1 - p) * cell });
+    drawClothRows(ctx, d, D.drawdown(d), { x0: 0, cell, rows, view: ui.view, back: false });
+    if (mask) overlayCells(ctx, mask, { x0: 0, y0: 0, cell, E, P, back: false, fill: 'rgba(255,222,130,.38)' });
+  };
+  draw(tc, t, null);
+  draw(mc, draft, Z.matchMask(draft, t, { structureOnly: pz.structureOnly }));
+  void pz;
+}
+
+function bindPuzzleCard() {
+  $('puzzleCard').addEventListener('click', (ev) => {
+    const b = ev.target.closest('[data-act]');
+    if (!b || !ui.puzzle) return;
+    const pz = Z.getPuzzle(ui.puzzle.id);
+    const act = b.dataset.act;
+    if (act === 'view') { ui.view = b.dataset.v; save(); renderAll(); }
+    else if (act === 'leave') leavePuzzle();
+    else if (act === 'next') enterPuzzle(nextPuzzleId());
+    else if (act === 'list') openPuzzleList();
+    else if (act === 'reset') { history.push(draft); draft = Z.startDraft(pz); save(); renderAll(); }
+    else if (act === 'hint') {
+      const stages = Z.hintStages(pz);
+      const n = puzzleStore.hints[pz.id] || 0;
+      if (n >= stages.length) return;
+      puzzleStore.hints[pz.id] = n + 1;
+      commit(Z.applyHint(draft, pz, stages[n]));
+    }
+  });
+}
+
+function openPuzzleList() {
+  const wrap = document.createElement('div');
+  Z.PUZZLES.forEach((p) => {
+    const b = document.createElement('button');
+    b.className = 'preset';
+    const done = puzzleStore.solved[p.id];
+    const started = !!puzzleStore.drafts[p.id];
+    b.innerHTML = `<div style="flex:1"><div class="t">${p.level}. ${esc(p.title)}${done ? ' &middot; matched' : ''}</div><div class="n">${p.shafts} shafts, ${p.treadles} treadles, ${p.ends}&times;${p.picks}${p.structureOnly ? '' : ' &middot; colors matter'}${!done && started ? ' &middot; in progress' : ''}</div></div>`;
+    b.onclick = () => enterPuzzle(p.id);
+    wrap.append(b);
+  });
+  openSheet('Match the cloth', wrap);
+}
+
+/* ------------------------------------------------------------ selection bar */
+
+function renderSelBar() {
+  const bar = $('selBar');
+  $('selectBtn').setAttribute('aria-pressed', String(ui.selecting));
+  $('selectBtn').classList.toggle('on', ui.selecting);
+  bar.style.display = ui.selecting ? 'block' : 'none';
+  if (!ui.selecting) return;
+  const s = ui.sel;
+  let text = 'Tap the first and last end in the threading, or the first and last pick in the treadling.';
+  if (s) {
+    const lo = Math.min(s.a, s.b) + 1;
+    const hi = Math.max(s.a, s.b) + 1;
+    text = `${s.kind === 'ends' ? 'Ends' : 'Picks'} ${lo}${hi > lo ? `–${hi}` : ''} selected${s.done ? '' : ' (tap another to extend)'}.`;
+  }
+  bar.innerHTML = `<div class="hint">${esc(text)}</div>
+    <div class="row">
+      <button class="btn small" data-sel="repeat" ${s ? '' : 'aria-disabled="true"'}>Repeat</button>
+      <button class="btn small" data-sel="mirror" ${s ? '' : 'aria-disabled="true"'}>Mirror</button>
+      <button class="btn small" data-sel="up" ${s ? '' : 'aria-disabled="true"'}>Shift +1</button>
+      <button class="btn small" data-sel="down" ${s ? '' : 'aria-disabled="true"'}>Shift &minus;1</button>
+      <button class="btn small" data-sel="clear">Clear selection</button>
+    </div>
+    <div class="hint" style="margin-top:6px">Repeat fills everything after the range. Mirror writes a reversed copy after it. Shift moves shafts (or treadles) up or down.</div>`;
+}
+function bindSelBar() {
+  $('selBar').addEventListener('click', (ev) => {
+    const b = ev.target.closest('[data-sel]');
+    if (!b) return;
+    const s = ui.sel;
+    const op = b.dataset.sel;
+    if (op === 'clear') { ui.sel = null; renderAll(); return; }
+    if (!s) return;
+    const fn = { repeat: () => D.repeatRange(draft, s.kind, s.a, s.b), mirror: () => D.mirrorRange(draft, s.kind, s.a, s.b), up: () => D.shiftRange(draft, s.kind, s.a, s.b, 1), down: () => D.shiftRange(draft, s.kind, s.a, s.b, -1) }[op];
+    commit(fn());
+  });
+}
+
+/* ---------------------------------------------------------------- library */
+
+function thumb(cv, d, size) {
+  const ctx = fit(cv, size, size);
+  const n = Math.min(16, d.threading.length, d.treadling.length);
+  const cell = size / n;
+  const rows = [];
+  for (let i = 0; i < n; i++) rows.push({ p: i, y: (n - 1 - i) * cell });
+  drawClothRows(ctx, d, D.drawdown(d), { x0: 0, cell, rows, view: 'cloth', back: false, e0: 0, e1: n });
+}
+
+function openLibrary() {
+  const wrap = document.createElement('div');
+  wrap.className = 'stack';
+  const name = document.createElement('input');
+  name.type = 'text';
+  name.placeholder = 'Name this draft';
+  name.maxLength = 60;
+  name.value = '';
+  name.setAttribute('aria-label', 'Draft name');
+  const save1 = document.createElement('button');
+  save1.className = 'btn primary';
+  save1.textContent = 'Save current draft';
+  save1.onclick = () => {
+    const nm = name.value.trim() || `Draft ${library.length + 1}`;
+    library.unshift({ id: `d${Date.now().toString(36)}${library.length}`, name: nm, draft: JSON.parse(JSON.stringify(draft)) });
+    saveLibrary();
+    openLibrary();
+  };
+  const top = document.createElement('div');
+  top.className = 'row';
+  top.append(name, save1);
+  name.style.flex = '1 1 160px';
+  wrap.append(top);
+  if (!library.length) {
+    const p = document.createElement('p');
+    p.className = 'caption';
+    p.textContent = 'Nothing saved yet. Save a draft you like and it will wait for you here.';
+    wrap.append(p);
+  }
+  library.forEach((it) => {
+    const row = document.createElement('div');
+    row.className = 'libitem';
+    const cv = document.createElement('canvas');
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    const d = D.normalizeDraft(it.draft);
+    meta.innerHTML = `<b>${esc(it.name)}</b><span>${d.threading.length} ends &middot; ${d.treadling.length} picks &middot; ${d.shafts} shafts</span>`;
+    const mk = (t, fn, cls = '') => { const b = document.createElement('button'); b.className = `btn small ${cls}`; b.textContent = t; b.onclick = fn; return b; };
+    row.append(cv, meta,
+      mk('Open', () => { closeSheet(); history.push(draft); draft = d; ui.shown = D.wovenCount(draft); save(); renderAll(); }, 'primary'),
+      mk('Duplicate', () => { library.splice(library.indexOf(it) + 1, 0, { id: `d${Date.now().toString(36)}${library.length}`, name: `${it.name} (copy)`, draft: JSON.parse(JSON.stringify(it.draft)) }); saveLibrary(); openLibrary(); }),
+      mk('Remove', () => { library = library.filter((x) => x !== it); saveLibrary(); openLibrary(); }));
+    wrap.append(row);
+    requestAnimationFrame(() => thumb(cv, d, 56));
+  });
+  openSheet('Draft library', wrap);
+}
+
+/* -------------------------------------------------------------------- WIF */
+
+function openWif() {
+  const wrap = document.createElement('div');
+  wrap.className = 'stack';
+  const title = document.createElement('input');
+  title.type = 'text';
+  title.placeholder = 'Title for the file (optional)';
+  title.setAttribute('aria-label', 'Title');
+  const exp = document.createElement('button');
+  exp.className = 'btn primary';
+  exp.textContent = 'Export .wif';
+  const msg = document.createElement('div');
+  msg.className = 'msg';
+  msg.style.display = 'none';
+  const say = (t) => { msg.textContent = t; msg.style.display = t ? 'block' : 'none'; };
+  exp.onclick = () => {
+    const text = W.writeWif(draft, { title: title.value.trim(), date: new Date().toDateString() });
+    const blob = new Blob([text], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const slug = (title.value.trim() || 'tincture-draft').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'draft';
+    a.href = url; a.download = `${slug}.wif`;
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    say(`Saved ${slug}.wif to your downloads.`);
+  };
+  const head = document.createElement('div');
+  head.className = 'row';
+  head.append(title, exp);
+  title.style.flex = '1 1 160px';
+
+  const ta = document.createElement('textarea');
+  ta.id = 'wifText';
+  ta.placeholder = 'Paste WIF text here, or pick a file below';
+  ta.setAttribute('aria-label', 'WIF text');
+  const file = document.createElement('input');
+  file.type = 'file';
+  file.accept = '.wif,.txt,text/plain';
+  file.setAttribute('aria-label', 'Pick a WIF file');
+  file.onchange = async () => { const f = file.files[0]; if (f) { ta.value = await f.text(); say(`Loaded ${f.name}. Tap Import to open it.`); } };
+  const imp = document.createElement('button');
+  imp.className = 'btn primary';
+  imp.id = 'wifImport';
+  imp.textContent = 'Import';
+  imp.onclick = () => {
+    try {
+      const r = W.parseWif(ta.value);
+      history.push(draft);
+      draft = r.draft;
+      ui.shown = D.wovenCount(draft);
+      save();
+      renderAll();
+      say(`Opened ${r.title ? `“${r.title}”: ` : ''}${r.draft.threading.length} ends, ${r.draft.treadling.length} picks, ${r.draft.shafts} shafts.${r.warnings.length ? ' Notes: ' + r.warnings.join(' ') : ''}`);
+    } catch (e) {
+      say(`That text didn't read as a WIF draft yet. ${e.message}`);
+    }
+  };
+  wrap.append(head, msg);
+  if (!ui.puzzle) wrap.append(ta, file, imp);
+  openSheet('WIF: weaving information file', wrap);
+}
+
 /* -------------------------------------------------------------------- main */
 
 function renderAll() {
@@ -921,13 +1294,15 @@ function renderAll() {
   if (ui.weaving) {
     if (!anim.active) drawStage(0, true);
   } else {
-    drawCloth();
+    if (ui.puzzle) renderPuzzleCard(); else drawCloth();
     drawDraft();
     renderBrushes();
+    renderSelBar();
   }
 }
 
 load();
+loadStores();
 ui.shown = D.wovenCount(draft);
 bindControls();
 initDraftInput();

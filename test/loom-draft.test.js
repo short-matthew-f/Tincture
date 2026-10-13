@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as D from '../proto/loom/draft.js';
+import * as Z from '../proto/loom/puzzles.js';
+import * as W from '../proto/loom/wif.js';
 
 const rowStr = (row) => row.map((c) => (c === 'warp' ? '#' : '.')).join('');
 
@@ -291,4 +293,298 @@ test('log cabin color-and-weave makes horizontal and vertical stripe blocks', ()
   assert.notEqual(row[0], row[1]);
   assert.equal(row[0], row[2]);
   assert.equal(top(0, 8), top(1, 8));
+});
+
+/* ------------------------------------------------------------ puzzles */
+
+const rotate = (a, k) => a.map((_, i) => a[(i + k) % a.length]);
+
+test('there are 12 puzzles in rising order with unique targets', () => {
+  assert.equal(Z.PUZZLES.length, 12);
+  Z.PUZZLES.forEach((p, i) => assert.equal(p.level, i + 1));
+  assert.equal(Z.PUZZLES[0].id, 'tea-towel');
+  assert.equal(Z.PUZZLES.at(-1).id, 'overshot');
+  assert.equal(Z.getPuzzle('nope'), null);
+});
+
+test('every puzzle is solvable within its stated shafts, treadles and size', () => {
+  for (const p of Z.PUZZLES) {
+    const s = p.solution();
+    assert.ok(s.threading.every((x) => x < p.shafts), `${p.id} shafts`);
+    assert.ok(s.treadling.every((t) => t < p.treadles), `${p.id} treadles`);
+    assert.equal(s.tieup.length, p.shafts, p.id);
+    assert.equal(s.threading.length, p.ends, p.id);
+    assert.equal(s.treadling.length, p.picks, p.id);
+    assert.equal(s.mode, 'treadle');
+    assert.equal(Z.similarity(s, Z.targetOf(p), { structureOnly: p.structureOnly }), 1, p.id);
+    assert.ok(Z.isSolved(s, p), p.id);
+  }
+});
+
+test('a shifted solution still scores 1.0', () => {
+  for (const p of Z.PUZZLES) {
+    const s = p.solution();
+    const shifted = {
+      ...s,
+      threading: rotate(s.threading, 3),
+      warpColors: rotate(s.warpColors, 3),
+      treadling: rotate(s.treadling, 5),
+      weftColors: rotate(s.weftColors, 5),
+    };
+    assert.equal(Z.similarity(shifted, Z.targetOf(p), { structureOnly: p.structureOnly }), 1, p.id);
+  }
+});
+
+test('a different structure scores below 1.0', () => {
+  for (const a of Z.PUZZLES) for (const b of Z.PUZZLES) {
+    if (a === b) continue;
+    const opts = { structureOnly: a.structureOnly && b.structureOnly };
+    assert.ok(Z.similarity(a.solution(), b.solution(), opts) < 1, `${a.id} vs ${b.id}`);
+  }
+});
+
+test('an alternative draft with the same cloth also solves the puzzle', () => {
+  const p = Z.getPuzzle('tea-towel');
+  const alt = D.createDraft({ shafts: 4, treadles: 2, ends: 16, picks: 16 });
+  alt.threading = D.repeatTreadling([0, 1], 16); // 2-shaft threading
+  alt.tieup[0][0] = true; alt.tieup[1][1] = true;
+  alt.treadling = D.repeatTreadling([0, 1], 16);
+  assert.ok(Z.isSolved(alt, p));
+  // the same cloth woven on a sinking shed with the complement tie-up
+  const sink = D.setShed(alt, 'sinking');
+  sink.tieup[0][0] = false; sink.tieup[1][1] = false; sink.tieup[1][0] = true; sink.tieup[0][1] = true;
+  assert.ok(Z.isSolved(sink, p));
+});
+
+test('colors matter only for color puzzles', () => {
+  const hp = Z.getPuzzle('houndstooth');
+  const s = hp.solution();
+  const recolored = D.clearColors(s, '#B8433A', '#3E6A9E');
+  assert.ok(Z.similarity(recolored, Z.targetOf(hp), { structureOnly: true }) === 1);
+  assert.ok(Z.similarity(recolored, Z.targetOf(hp), { structureOnly: false }) < 1);
+});
+
+test('a blank draft scores gently below 1 and the mask lights only matching cells', () => {
+  const p = Z.getPuzzle('twill22');
+  const blank = Z.startDraft(p);
+  assert.ok(Z.similarity(blank, Z.targetOf(p)) < 1);
+  const solved = p.solution();
+  assert.ok(Z.matchMask(solved, Z.targetOf(p)).every((r) => r.every(Boolean)));
+  const m = Z.matchMask(blank, Z.targetOf(p));
+  assert.ok(m.flat().some((x) => !x) && m.flat().some(Boolean));
+});
+
+test('hints reveal threading, tie-up, treadling (and colors) one at a time', () => {
+  for (const p of Z.PUZZLES) {
+    const stages = Z.hintStages(p);
+    assert.deepEqual(stages.slice(0, 3), ['threading', 'tie-up', 'treadling']);
+    assert.equal(stages.length, p.structureOnly ? 3 : 4);
+    let d = Z.startDraft(p);
+    d = Z.applyHint(d, p, 'threading');
+    assert.deepEqual(d.treadling, Z.startDraft(p).treadling);
+    assert.ok(d.threading.every((s) => s !== null));
+    d = Z.applyHint(d, p, 'tie-up');
+    d = Z.applyHint(d, p, 'treadling');
+    for (const st of stages.slice(3)) d = Z.applyHint(d, p, st);
+    assert.ok(Z.isSolved(d, p), p.id);
+  }
+});
+
+/* --------------------------------------------------------------- WIF */
+
+test('WIF round trip keeps threading, tie-up, treadling, shed and colors', () => {
+  for (const { id } of D.PRESETS) {
+    const d = D.buildPreset(id);
+    const text = W.writeWif(d, { title: id, date: 'Oct 1, 2026' });
+    const back = W.parseWif(text);
+    assert.deepEqual(back.warnings, [], id);
+    assert.equal(back.title, id);
+    const b = back.draft;
+    assert.equal(b.shafts, d.shafts, id);
+    assert.deepEqual(b.threading, d.threading, id);
+    assert.deepEqual(b.treadling, d.treadling, id);
+    assert.deepEqual(b.tieup, d.tieup.map((r) => r.slice(0, b.treadles)), id);
+    assert.deepEqual(b.warpColors.map((c) => c.toLowerCase()), d.warpColors.map((c) => c.toLowerCase()), id);
+    assert.deepEqual(b.weftColors.map((c) => c.toLowerCase()), d.weftColors.map((c) => c.toLowerCase()), id);
+    assert.deepEqual(D.drawdown(b), D.drawdown(d), id);
+  }
+});
+
+test('WIF writer uses the 1.1 layout with 1-based comma lists', () => {
+  const d = D.buildPreset('twill22');
+  const t = W.writeWif(d, {});
+  for (const h of ['[WIF]', '[CONTENTS]', '[WEAVING]', '[WARP]', '[WEFT]', '[THREADING]', '[TIEUP]', '[TREADLING]', '[COLOR PALETTE]', '[COLOR TABLE]', '[WARP COLORS]', '[WEFT COLORS]']) {
+    assert.ok(t.includes(h + '\n'), h);
+  }
+  assert.ok(t.includes('Version=1.1'));
+  assert.ok(t.includes('Range=0,255'));
+  assert.match(t, /\[THREADING\]\n1=1\n2=2\n3=3\n4=4\n5=1/);
+  assert.match(t, /\[TIEUP\]\n1=1,2\n2=2,3\n3=3,4\n4=1,4\n/);
+  assert.ok(!t.includes('[LIFTPLAN]'));
+});
+
+test('WIF round trip of a lift plan and a sinking shed', () => {
+  let d = D.setShed(D.setMode(D.buildPreset('point'), 'liftplan'), 'sinking');
+  d = D.toggleLift(d, 0, 3);
+  const text = W.writeWif(d);
+  assert.ok(text.includes('[LIFTPLAN]') && text.includes('Rising Shed=false') && !text.includes('[TIEUP]'));
+  const b = W.parseWif(text).draft;
+  assert.equal(b.mode, 'liftplan');
+  assert.equal(b.shed, 'sinking');
+  assert.deepEqual(b.liftplan, d.liftplan);
+  assert.deepEqual(D.drawdown(b), D.drawdown(d));
+});
+
+const SAMPLE = `[WIF]
+Version=1.1
+Date=April 20, 1997
+Developers=wif@mhsoft.com
+Source Program=Hand-written sample
+[CONTENTS]
+COLOR PALETTE=yes
+WEAVING=yes
+WARP=yes
+WEFT=yes
+COLOR TABLE=yes
+THREADING=yes
+TIEUP=yes
+TREADLING=yes
+NOTES=yes
+[NOTES]
+1=Anything here is ignored.
+[weaving]
+Shafts=4
+Treadles=4
+Rising Shed=yes
+Profile=false ; unknown keys are ignored
+[WARP]
+Threads=8
+Color=1
+Units=Centimeters
+Spacing=0.1
+[WEFT]
+Threads=4
+Color=2
+[COLOR PALETTE]
+Entries=2
+Form=RGB
+Range=0,999
+[COLOR TABLE]
+1=999,0,0
+2=0,0,999 ; blue
+[THREADING]
+1=1
+2=2
+3=3
+4=4
+5=1
+6=2
+7=3
+8=4
+[TIEUP]
+1=1,2
+2=2,3
+3=3,4
+4=4,1
+[TREADLING]
+1=1
+2=2
+3=3
+4=4
+[WARP COLORS]
+5=2
+`;
+
+test('a small hand-written WIF sample parses to a 2/2 twill with scaled colors', () => {
+  const { draft, warnings } = W.parseWif(SAMPLE);
+  assert.deepEqual(warnings, []);
+  assert.equal(draft.shafts, 4);
+  assert.equal(draft.threading.length, 8);
+  assert.equal(draft.treadling.length, 4);
+  assert.deepEqual(draft.threading, [0, 1, 2, 3, 0, 1, 2, 3]);
+  assert.deepEqual(draft.tieup.map((r) => r.map(Number).join('')), ['1001', '1100', '0110', '0011']);
+  assert.equal(draft.shed, 'rising');
+  assert.equal(draft.warpColors[0], '#ff0000'); // 999 of 999 -> 255
+  assert.equal(draft.warpColors[4], '#0000ff'); // override from [WARP COLORS]
+  assert.equal(draft.weftColors[0], '#0000ff');
+  const dd = D.drawdown(draft);
+  assert.equal(rowStr(dd[0]), '##..##..');
+  assert.equal(rowStr(dd[1]), '.##..##.');
+});
+
+test('WIF with several treadles per pick becomes a lift plan; junk is rejected kindly', () => {
+  const text = '[WEAVING]\nShafts=4\nTreadles=2\n[THREADING]\n1=1\n2=2\n[TIEUP]\n1=1\n2=2\n[TREADLING]\n1=1,2\n';
+  const r = W.parseWif(text);
+  assert.equal(r.draft.mode, 'liftplan');
+  assert.deepEqual(r.draft.liftplan[0], [0, 1]);
+  assert.equal(r.warnings.length, 1);
+  assert.throws(() => W.parseWif('hello world'), /WIF/);
+});
+
+/* ---------------------------------------------- range edits & overlay */
+
+test('repeat, mirror and shift a selected range', () => {
+  let d = D.createDraft({ ends: 8, picks: 8 });
+  d.threading = [0, 1, 2, null, null, null, null, null];
+  const r = D.repeatRange(d, 'ends', 0, 2);
+  assert.deepEqual(r.threading, [0, 1, 2, 0, 1, 2, 0, 1]);
+  const m = D.mirrorRange(d, 'ends', 0, 2);
+  assert.deepEqual(m.threading, [0, 1, 2, 1, 0, null, null, null]);
+  const s = D.shiftRange(d, 'ends', 1, 2, 1);
+  assert.deepEqual(s.threading.slice(0, 3), [0, 2, 3]);
+  assert.deepEqual(D.shiftRange(d, 'ends', 2, 2, 2).threading[2], 0); // wraps at 4 shafts
+  assert.deepEqual(d.threading.slice(0, 3), [0, 1, 2]); // immutable
+  d.treadling = [0, 1, null, null, null, null, null, null];
+  assert.deepEqual(D.repeatRange(d, 'picks', 0, 1).treadling, [0, 1, 0, 1, 0, 1, 0, 1]);
+  assert.deepEqual(D.mirrorRange(d, 'picks', 0, 1).treadling.slice(0, 3), [0, 1, 0]);
+  assert.deepEqual(D.shiftRange(d, 'picks', 0, 1, -1).treadling.slice(0, 2), [5, 0]);
+});
+
+test('tromp as writ makes the treadling follow the threading', () => {
+  let d = D.createDraft({ shafts: 4, treadles: 4, ends: 6, picks: 8 });
+  d.threading = [0, 1, 2, 3, 2, 1];
+  const t = D.trompAsWrit(d);
+  assert.deepEqual(t.treadling, [0, 1, 2, 3, 2, 1, 0, 1]);
+  assert.deepEqual(t.liftplan[3], [3]);
+  // with a straight tie-up that gives the straight draw's classic twill look
+  for (let s = 0; s < 4; s++) { d.tieup[s][s] = true; d.tieup[(s + 1) % 4][s] = true; }
+  const two = D.trompAsWrit({ ...d, threading: D.straightDraw(6, 4) });
+  assert.deepEqual(two.treadling.slice(0, 5), [0, 1, 2, 3, 0]);
+  const fewTreadles = D.trompAsWrit(D.createDraft({ shafts: 4, treadles: 2, ends: 4, picks: 4 }).threading.length ? { ...D.createDraft({ shafts: 4, treadles: 2, ends: 4, picks: 4 }), threading: [0, 1, 2, 3] } : null);
+  assert.deepEqual(fewTreadles.treadling, [0, 1, null, null]);
+});
+
+test('floatCells marks only floats longer than the limit, on face or back', () => {
+  const d = D.createDraft({ shafts: 4, treadles: 1, ends: 6, picks: 5 });
+  d.threading = [0, 1, 1, 1, 1, 1];
+  d.tieup[0][0] = true;
+  d.treadling = [0, 0, 0, 0, 0];
+  const f = D.floatCells(d, 3);
+  // end 0 is warp on top for 5 picks; picks have weft over ends 1-5 (5 ends)
+  assert.ok(f.every((row) => row[0]));
+  assert.ok(f.every((row) => row.slice(1).every(Boolean)));
+  assert.ok(D.floatCells(d, 5).flat().every((x) => !x));
+  const plainOverlay = D.floatCells(plain(), 1);
+  assert.ok(plainOverlay.flat().every((x) => !x));
+  const back = D.floatCells(d, 3, 'back');
+  assert.ok(back.flat().some(Boolean));
+  assert.equal(D.floatCells(D.buildPreset('twill13'), 2).flat().some(Boolean), true);
+  assert.equal(D.floatCells(D.buildPreset('twill22'), 2).flat().some(Boolean), false);
+});
+
+test('progress rescales so a blank draft reads 0, the solution 1, and a half-right draft in between', () => {
+  for (const p of Z.PUZZLES) {
+    const target = Z.targetOf(p);
+    const o = { structureOnly: p.structureOnly };
+    assert.equal(Z.progress(Z.startDraft(p), target, o), 0, p.id);
+    assert.equal(Z.progress(p.solution(), target, o), 1, p.id);
+  }
+  const p = Z.getPuzzle('point');
+  let d = Z.applyHint(Z.startDraft(p), p, 'threading');
+  assert.equal(Z.progress(d, Z.targetOf(p)), 0); // threading alone weaves nothing yet
+  d = Z.applyHint(d, p, 'tie-up');
+  const half = Z.applyHint(d, p, 'treadling');
+  half.treadling = half.treadling.map((t, i) => (i < 12 ? t : null));
+  const v = Z.progress(half, Z.targetOf(p));
+  assert.ok(v > 0 && v < 1, String(v));
 });

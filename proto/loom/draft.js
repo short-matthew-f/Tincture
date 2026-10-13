@@ -616,3 +616,115 @@ export function buildPreset(id) {
   const def = PRESET_DEFS.find((p) => p.id === id);
   return def ? def.build() : null;
 }
+
+/** Build a draft from readable 1-based data (see `build` above). Used by puzzles. */
+export const buildDraft = build;
+
+/* ------------------------------------------------- range edits & conveniences */
+
+function rangeArrays(d, kind) {
+  return kind === 'ends' ? [d.threading, d.warpColors] : [d.treadling, d.liftplan, d.weftColors];
+}
+function normRange(a, b, n) {
+  const lo = clamp(Math.min(a, b), 0, n - 1);
+  const hi = clamp(Math.max(a, b), 0, n - 1);
+  return [lo, hi];
+}
+const cloneVal = (v) => (Array.isArray(v) ? v.slice() : v);
+
+/** Repeat the selected range (kind 'ends' or 'picks') over everything after it. */
+export function repeatRange(draft, kind, a, b) {
+  const d = copy(draft);
+  const arrs = rangeArrays(d, kind);
+  const [lo, hi] = normRange(a, b, arrs[0].length);
+  const len = hi - lo + 1;
+  for (const arr of arrs) {
+    const unit = arr.slice(lo, hi + 1);
+    for (let i = hi + 1; i < arr.length; i++) arr[i] = cloneVal(unit[(i - lo) % len]);
+  }
+  return d;
+}
+
+/** Write a mirrored copy of the range right after it (the turning thread is not doubled). */
+export function mirrorRange(draft, kind, a, b) {
+  const d = copy(draft);
+  const arrs = rangeArrays(d, kind);
+  const [lo, hi] = normRange(a, b, arrs[0].length);
+  for (const arr of arrs) {
+    const back = arr.slice(lo, hi + 1).reverse().slice(1);
+    back.forEach((v, i) => { if (hi + 1 + i < arr.length) arr[hi + 1 + i] = cloneVal(v); });
+  }
+  return d;
+}
+
+/** Move every shaft (ends) or treadle/shaft (picks) in the range up or down by delta, wrapping. */
+export function shiftRange(draft, kind, a, b, delta) {
+  const d = copy(draft);
+  const wrap = (v, n) => (((v + delta) % n) + n) % n;
+  if (kind === 'ends') {
+    const [lo, hi] = normRange(a, b, d.threading.length);
+    for (let i = lo; i <= hi; i++) if (d.threading[i] != null) d.threading[i] = wrap(d.threading[i], d.shafts);
+  } else {
+    const [lo, hi] = normRange(a, b, d.treadling.length);
+    for (let i = lo; i <= hi; i++) {
+      if (d.treadling[i] != null) d.treadling[i] = wrap(d.treadling[i], d.treadles);
+      d.liftplan[i] = sortedUnique(d.liftplan[i].map((s) => wrap(s, d.shafts)));
+    }
+  }
+  return d;
+}
+
+/**
+ * Tromp as writ: the treadling follows the threading. Pick p is treadled on the
+ * treadle numbered like the shaft end p is threaded on (cycling through the
+ * threading if there are more picks than ends). Treadles beyond the treadle count
+ * leave the pick blank. The lift plan follows the same way (the one shaft).
+ */
+export function trompAsWrit(draft) {
+  const d = copy(draft);
+  const E = d.threading.length;
+  d.treadling = d.treadling.map((_, p) => {
+    const s = d.threading[p % E];
+    return s != null && s < d.treadles ? s : null;
+  });
+  d.liftplan = d.liftplan.map((_, p) => {
+    const s = d.threading[p % E];
+    return s != null ? [s] : [];
+  });
+  return d;
+}
+
+/**
+ * Cells that sit in a float longer than `limit` threads: boolean [pick][end].
+ * side 'face' or 'back'. Warp floats run down a column, weft floats along a pick.
+ * Informational only.
+ */
+export function floatCells(draft, limit, side = 'face') {
+  let dd = drawdown(draft);
+  if (side === 'back') dd = backOf(dd);
+  const P = dd.length;
+  const E = draft.threading.length;
+  const out = range(P).map(() => range(E).map(() => false));
+  const ok = (p, e) => draft.threading[e] != null && !isBlankPick(draft, p);
+  for (let e = 0; e < E; e++) {
+    let p = 0;
+    while (p < P) {
+      if (!(ok(p, e) && dd[p][e] === 'warp')) { p++; continue; }
+      let q = p;
+      while (q + 1 < P && ok(q + 1, e) && dd[q + 1][e] === 'warp') q++;
+      if (q - p + 1 > limit) for (let k = p; k <= q; k++) out[k][e] = true;
+      p = q + 1;
+    }
+  }
+  for (let p = 0; p < P; p++) {
+    let e = 0;
+    while (e < E) {
+      if (!(ok(p, e) && dd[p][e] === 'weft')) { e++; continue; }
+      let q = e;
+      while (q + 1 < E && ok(p, q + 1) && dd[p][q + 1] === 'weft') q++;
+      if (q - e + 1 > limit) for (let k = e; k <= q; k++) out[p][k] = true;
+      e = q + 1;
+    }
+  }
+  return out;
+}
