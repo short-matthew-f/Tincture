@@ -588,3 +588,87 @@ test('progress rescales so a blank draft reads 0, the solution 1, and a half-rig
   const v = Z.progress(half, Z.targetOf(p));
   assert.ok(v > 0 && v < 1, String(v));
 });
+
+/* ------------------------------------------------------------- tartan setts */
+import * as T from '../proto/loom/tartan.js';
+
+test('tartan: a symmetric sett mirrors at its pivots and does not double them', () => {
+  const p = T.parseSett('R/8 G24 K/4');
+  assert.equal(p.pivots, true);
+  assert.deepEqual(p.stripes.map((s) => [s.code, s.n]), [['R', 8], ['G', 24], ['K', 4]]);
+  const seq = T.expandSett(p.stripes, { symmetric: true });
+  // R8 G24 K4 G24 -> 60 threads; the R and K pivots appear once per sett
+  assert.equal(seq.length, 8 + 24 + 4 + 24);
+  const runs = [];
+  for (const c of seq) { if (runs.length && runs[runs.length - 1][0] === c) runs[runs.length - 1][1]++; else runs.push([c, 1]); }
+  assert.deepEqual(runs, [['R', 8], ['G', 24], ['K', 4], ['G', 24]]);
+  assert.equal(T.settThreads(p.stripes, { symmetric: true }), 60);
+});
+
+test('tartan: an asymmetric sett repeats exactly as written', () => {
+  const p = T.parseSett('W10 R2 W10 G2');
+  assert.equal(p.pivots, false);
+  const seq = T.expandSett(p.stripes, { symmetric: false });
+  assert.equal(seq.length, 24);
+  const r = T.tartanDraft('W10 R2 W10 G2', { symmetric: false, repeats: 3 });
+  assert.ok(r.ok);
+  assert.equal(r.ends, 72);
+  // the overchecks alternate red, green, red, green across repeats
+  const over = [];
+  r.draft.warpColors.forEach((c, i) => { if (c !== r.draft.warpColors[i - 1] && c !== T.TARTAN_COLORS.W.hex) over.push(c); });
+  assert.deepEqual(over, [T.TARTAN_COLORS.R.hex, T.TARTAN_COLORS.G.hex, T.TARTAN_COLORS.R.hex, T.TARTAN_COLORS.G.hex, T.TARTAN_COLORS.R.hex, T.TARTAN_COLORS.G.hex]);
+});
+
+test('tartan: unknown letters and junk are handled gently', () => {
+  const p = T.parseSett('R/8 XQ4 hello G12, k/4');
+  assert.deepEqual(p.stripes.map((s) => s.code), ['R', 'XQ', 'G', 'K']);
+  assert.deepEqual(p.unknown, ['XQ']);
+  assert.ok(p.warnings.some((w) => w.includes('hello')));
+  assert.ok(p.warnings.some((w) => w.includes('XQ')));
+  const r = T.tartanDraft('R/8 XQ4 G12 K/4');
+  assert.ok(r.ok);
+  assert.ok(r.draft.warpColors.includes(T.UNKNOWN_HEX));
+  // and she can dye the unknown letter
+  const r2 = T.tartanDraft('R/8 XQ4 G12 K/4', { colors: { XQ: '#C2507A' } });
+  assert.ok(!r2.draft.warpColors.includes(T.UNKNOWN_HEX));
+  assert.ok(r2.draft.warpColors.includes('#C2507A'));
+  assert.equal(T.tartanDraft('').ok, false);
+  assert.equal(T.parseSett('nonsense only').stripes.length, 0);
+  // codes are case-insensitive, two-letter shades included
+  assert.deepEqual(T.parseSett('db4 Az2 ly/6').stripes.map((s) => s.code), ['DB', 'Az', 'LY']);
+});
+
+test('tartan: library thread counts match the totals their sources state', () => {
+  for (const t of T.TARTANS) {
+    const p = T.parseSett(t.sett);
+    assert.equal(p.warnings.length, 0, `${t.name}: ${p.warnings.join(' ')}`);
+    assert.equal(p.unknown.length, 0, t.name);
+    if (t.total) assert.equal(T.settThreads(p.stripes, { symmetric: !t.asymmetric }), t.total, t.name);
+  }
+  // Royal Stewart, stated as 212 threads in the full sett
+  const rs = T.getTartan('royal-stewart');
+  assert.equal(T.expandSett(T.parseSett(rs.sett).stripes, { symmetric: true }).length, 212);
+});
+
+test('tartan: warp and weft carry the same colour sequence in 2/2 twill, sized to whole repeats', () => {
+  const r = T.tartanDraft(T.getTartan('royal-stewart').sett, { scale: 'half' });
+  assert.ok(r.ok);
+  assert.deepEqual(r.draft.warpColors, r.draft.weftColors);
+  assert.equal(r.ends % r.settLen, 0);
+  assert.equal(r.draft.threading.length, r.ends);
+  assert.equal(r.draft.treadling.length, r.ends);
+  assert.ok(r.ends <= 200);
+  // straight draw and the 2/2 tie-up: every pick lifts exactly two adjacent shafts
+  assert.deepEqual(r.draft.threading.slice(0, 8), [0, 1, 2, 3, 0, 1, 2, 3]);
+  for (let t = 0; t < 4; t++) assert.equal(r.draft.tieup.filter((row) => row[t]).length, 2);
+  const f = D.floats(r.draft);
+  assert.equal(f.warp, 2);
+  assert.equal(f.weft, 2);
+  // the full Royal Stewart sett (212) is wider than the loom: refused kindly, with a reason
+  const full = T.tartanDraft(T.getTartan('royal-stewart').sett, { scale: 'full' });
+  assert.equal(full.ok, false);
+  assert.equal(full.reason, 'too-wide');
+  assert.equal(T.defaultScale(T.parseSett('K/8 R/8').stripes, true), 'full');
+  assert.equal(T.repeatsToFit(16), 8);
+  assert.equal(T.repeatsToFit(250), 0);
+});

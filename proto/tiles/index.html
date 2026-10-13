@@ -16,7 +16,7 @@
     --t: clamp(26px, calc((100vw - 76px) / 10), 40px);
     --pitch: calc(var(--t) + 7px);
   }
-  body { padding: 0 12px 110px; overflow-x: hidden; }
+  body { padding: 0 12px calc(var(--barH, 64px) + 40px); overflow-x: hidden; }
   .wrap { max-width: 460px; margin: 0 auto; }
   button { font: inherit; color: inherit; }
   .topbar { display: flex; align-items: center; justify-content: space-between; }
@@ -31,9 +31,14 @@
   #idaMsg { margin: 0 0 8px; font-size: 13px; line-height: 1.35; color: var(--ink-soft); background: var(--card); border-radius: 12px; padding: 8px 10px; min-height: 3.1em; box-shadow: 0 1px 0 var(--line); }
   #idaMsg b { color: var(--ink); }
 
-  .status { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; display: flex; align-items: center; gap: 8px; min-height: 64px; margin: 0; padding: 10px max(12px, calc((100vw - 460px) / 2 + 12px)) calc(10px + env(safe-area-inset-bottom)); background: rgba(251,248,241,.97); box-shadow: 0 -3px 0 rgba(42,38,34,.08), 0 -8px 24px rgba(42,38,34,.08); }
+  [hidden] { display: none !important; }
+  .btn.small { min-height: 44px; }
+  .status { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; min-height: 64px; margin: 0; padding: 10px max(12px, calc((100vw - 460px) / 2 + 12px)) calc(10px + env(safe-area-inset-bottom)); background: rgba(251,248,241,.97); box-shadow: 0 -3px 0 rgba(42,38,34,.08), 0 -8px 24px rgba(42,38,34,.08); }
   .status .btn.primary { flex: 0 0 auto; }
-  .status .msg { flex: 1; font-size: 14px; line-height: 1.3; font-weight: 500; }
+  .status .msg { flex: 1 1 190px; font-size: 14px; line-height: 1.3; font-weight: 500; }
+  .status .btn { min-height: 44px; }
+  @media (max-width: 420px) { .status .msg { flex-basis: 100%; } } /* buttons sit together under the message */
+  .status .btn.primary { min-height: 48px; }
 
   .card { padding: 8px; margin: 0 0 10px; }
   .cap { margin: 0 0 6px 2px; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-soft); }
@@ -141,8 +146,8 @@
   </div>
   <p id="idaMsg" aria-live="polite"></p>
 
+  <div class="status" id="status"></div>
   <div id="play">
-    <div class="status" id="status"></div>
     <section class="card" aria-label="Dishes">
       <div id="dishes"></div>
       <p class="cap" style="margin-top:8px">The middle</p>
@@ -169,7 +174,7 @@
       <div class="total" id="sumTotal">0</div>
       <p class="muted" style="margin:0 0 6px">points in all</p>
       <p class="coins serif" id="sumCoins"></p>
-      <button type="button" class="btn primary wide" id="againBtn">Start a new wall</button>
+      <!-- "Start a new wall" lives in the bottom bar, where every next step is -->
     </div>
   </div>
 

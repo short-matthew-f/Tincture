@@ -32,14 +32,14 @@
   #bath { display: block; width: 100%; aspect-ratio: 1; touch-action: none; cursor: crosshair; user-select: none; -webkit-user-select: none; }
   .tray-note { position: absolute; left: 14px; right: 14px; bottom: 14px; text-align: center; pointer-events: none; font-size: 14px; font-weight: 600; color: var(--ink); background: rgba(251,248,241,.88); border-radius: 12px; padding: 6px 10px; opacity: 0; transition: opacity .25s; }
   .tray-note.on { opacity: 1; }
-  .tipline { min-height: 20px; margin: 8px 2px 8px; font-size: 14px; color: var(--ink-soft); }
+  .tipline { min-height: 20px; margin: 10px 2px 8px; font-size: 14px; color: var(--ink-soft); }
 
-  .palette { display: flex; justify-content: space-between; gap: 2px; margin: 12px 0 8px; }
-  .palette button { flex: 0 0 44px; height: 48px; border: 0; background: transparent; padding: 0; display: grid; place-items: center; touch-action: manipulation; }
-  .palette i { display: block; width: 34px; height: 34px; border-radius: 50%; box-shadow: inset 0 0 0 2px rgba(42,38,34,.18), 0 2px 0 rgba(42,38,34,.18); transition: transform .12s; }
+  /* one row of inks at every phone width: the cells touch, so the whole row is the target */
+  .palette { display: grid; grid-template-columns: repeat(8, 1fr); gap: 0; margin: 10px 0 8px; }
+  .palette button { width: 100%; height: 48px; border: 0; background: transparent; padding: 0; display: grid; place-items: center; touch-action: manipulation; }
+  .palette i { display: block; width: min(34px, calc(100% - 10px)); aspect-ratio: 1; border-radius: 50%; box-shadow: inset 0 0 0 2px rgba(42,38,34,.18), 0 2px 0 rgba(42,38,34,.18); transition: transform .12s; }
   .palette button:active i { transform: scale(.92); }
   .palette button[aria-pressed="true"] i { box-shadow: 0 0 0 3px var(--card), 0 0 0 5.5px var(--ink); transform: scale(1.04); }
-  @media (max-width: 380px) { .palette { flex-wrap: wrap; } .palette button { flex: 1 0 25%; } }
 
   .tools { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
   .tool { flex-direction: column; gap: 2px; min-height: 58px; padding: 4px 2px; font-size: 13px; }
@@ -139,7 +139,6 @@
       <canvas id="bath" role="img" aria-label="Marbling bath. Tap to drop ink, drag to pull a stylus through it."></canvas>
       <div class="tray-note" id="trayNote"></div>
     </div></div>
-    <p class="tipline" id="tip"></p>
 
     <div class="palette" id="palette" role="group" aria-label="Dye inks"></div>
 
@@ -149,17 +148,18 @@
       <button class="btn tool" data-tool="comb" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M4 8h16M7 8v10M10.500 8v10M14 8v10M17.500 8v10"/></svg>Comb</button>
       <button class="btn tool" data-tool="swirl" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M12 12m-1 0a1 1 0 1 0 2 0a1 1 0 1 0-2 0M12 10.500c1.500-.5 3 .5 3 2s-1.500 3.500-3.500 3.500S8 14 8 12c0-3 2.500-5 5-5 3.500 0 6 2.500 6 5.500"/></svg>Swirl</button>
     </div>
+    <div class="actions">
+      <button class="btn" id="undo" aria-disabled="true">Undo</button>
+      <button class="btn" id="clear">Clear the bath</button>
+      <button class="btn primary" id="lay">Lay the paper</button>
+    </div>
     <div id="combOpts"><span class="hint">Comb</span>
       <div class="seg" id="tineSeg" role="group" aria-label="Tine spacing">
         <button data-n="110" aria-pressed="false">Wide</button><button data-n="70" aria-pressed="true">Medium</button><button data-n="40" aria-pressed="false">Fine</button>
       </div>
     </div>
 
-    <div class="actions">
-      <button class="btn" id="undo" aria-disabled="true">Undo</button>
-      <button class="btn" id="clear">Clear the bath</button>
-      <button class="btn primary" id="lay">Lay the paper</button>
-    </div>
+    <p class="tipline" id="tip"></p>
 
     <div class="card" style="margin-top:14px">
       <h2>One-tap starters</h2>

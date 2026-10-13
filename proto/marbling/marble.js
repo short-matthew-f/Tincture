@@ -548,3 +548,24 @@ export function runStarter(bath, name, rng, step = 20) {
   for (const op of ops) applyOp(bath, op, step);
   return ops;
 }
+
+// ------------------------------------------------------------------ saving a bath across reloads
+// Coordinates are rounded to 0.1 bath units (1/10000 of the basin): invisible, and it keeps a
+// busy 48k-vertex bath to a few hundred kB of JSON.
+export function serializeBath(bath) {
+  return { v: 1, size: bath.size, inks: bath.inks.map((i) => ({ color: i.color, pts: Array.from(i.pts, (x) => Math.round(x * 10) / 10) })) };
+}
+
+/** Rebuild a bath from serializeBath() output; anything malformed gives an empty bath. */
+export function deserializeBath(o) {
+  const bath = createBath();
+  if (!o || o.v !== 1 || !Array.isArray(o.inks)) return bath;
+  if (Number.isFinite(o.size) && o.size > 0) bath.size = o.size;
+  for (const ink of o.inks) {
+    if (!ink || typeof ink.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(ink.color)) continue;
+    if (!Array.isArray(ink.pts) || ink.pts.length < 6 || ink.pts.length % 2) continue;
+    if (!ink.pts.every(Number.isFinite)) continue;
+    bath.inks.push(makeInk(ink.color, Float64Array.from(ink.pts)));
+  }
+  return bath;
+}

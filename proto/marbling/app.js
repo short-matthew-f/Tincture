@@ -3,6 +3,7 @@
 import {
   INKS, BATH_COLOR, LIMITS, createBath, snapshot, restore, beginDrop, growDrop, maintain, stylusStep, combStep, swirlStep,
   resample, basinOffsets, starterOps, applyOp, STARTERS, mulberry32, runStarter, countVerts, pathNormal, combOffsets, dropInk,
+  serializeBath, deserializeBath,
 } from './marble.js';
 import {
   buildStates, finalState, modelBounds, stackBounds, planStep, stepOps, creaseSegments, applyM, mul, modelDecor,
@@ -12,6 +13,8 @@ import { MODELS, LEVELS, getModel } from './models.js';
 
 const $ = (s) => document.querySelector(s);
 const STORE_KEY = 'tincture.proto.marbling';
+const BATH_KEY = 'tincture.proto.marbling.bath'; // the ink on the bath, so a reload keeps her work
+const UI_KEY = 'tincture.proto.marbling.ui'; // which tab, and where she is in a fold
 const MAX_SHEETS = 8;
 const MAX_SHELF = 12;
 const reduce = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -89,6 +92,21 @@ function makeGrain(ctx) {
 const bathCanvas = $('#bath');
 const bctx = bathCanvas.getContext('2d');
 let bath = createBath();
+try { bath = deserializeBath(JSON.parse(localStorage.getItem(BATH_KEY) || 'null')); } catch { bath = createBath(); }
+let bathSaveTimer = 0;
+function saveBath(now = false) {
+  clearTimeout(bathSaveTimer);
+  const write = () => {
+    if (pointer || tail || runner) return; // only a settled bath is written
+    try {
+      if (bath.inks.length) localStorage.setItem(BATH_KEY, JSON.stringify(serializeBath(bath)));
+      else localStorage.removeItem(BATH_KEY);
+    } catch { try { localStorage.removeItem(BATH_KEY); } catch { /* storage unavailable */ } }
+  };
+  if (now) write(); else bathSaveTimer = setTimeout(write, 1200);
+}
+window.addEventListener('pagehide', () => saveBath(true));
+document.addEventListener('visibilitychange', () => { if (document.hidden) saveBath(true); });
 let inkColor = INKS[2].hex;
 let tool = 'drop';
 let tines = 70; // gap between tines, in bath units (the comb always spans the basin)
@@ -113,10 +131,11 @@ function resizeBath() {
 }
 new ResizeObserver(resizeBath).observe(bathCanvas);
 
-function polyPath(ctx, p) {
+function polyPath(ctx, p, stride = 1) {
   ctx.beginPath();
   ctx.moveTo(p[0], p[1]);
-  for (let i = 2; i < p.length; i += 2) ctx.lineTo(p[i], p[i + 1]);
+  const st = p.length > 240 ? stride : 1; // small drops always keep every vertex
+  for (let i = 2 * st; i < p.length; i += 2 * st) ctx.lineTo(p[i], p[i + 1]);
   ctx.closePath();
 }
 
@@ -134,7 +153,12 @@ function edgeColor(hex) {
 }
 
 // Paint the bath into any square canvas context (the live tray and the sheet capture share this).
-function paintBath(ctx, b, px) {
+// fast: while ink is moving on a very busy bath, skip every 2nd/3rd vertex and the edge
+// stroke (a 48k-vertex bath took ~300 ms a frame to paint); the resting bath and every
+// captured sheet are painted in full.
+function paintBath(ctx, b, px, fast = false) {
+  const verts = fast ? countVerts(b) : 0;
+  const stride = !fast || verts < 12000 ? 1 : verts < 26000 ? 2 : 3;
   const k = px / b.size;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = BATH_COLOR;
@@ -143,9 +167,10 @@ function paintBath(ctx, b, px) {
   ctx.lineJoin = 'round';
   ctx.lineWidth = Math.max(1, px / 520) / k;
   for (const ink of b.inks) {
-    polyPath(ctx, ink.pts);
+    polyPath(ctx, ink.pts, stride);
     ctx.fillStyle = ink.color;
     ctx.fill();
+    if (stride > 1) continue;
     ctx.strokeStyle = edgeColor(ink.color);
     ctx.stroke();
   }
@@ -216,6 +241,7 @@ bathCanvas.addEventListener('pointerdown', (e) => {
   if (busy) { if (runner) runner.fast = true; return; }
   if (pointer) return;
   e.preventDefault();
+  settleTail();
   try { bathCanvas.setPointerCapture(e.pointerId); } catch { /* ok */ }
   const [x, y] = toBath(e);
   pushUndo();
@@ -237,7 +263,6 @@ function endPointer(e, cancel) {
   if (!pointer || e.pointerId !== pointer.id) return;
   const p = pointer;
   pointer = null;
-  flushQueue(p);
   if (p.mode === 'drop') {
     if (cancel) { undoStack.pop(); syncButtons(); } else {
       const r = dropRadius(performance.now() - p.t0);
@@ -246,35 +271,58 @@ function endPointer(e, cancel) {
       vibrate(8);
     }
   } else if (p.mode === 'stylus' || p.mode === 'comb') {
-    maintain(bath);
+    if (queue.length) tail = p; else maintain(bath);
   }
   dirty = true;
+  saveBath();
 }
 bathCanvas.addEventListener('pointerup', (e) => endPointer(e, false));
 bathCanvas.addEventListener('pointercancel', (e) => endPointer(e, true));
 bathCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
 // Pull the queued stylus/comb points into the bath (one frame's worth at a time).
-function flushQueue(p) {
+// Pull the queued stylus/comb points into the bath. With a time budget (ms) the work stops
+// between sub-steps and the rest waits for the next frame, so the tool overlay keeps up with
+// the finger and the ink follows a moment later instead of the whole page stalling.
+function flushQueue(p, budget = Infinity) {
   if (!p || !queue.length) { queue.length = 0; return; }
-  for (const [x, y] of queue) {
-    if (p.mode === 'stylus') {
-      if (Math.hypot(x - p.lx, y - p.ly) < 1.5) continue;
-      stylusStep(bath, [p.lx, p.ly], [x, y], LIMITS.stylusC);
-      p.lx = x; p.ly = y;
-    } else if (p.mode === 'comb') {
-      if (!p.nrm) {
+  const t0 = performance.now();
+  let i = 0;
+  for (; i < queue.length; i++) {
+    const [x, y] = queue[i];
+    if (p.mode === 'stylus' || p.mode === 'comb') {
+      if (p.mode === 'comb' && !p.nrm) {
         if (Math.hypot(x - p.start[0], y - p.start[1]) < 16) continue;
         p.nrm = pathNormal([p.start, [x, y]]);
         p.offs = basinOffsets(p.start, p.nrm, tines);
         p.lx = p.start[0]; p.ly = p.start[1];
       }
-      if (Math.hypot(x - p.lx, y - p.ly) < 1.5) continue;
-      combStep(bath, [p.lx, p.ly], [x, y], p.nrm, p.offs, 0, LIMITS.combC);
-      p.lx = x; p.ly = y;
+      const c = p.mode === 'comb' ? LIMITS.combC : LIMITS.stylusC;
+      let len = Math.hypot(x - p.lx, y - p.ly);
+      if (len < 1.5) continue;
+      while (len >= 1.5) {
+        const k = Math.min(1, (0.9 * c) / len); // one engine sub-step at a time
+        const q = [p.lx + (x - p.lx) * k, p.ly + (y - p.ly) * k];
+        if (p.mode === 'comb') combStep(bath, [p.lx, p.ly], q, p.nrm, p.offs, 0, c);
+        else stylusStep(bath, [p.lx, p.ly], q, c);
+        p.lx = q[0]; p.ly = q[1];
+        len = Math.hypot(x - p.lx, y - p.ly);
+        if (performance.now() - t0 > budget) break;
+      }
+      if (len >= 1.5) break; // out of time partway along this point
     }
+    if (performance.now() - t0 > budget) { i++; break; }
   }
+  queue.splice(0, i);
+  dirty = true;
+}
+let tail = null; // a stylus/comb stroke whose ink is still catching up after the finger lifted
+function settleTail() {
+  if (!tail) return;
+  flushQueue(tail);
   queue.length = 0;
+  maintain(bath);
+  tail = null;
   dirty = true;
 }
 
@@ -314,7 +362,7 @@ function stepRunner(now, dt) {
       }
       if (!r.fast && now < r.nextAt) return;
       if (blooms.length) { for (const b of blooms) growDrop(bath, b.h, b.target); blooms = []; }
-      r.cur = { op, pts: resample(op.pts, 10), idx: 1, nrm: pathNormal(op.pts) };
+      r.cur = { op, pts: resample(op.pts, starterStep(op)), idx: 1, nrm: pathNormal(op.pts) };
     }
     const c = r.cur;
     if (budget <= 0) return;
@@ -329,6 +377,22 @@ function stepRunner(now, dt) {
   }
 }
 
+// combStep/stylusStep already subdivide every segment at 0.9 c, so resampling finer than
+// that only repeats work (it made Bouquet take 20 s, and "skip ahead" barely helped).
+function starterStep(op) { return 0.9 * (op.c || (op.tool === 'comb' ? LIMITS.combC : LIMITS.stylusC)); }
+
+// Stop a starter where it is: the bath keeps what has been drawn so far and is hers again.
+function stopRunner() {
+  if (!runner) return;
+  runner = null;
+  busy = false;
+  for (const b of blooms) growDrop(bath, b.h, b.target);
+  blooms = [];
+  maintain(bath);
+  note('');
+  dirty = true;
+}
+
 function finishRunner() {
   runner = null;
   busy = false;
@@ -337,6 +401,7 @@ function finishRunner() {
   $('#tip').textContent = 'That is your bath. Lay a sheet on it when you like it, or keep pulling.';
   say('Starter finished.');
   dirty = true;
+  saveBath();
 }
 
 let noteTimer = 0;
@@ -349,30 +414,39 @@ function note(msg, ms = 0) {
 }
 
 function frame(now) {
-  const dt = lastFrame ? now - lastFrame : 16;
+  requestAnimationFrame(frame);
+  try { frameBody(now); } catch (err) {
+    console.error(err);
+    if (runner) stopRunner();
+    if (fold) { fold.anim = null; fold.hold = null; fold.drag = null; fold.t = 0; }
+    pointer = null;
+  }
+}
+function frameBody(now) {
+  const dt = lastFrame ? Math.max(0, now - lastFrame) : 16;
   lastFrame = now;
   if (pointer && pointer.mode === 'swirl' && !busy) {
     swirlStep(bath, pointer.x, pointer.y, 90, pointer.dir * 0.05 * (Math.min(dt, 34) / 16.7), LIMITS.swirlC);
     dirty = true;
   }
-  if (pointer) flushQueue(pointer);
+  if (pointer) flushQueue(pointer, 12);
+  else if (tail) { flushQueue(tail, 12); if (!queue.length) { maintain(bath); tail = null; saveBath(); } }
   stepBlooms(now);
   stepRunner(now, dt);
   if (pointer && pointer.mode === 'drop') dirty = true;
   if (!$('#viewMarble').hidden) {
     // a very busy bath is drawn a little softer while it is moving, then sharp again once it rests
     const v = countVerts(bath);
-    const moving = busy || pointer || blooms.length;
+    const moving = busy || pointer || tail || blooms.length;
     const want = moving ? (v > 22000 ? 0.55 : v > 12000 ? 0.75 : 1) : 1;
     if (want !== renderScale) { renderScale = want; resizeBath(); }
   }
   if (dirty && bathCanvas.width > 0 && !$('#viewMarble').hidden) {
     dirty = false;
-    paintBath(bctx, bath, bathCanvas.width);
+    paintBath(bctx, bath, bathCanvas.width, !!(busy || pointer || tail || blooms.length));
     paintOverlay(now);
   }
   if (foldVisible()) foldFrame(now);
-  requestAnimationFrame(frame);
 }
 
 // ------------------------------------------------------------------ controls
@@ -413,19 +487,25 @@ $('#tineSeg').addEventListener('click', (e) => {
 setTool('drop');
 
 $('#undo').addEventListener('click', () => {
+  if (runner) { stopRunner(); say('Starter stopped.'); } // Undo during a starter takes the bath back to before it
   if (busy || !undoStack.length) return;
+  tail = null; queue.length = 0;
   restore(bath, undoStack.pop());
   blooms = [];
   syncButtons();
   dirty = true;
+  saveBath();
   say('Undone.');
 });
 $('#clear').addEventListener('click', () => {
+  stopRunner();
   if (busy) return;
+  tail = null; queue.length = 0;
   if (bath.inks.length) pushUndo();
   bath = createBath();
   blooms = [];
   dirty = true;
+  saveBath();
   note('The bath is clear and still.', 1600);
 });
 
@@ -439,7 +519,9 @@ for (const s of STARTERS) {
 }
 
 function startStarter(id) {
+  stopRunner(); // a new starter replaces one that is still playing
   if (busy) return;
+  settleTail();
   pushUndo();
   bath = createBath();
   blooms = [];
@@ -447,9 +529,14 @@ function startStarter(id) {
   runner = { ops: starterOps(id, rng), i: 0, cur: null, nextAt: 0, fast: reduce.matches, id };
   busy = true;
   const meta = STARTERS.find((s) => s.id === id);
-  note(`${meta.name}. Tap to skip ahead.`);
+  note(`${meta.name}. Tap the bath to skip ahead, or Undo to stop.`);
   $('#tip').textContent = meta.note;
   dirty = true;
+  // The starters sit below the tray: bring the bath into view so she sees it happen.
+  const tr = $('.tray').getBoundingClientRect();
+  if (tr.top < 0 || tr.bottom > window.innerHeight) {
+    window.scrollTo({ top: window.scrollY + tr.top - 8, behavior: reduce.matches ? 'auto' : 'smooth' });
+  }
 }
 
 // ------------------------------------------------------------------ lay the paper
@@ -509,7 +596,9 @@ function drawSheetQuad(ctx, d, cx, cy, w, opt) {
 }
 
 function layPaper() {
+  stopRunner(); // lay what is on the bath now
   if (busy) return;
+  settleTail();
   if (!bath.inks.length) { note('Float a little ink first, then lay the paper.', 2200); return; }
   busy = true;
   const sheetCanvas = captureSheet();
@@ -531,6 +620,15 @@ function layPaper() {
   note('');
   say('Laying the paper on the bath.');
   const tick = () => {
+    try { tickBody(); } catch (err) {
+      console.error(err);
+      fly.classList.remove('on');
+      busy = false;
+      const el = $(`#drawer .thumb[data-id="${id}"]`);
+      if (el) el.classList.remove('arriving');
+    }
+  };
+  const tickBody = () => {
     const t = performance.now() - t0;
     fctx.setTransform(1, 0, 0, 1, 0, 0);
     fctx.clearRect(0, 0, fly.width, fly.height);
@@ -565,7 +663,9 @@ function layPaper() {
     busy = false;
     const el = $(`#drawer .thumb[data-id="${id}"]`);
     if (el) { el.classList.remove('arriving'); el.classList.add('landed'); }
-    note('Your paper is resting in the drawer.', 2600);
+    saveBath();
+    const dr = $('#drawer').getBoundingClientRect();
+    note(dr.top > window.innerHeight ? 'Your paper is resting in the drawer, further down.' : 'Your paper is resting in the drawer.', 2600);
     $('#tip').textContent = 'The bath is still. Float more ink, or tap the sheet in the drawer to fold it.';
     say('Paper added to the drawer.');
   };
@@ -608,6 +708,14 @@ function foldVisible() { return !$('#viewFold').hidden && fold && !$('#foldStage
 function sheetImg(id) { return sheetImgs.get(id) || null; }
 
 // ---- tabs
+function saveUI() {
+  try {
+    localStorage.setItem(UI_KEY, JSON.stringify({
+      tab: $('#viewFold').hidden ? 'marble' : 'fold',
+      fold: fold ? { model: fold.model.id, sheet: fold.sheet, step: fold.finished ? fold.model.steps.length : fold.step } : null,
+    }));
+  } catch { /* optional */ }
+}
 function showTab(which) {
   const marble = which === 'marble';
   $('#viewMarble').hidden = !marble;
@@ -615,6 +723,7 @@ function showTab(which) {
   $('#tabMarble').setAttribute('aria-pressed', marble ? 'true' : 'false');
   $('#tabFold').setAttribute('aria-pressed', marble ? 'false' : 'true');
   if (marble) { resizeBath(); dirty = true; } else { renderPicker(); resizeStage(); }
+  saveUI();
 }
 $('#tabMarble').addEventListener('click', () => showTab('marble'));
 $('#tabFold').addEventListener('click', () => showTab('fold'));
@@ -990,6 +1099,7 @@ function startModel(modelId) {
 
 function leaveStage() {
   fold = null;
+  saveUI();
   $('#foldStage').hidden = true;
   $('#foldPick').hidden = false;
   $('#nameCard').hidden = true;
@@ -1034,7 +1144,16 @@ function syncFoldUI() {
   sn.textContent = step && isPullStep(step) ? (step.prompt || 'Tap, press and hold, or drag the paper') : '';
   sn.classList.toggle('on', !!step && isPullStep(step) && !f.anim);
   $('#stage').classList.toggle('pullstep', !!step && isPullStep(step));
+  const wasHidden = $('#nameCard').hidden;
   $('#nameCard').hidden = !f.finished;
+  saveUI();
+  if (f.finished && wasHidden) {
+    // the next step (shelf, or fold another) is on this card: make sure she can see it
+    requestAnimationFrame(() => {
+      const r = $('#nameCard').getBoundingClientRect();
+      if (r.bottom > window.innerHeight) window.scrollBy({ top: r.bottom - window.innerHeight + 12, behavior: reduce.matches ? 'auto' : 'smooth' });
+    });
+  }
   if (f.finished) {
     $('#mName').textContent = f.model.name;
     $('#mNote').textContent = f.model.blurb;
@@ -1274,8 +1393,17 @@ function refreshImages() {
 }
 
 $('#sample').addEventListener('click', () => { makeSample(); renderPicker(); });
+// Letting a sheet go, or taking a piece down, removes something she made: ask with a second tap.
+function armed(btn, label, again) {
+  if (btn.dataset.armed) return true;
+  btn.dataset.armed = '1';
+  btn.textContent = again;
+  setTimeout(() => { delete btn.dataset.armed; btn.textContent = label; }, 3000);
+  return false;
+}
 $('#recycle').addEventListener('click', () => {
   if (!selSheet) return;
+  if (!armed($('#recycle'), 'Let this sheet go', 'Tap again to let it go')) return;
   store.sheets = store.sheets.filter((s) => s.id !== selSheet);
   sheetImgs.delete(selSheet);
   selSheet = null;
@@ -1344,6 +1472,7 @@ $('#dClose').addEventListener('click', closePiece);
 $('#dialog').addEventListener('click', (e) => { if (e.target === $('#dialog')) closePiece(); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closePiece(); });
 $('#dRemove').addEventListener('click', () => {
+  if (!armed($('#dRemove'), 'Take it down', 'Tap again to take it down')) return;
   if (shownPiece) { store.shelf = store.shelf.filter((s) => s.id !== shownPiece.id); saveStore(); renderShelf(); }
   closePiece();
 });
@@ -1357,6 +1486,23 @@ function bctxInit() {
   syncButtons();
   resizeBath();
   requestAnimationFrame(frame);
+  setTimeout(restoreUI, 0); // after window.__marbling exists
+}
+function restoreUI() {
+  let o = null;
+  try { o = JSON.parse(localStorage.getItem(UI_KEY) || 'null'); } catch { /* fresh */ }
+  if (!o || o.tab !== 'fold') return;
+  showTab('fold');
+  const f0 = o.fold;
+  if (!f0 || !getModel(f0.model) || !store.sheets.some((s) => s.id === f0.sheet)) return;
+  selSheet = f0.sheet;
+  const go = () => {
+    startModel(f0.model);
+    const n = Math.max(0, Math.min(fold.model.steps.length, Number(f0.step) || 0));
+    if (n) window.__marbling.jump(n);
+  };
+  // the sheet image loads asynchronously; fold as soon as it is there (or straight away without it)
+  if (sheetImgs.has(f0.sheet)) go(); else { let tries = 0; const wait = () => (sheetImgs.has(f0.sheet) || tries++ > 40 ? go() : setTimeout(wait, 50)); wait(); }
 }
 window.addEventListener('resize', () => { dirty = true; });
 

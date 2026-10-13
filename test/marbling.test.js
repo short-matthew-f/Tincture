@@ -581,3 +581,34 @@ test('the comb spans the whole basin in any direction, diagonals included', asyn
     assert.ok(Math.max(...corners) - proj(ends[1]) <= 70, 'last tine within a gap of the other wall');
   }
 });
+
+// ---- saving the bath across reloads (UX audit: a reload used to lose the ink)
+import { serializeBath, deserializeBath } from '../proto/marbling/marble.js';
+
+test('serializeBath / deserializeBath round-trip keeps colours and shapes within 0.1 units', () => {
+  const b = createBath();
+  dropInk(b, 300, 400, 80, '#B8433A');
+  dropInk(b, 520, 480, 120, '#3E6A9E');
+  const json = JSON.parse(JSON.stringify(serializeBath(b)));
+  const c = deserializeBath(json);
+  assert.equal(c.inks.length, b.inks.length);
+  for (let i = 0; i < b.inks.length; i++) {
+    assert.equal(c.inks[i].color, b.inks[i].color);
+    assert.equal(c.inks[i].pts.length, b.inks[i].pts.length);
+    for (let k = 0; k < b.inks[i].pts.length; k++) assert.ok(Math.abs(c.inks[i].pts[k] - b.inks[i].pts[k]) <= 0.05 + 1e-9);
+  }
+  assert.equal(countVerts(c), countVerts(b));
+});
+
+test('deserializeBath is gentle with junk: bad inks are skipped, nothing throws', () => {
+  assert.deepEqual(deserializeBath(null).inks, []);
+  assert.deepEqual(deserializeBath({ v: 2, inks: [] }).inks, []);
+  const c = deserializeBath({ v: 1, inks: [
+    { color: 'red', pts: [0, 0, 1, 1, 2, 2] },
+    { color: '#112233', pts: [0, 0, 1] },
+    { color: '#112233', pts: [0, 0, 'x', 1, 2, 2] },
+    { color: '#112233', pts: [0, 0, 10, 0, 10, 10] },
+  ] });
+  assert.equal(c.inks.length, 1);
+  assert.equal(c.inks[0].color, '#112233');
+});

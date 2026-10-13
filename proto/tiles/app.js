@@ -31,8 +31,8 @@ let confirmNew = 0, busyMsg = '', lastGain = null;
 
 const randSeed = () => ((Date.now() ^ Math.floor(Math.random() * 4294967296)) >>> 0) || 1;
 
-function save() {
-  try { localStorage.setItem(KEY, JSON.stringify({ g: G, undo: undoSnap, pending })); } catch { /* storage may be blocked */ }
+function save(pend = pending) {
+  try { localStorage.setItem(KEY, JSON.stringify({ g: G, undo: undoSnap, pending: pend })); } catch { /* storage may be blocked */ }
 }
 function load() {
   try {
@@ -79,7 +79,13 @@ function render() {
   $('#play').hidden = G.over;
   $('#summary').hidden = !G.over;
   $('#newBtn').textContent = confirmNew ? 'Tap again to start over' : 'New wall';
-  if (G.over) { renderSummary(fs); return; }
+  if (G.over) {
+    // The bar keeps its job at the end too: the one next step is a new wall.
+    $('#status').innerHTML = `<span class="msg" role="status">Final score ${fs.total}. Well made.</span><button class="btn primary" type="button" id="againBar">Start a new wall</button>`;
+    $('#score').textContent = fs.total;
+    renderSummary(fs);
+    return;
+  }
 
   // The action bar (fixed at the bottom): what is happening, and the one next step.
   const canUndo = !!undoSnap && !busy;
@@ -96,7 +102,7 @@ function render() {
   } else if (!busy && sel && !legal.length) {
     act = '<button class="btn primary" type="button" data-basket>Seconds basket</button>';
   } else if (onlyMid && !sel) {
-    msg = 'Only the middle is left. Take a colour, or finish the round.';
+    msg = 'Only the middle is left. Take a colour, or finish: the rest go to seconds (+1 each).';
     act = '<button class="btn primary" type="button" id="sweepBtn">Finish the round</button>';
   }
   $('#status').innerHTML = `<span class="msg" role="status">${msg}</span>` +
@@ -224,7 +230,7 @@ function roll(from, to, el = $('#score')) {
   return new Promise((res) => {
     const t0 = performance.now(), dur = 450;
     const step = (now) => {
-      const p = Math.min(1, (now - t0) / dur);
+      const p = Math.max(0, Math.min(1, (now - t0) / dur));
       el.textContent = Math.round(from + (to - from) * (1 - Math.pow(1 - p, 3)));
       p < 1 ? requestAnimationFrame(step) : res();
     };
@@ -248,12 +254,14 @@ async function place(line) {
   const res = take(G, { ...s, line });
   if (!res.ok) return;
   busy = true; busyMsg = '';
+  try {
   const srcSel = s.source === 'center' ? '#center .tile' : `#dishes .tile[data-i="${s.index}"]`;
   const all = $$(srcSel).map((el) => ({ c: +el.dataset.c, rect: rectOf(el), el }));
   all.forEach((a) => { a.el.style.visibility = 'hidden'; });
   const picked = all.filter((a) => a.c === s.color), rest = all.filter((a) => a.c !== s.color);
   const oldN = before.lines[line >= 0 ? line : 0].n;
   undoSnap = before; sel = null; G = res.state;
+  save(G.rival || roundOver(G)); // a reload mid-flight keeps the move
   render();
   const moves = [];
   const m = res.moved;
@@ -271,10 +279,15 @@ async function place(line) {
   }
   void src;
   await stagger(moves.filter((x) => x.toEl));
-  pending = G.rival || roundOver(G);
-  busy = false;
-  save();
-  render();
+  } catch (err) {
+    console.error(err);
+  } finally {
+    $$('.tile.fly').forEach((el) => el.remove());
+    pending = G.rival || roundOver(G);
+    busy = false;
+    save();
+    render();
+  }
   if (pending) { clearTimeout(timer); timer = setTimeout(resolve, 2300); }
 }
 
@@ -369,12 +382,23 @@ async function resolve() {
   busy = true; undoSnap = null; sel = null;
   busyMsg = roundOver(G) ? '' : 'Ida is choosing a dish.';
   render();
-  if (!roundOver(G)) await idaMove();
-  if (roundOver(G)) await finishRound();
-  pending = false;
-  busy = false;
-  save();
-  render();
+  try {
+    if (!roundOver(G)) await idaMove();
+    if (roundOver(G)) await finishRound();
+  } catch (err) {
+    // Never leave the board locked: settle the rules state without the animation.
+    console.error(err);
+    if (G.rival && !roundOver(G) && G.dishes.some((d) => d.length)) G = rivalTurn(G).state;
+    if (roundOver(G) && !G.over && G.lines.some((L, i) => L.n === i + 1 || G.seconds.length)) G = endRound(G).state;
+  } finally {
+    $$('.tile.fly, .pop').forEach((el) => el.remove());
+    pending = false;
+    busy = false;
+    save();
+    render();
+  }
+  // The finished mosaic is the reward: show it from the top.
+  if (G.over) window.scrollTo({ top: 0, behavior: reduced() ? 'auto' : 'smooth' });
 }
 
 function undo() {
@@ -394,7 +418,7 @@ app.addEventListener('click', async (ev) => {
     if (!confirmNew) { confirmNew = setTimeout(() => { confirmNew = 0; render(); }, 3000); return render(); }
     clearTimeout(confirmNew); confirmNew = 0; return startNew();
   }
-  if (t.closest('#againBtn')) return startNew();
+  if (t.closest('#againBtn, #againBar')) return startNew();
   if (G.over) return;
   if (t.closest('[data-deal]')) return deal();
   if (t.closest('[data-go]')) return resolve();
@@ -411,9 +435,18 @@ app.addEventListener('click', async (ev) => {
   }
   const tl = t.closest('[data-src]');
   if (tl) {
+    const key = { source: tl.dataset.src, index: +tl.dataset.i, color: +tl.dataset.c };
     if (pending) await resolve();
     if (G.over) return;
-    const key = { source: tl.dataset.src, index: +tl.dataset.i, color: +tl.dataset.c };
+    const still = (key.source === 'center' ? G.center : G.dishes[key.index] || []).includes(key.color);
+    if (!still) {
+      // Ida (or the round's end) took those tiles while she was tapping: say so, and select nothing.
+      sel = null;
+      render();
+      const m = $('#status .msg');
+      if (m && G.rival) m.textContent = 'Ida took that dish just before you. Pick another glaze.';
+      return;
+    }
     const same = sel && sel.source === key.source && sel.index === key.index && sel.color === key.color;
     sel = same ? null : key;
     render();
@@ -434,6 +467,10 @@ function startNew() {
   save(); render();
   window.scrollTo(0, 0);
 }
+
+try {
+  new ResizeObserver(() => document.body.style.setProperty('--barH', $('#status').offsetHeight + 'px')).observe($('#status'));
+} catch { /* older browsers keep the default padding */ }
 
 G = load();
 if (!G) { G = newGame(randSeed(), { rival: true }); save(); }

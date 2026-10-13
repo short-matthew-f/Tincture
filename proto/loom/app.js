@@ -2,6 +2,7 @@
 import * as D from './draft.js';
 import * as Z from './puzzles.js';
 import * as W from './wif.js';
+import * as TT from './tartan.js';
 
 const STORE_KEY = 'tincture.proto.loom';
 const PUZZLE_KEY = 'tincture.proto.loom.puzzles';
@@ -120,7 +121,9 @@ function rr(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 function fit(canvas, w, h) {
-  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  // Big drafts (a tartan is 100+ ends and picks) would make canvases larger than a phone allows
+  // (iOS stops drawing above ~16.7M pixels): lower the pixel density instead.
+  const dpr = Math.min(window.devicePixelRatio || 1, 3, Math.sqrt(16e6 / Math.max(1, w * h)));
   canvas.width = Math.round(w * dpr);
   canvas.height = Math.round(h * dpr);
   canvas.style.width = `${w}px`;
@@ -426,7 +429,7 @@ function drawDraft() {
   $('draftCaption').textContent = (d.shed === 'sinking'
     ? 'Sinking shed: tied shafts go down, the rest rise. '
     : 'Rising shed: tied shafts lift. ')
-    + 'Ends read from the right; picks read upward. Tap a square to set it, tap a color chip to dye it.';
+    + 'Ends read from the right; picks read upward. Tap a square to set it, tap a color chip to dye it. Swipe the draft to see all of it; pinch or use Zoom to resize.';
   return L;
 }
 
@@ -457,10 +460,27 @@ function hitDraft(L, d, x, y) {
 function initDraftInput() {
   const canvas = $('draft');
   let down = null;
-  canvas.addEventListener('pointerdown', (ev) => { down = { x: ev.clientX, y: ev.clientY, t: ev.timeStamp }; });
+  // Pinch the draft to zoom (two fingers); one finger still scrolls and taps.
+  let pinch = null;
+  const dist = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  const box = $('draftBox');
+  canvas.addEventListener('touchstart', (ev) => {
+    if (ev.touches.length === 2) { pinch = { d0: dist(ev.touches), c0: ui.cell }; down = null; }
+  }, { passive: true });
+  canvas.addEventListener('touchmove', (ev) => {
+    if (!pinch || ev.touches.length !== 2) return;
+    ev.preventDefault();
+    const want = Math.max(16, Math.min(44, Math.round((pinch.c0 * dist(ev.touches)) / pinch.d0 / 2) * 2));
+    if (want !== ui.cell) zoomTo(want);
+  }, { passive: false });
+  const endPinch = (ev) => { if (pinch && ev.touches.length < 2) { setTimeout(() => { pinch = null; }, 0); save(); } };
+  canvas.addEventListener('touchend', endPinch);
+  canvas.addEventListener('touchcancel', endPinch);
+  void box;
+  canvas.addEventListener('pointerdown', (ev) => { down = pinch ? null : { x: ev.clientX, y: ev.clientY, t: ev.timeStamp, id: ev.pointerId }; });
   canvas.addEventListener('pointercancel', () => { down = null; });
   canvas.addEventListener('pointerup', (ev) => {
-    if (!down) return;
+    if (!down || ev.pointerId !== down.id || pinch) { down = null; return; }
     const moved = Math.hypot(ev.clientX - down.x, ev.clientY - down.y);
     const quick = ev.timeStamp - down.t < 1500;
     down = null;
@@ -470,40 +490,60 @@ function initDraftInput() {
     tapDraft(hitDraft(L, draft, ev.clientX - r.left, ev.clientY - r.top));
   });
 
-  // paint strips: drag across chips to set many at once
+  // Paint strips over the color chips. A tap dyes one chip; a drag ALONG the chips dyes
+  // each one it passes; a drag ACROSS them scrolls, the same as anywhere else on the page.
   const strip = (el, kind) => {
-    let active = false;
-    let work = null;
-    const apply = (ev) => {
+    let g = null; // { id, x, y, mode: null|'paint'|'scroll', work, lx, ly }
+    const box = $('draftBox');
+    const indexAt = (ev) => {
       const L = layoutDraft(draft, ui.cell);
       const r = el.getBoundingClientRect();
-      let i;
-      if (kind === 'warp') {
-        const col = Math.floor((ev.clientX - r.left) / L.cell);
-        i = L.E - 1 - Math.max(0, Math.min(L.E - 1, col));
-        work = D.setWarpColor(work, i, ui.brush);
-      } else {
-        const row = Math.floor((ev.clientY - r.top) / L.cell);
-        i = L.P - 1 - Math.max(0, Math.min(L.P - 1, row));
-        work = D.setWeftColor(work, i, ui.brush);
-      }
+      if (kind === 'warp') return L.E - 1 - Math.max(0, Math.min(L.E - 1, Math.floor((ev.clientX - r.left) / L.cell)));
+      return L.P - 1 - Math.max(0, Math.min(L.P - 1, Math.floor((ev.clientY - r.top) / L.cell)));
+    };
+    const paintAt = (ev) => {
+      const i = indexAt(ev);
+      g.work = kind === 'warp' ? D.setWarpColor(g.work, i, ui.brush) : D.setWeftColor(g.work, i, ui.brush);
       const prev = draft;
-      draft = work;
-      drawDraft(); drawCloth();
-      draft = prev;
+      draft = g.work;
+      try { drawDraft(); drawCloth(); drawPeek(); } finally { draft = prev; }
     };
     el.addEventListener('pointerdown', (ev) => {
-      active = true; work = draft; el.setPointerCapture(ev.pointerId); apply(ev); ev.preventDefault();
+      if (g) return;
+      g = { id: ev.pointerId, x: ev.clientX, y: ev.clientY, lx: ev.clientX, ly: ev.clientY, mode: null, work: draft, first: ev };
+      try { el.setPointerCapture(ev.pointerId); } catch { /* ok */ }
+      ev.preventDefault();
     });
-    el.addEventListener('pointermove', (ev) => { if (active) apply(ev); });
-    const end = () => {
-      if (!active) return;
-      active = false;
-      const w = work; work = null;
-      commit(w);
+    el.addEventListener('pointermove', (ev) => {
+      if (!g || ev.pointerId !== g.id) return;
+      const dx = ev.clientX - g.x, dy = ev.clientY - g.y;
+      if (!g.mode) {
+        if (Math.hypot(dx, dy) < 8) return;
+        const along = kind === 'warp' ? Math.abs(dx) >= Math.abs(dy) : Math.abs(dy) >= Math.abs(dx);
+        g.mode = along ? 'paint' : 'scroll';
+        if (g.mode === 'paint') paintAt(g.first);
+      }
+      if (g.mode === 'paint') paintAt(ev);
+      else {
+        // scroll the draft box first, then the page, by the finger's movement
+        const mx = g.lx - ev.clientX, my = g.ly - ev.clientY;
+        const before = [box.scrollLeft, box.scrollTop];
+        box.scrollBy(mx, my);
+        const usedY = box.scrollTop - before[1];
+        if (Math.abs(my - usedY) > 0.5) window.scrollBy(0, my - usedY);
+      }
+      g.lx = ev.clientX; g.ly = ev.clientY;
+    });
+    const end = (ev, cancel) => {
+      if (!g || ev.pointerId !== g.id) return;
+      const was = g;
+      g = null;
+      if (cancel) { if (was.mode === 'paint') renderAll(); return; }
+      if (!was.mode) { g = was; paintAt(was.first); g = null; }
+      if (was.mode !== 'scroll') commit(was.work);
     };
-    el.addEventListener('pointerup', end);
-    el.addEventListener('pointercancel', end);
+    el.addEventListener('pointerup', (ev) => end(ev, false));
+    el.addEventListener('pointercancel', (ev) => end(ev, true));
   };
   strip($('warpStrip'), 'warp');
   strip($('weftStrip'), 'weft');
@@ -521,8 +561,10 @@ function tapDraft(h) {
   if (ui.selecting) {
     if (h.area === 'thread' || h.area === 'warpchip') selTap('ends', h.end);
     else if (h.area === 'tread' || h.area === 'lift' || h.area === 'weftchip') selTap('picks', h.pick);
+    else if (h.area === 'tie') { ui.selNote = 'The tie-up is not part of a range: tap ends in the threading or picks in the treadling.'; renderSelBar(); ui.selNote = null; }
     return;
   }
+  if (ui.puzzle) ui.puzzle.note = null;
   if (h.area === 'thread') commit(D.toggleThreading(draft, h.end, h.shaft));
   else if (h.area === 'tie') commit(D.toggleTieup(draft, h.shaft, h.treadle));
   else if (h.area === 'tread') commit(D.toggleTreadling(draft, h.pick, h.treadle));
@@ -549,10 +591,12 @@ function openSheet(title, node) {
   inner.append(close);
   $('overlay').classList.add('open');
   $('sheet').classList.add('open');
+  updatePeek();
 }
 function closeSheet() {
   $('overlay').classList.remove('open');
   $('sheet').classList.remove('open');
+  if (typeof updatePeek === 'function') updatePeek();
 }
 $('overlay').addEventListener('click', closeSheet);
 
@@ -626,6 +670,7 @@ function openPresets() {
       ui.shown = D.wovenCount(draft);
       save();
       renderAll();
+      alignDraft();
     };
   });
   openSheet('Presets', wrap);
@@ -661,14 +706,14 @@ function bindControls() {
   $('sideSeg').onclick = (e) => { const s = e.target.dataset?.s; if (s) { ui.side = s; save(); renderAll(); } };
   $('presetsBtn').onclick = openPresets;
   $('undoBtn').onclick = undo;
-  $('wUndo').onclick = undo;
+  $('wUndo').onclick = () => { if (history.length > weaveBase) undo(); };
   $('dyeWarp').onclick = () => commit(D.setAllWarpColors(draft, ui.brush));
   $('dyeWeft').onclick = () => commit(D.setAllWeftColors(draft, ui.brush));
   $('weaveBtn').onclick = () => setWeaving(true);
   $('doneBtn').onclick = () => setWeaving(false);
   $('curColor').onclick = () => openPalette('Weft color', (hex) => { ui.weftColor = hex; save(); renderAll(); }, ui.weftColor);
-  $('zoomIn').onclick = () => { ui.cell = Math.min(44, ui.cell + 4); save(); renderAll(); };
-  $('zoomOut').onclick = () => { ui.cell = Math.max(16, ui.cell - 4); save(); renderAll(); };
+  $('zoomIn').onclick = () => { zoomTo(Math.min(44, ui.cell + 4)); save(); };
+  $('zoomOut').onclick = () => { zoomTo(Math.max(16, ui.cell - 4)); save(); };
   $('shedSeg').onclick = (e) => { const v = e.target.dataset?.v; if (v) commit(D.setShed(draft, v)); };
   $('modeSeg').onclick = (e) => { const v = e.target.dataset?.v; if (v) commit(D.setMode(draft, v)); };
   $('shaftSeg').onclick = (e) => { const n = Number(e.target.dataset?.n); if (n) commit(D.setShafts(draft, n)); };
@@ -681,7 +726,9 @@ function bindControls() {
   $('puzzlesBtn').onclick = openPuzzleList;
   $('libraryBtn').onclick = openLibrary;
   $('wifBtn').onclick = openWif;
+  $('tartanBtn').onclick = openTartan;
   $('selectBtn').onclick = () => { ui.selecting = !ui.selecting; if (!ui.selecting) ui.sel = null; renderAll(); };
+  $('selBar').addEventListener('click', (ev) => { if (ev.target.closest('[data-sel="done"]')) { ui.selecting = false; ui.sel = null; renderAll(); } });
   $('floatBtn').onclick = () => { ui.floatOn = !ui.floatOn; save(); renderAll(); };
   $('floatStep').querySelectorAll('button').forEach((b) => { b.onclick = () => { ui.floatLimit = Math.max(1, Math.min(12, ui.floatLimit + Number(b.dataset.d))); save(); renderAll(); }; });
   bindPuzzleCard();
@@ -727,7 +774,7 @@ function renderControls() {
   $('floatStep').style.display = ui.floatOn ? 'inline-flex' : 'none';
   $('floatVal').textContent = `>${ui.floatLimit}`;
   $('undoBtn').setAttribute('aria-disabled', String(!history.length));
-  $('wUndo').setAttribute('aria-disabled', String(!history.length));
+  $('wUndo').setAttribute('aria-disabled', String(history.length <= weaveBase));
   setPressed($('viewSeg'), 'v', ui.view);
   setPressed($('sideSeg'), 's', ui.side);
   setPressed($('shedSeg'), 'v', d.shed);
@@ -748,6 +795,7 @@ function renderControls() {
   $('curColor').style.background = ui.weftColor;
   const pick = D.wovenCount(d);
   $('weaveCaption').textContent = `Pick ${pick}. Tap a treadle to open the shed and throw the shuttle.`;
+  $('wPick').textContent = pick ? `Pick ${pick}` : 'Tap a treadle';
   // info line
   const f = D.floats(d);
   const longest = Math.max(f.warp, f.weft);
@@ -805,9 +853,11 @@ function renderTreadles(force) {
   }
 }
 
+let weaveBase = 0; // history length when she sat down at the loom
 function setWeaving(on) {
   finishAnim();
   ui.weaving = on;
+  weaveBase = history.length;
   ui.shown = D.wovenCount(draft);
   renderAll();
   window.scrollTo(0, 0);
@@ -841,9 +891,9 @@ function finishAnim() {
   renderControls();
 }
 function tick() {
-  const t = (performance.now() - anim.t0) / DURATION;
+  const t = Math.max(0, (performance.now() - anim.t0) / DURATION);
   if (t >= 1) { finishAnim(); return; }
-  drawStage(t, false);
+  try { drawStage(t, false); } catch (err) { console.error(err); finishAnim(); return; }
   raf = requestAnimationFrame(tick);
 }
 
@@ -1009,6 +1059,7 @@ function enterPuzzle(id) {
   ui.sel = null; ui.selecting = false; ui.painting = false; ui.weaving = false;
   closeSheet();
   renderAll();
+  alignDraft();
   window.scrollTo(0, 0);
 }
 function leavePuzzle() {
@@ -1018,6 +1069,7 @@ function leavePuzzle() {
   if (studio) { draft = studio.draft; history = studio.history; ui.shown = studio.shown; studio = null; }
   ui.sel = null; ui.selecting = false;
   renderAll();
+  alignDraft();
 }
 function nextPuzzleId() {
   const i = Z.PUZZLES.findIndex((p) => p.id === ui.puzzle.id);
@@ -1034,6 +1086,7 @@ function renderPuzzleCard() {
   ui.puzzle.match = m;
   const pct = Math.floor(Z.progress(draft, ui.puzzle.target, { structureOnly: pz.structureOnly }) * 100);
   const solved = m.score >= 1;
+  ui.puzzle.pct = pct; ui.puzzle.solved = solved;
   if (solved && !puzzleStore.solved[pz.id]) { puzzleStore.solved[pz.id] = true; save(); }
   const hintLabel = hints < stages.length ? `Hint: show the ${stages[hints]}` : 'All hints shown';
   card.innerHTML = `
@@ -1047,6 +1100,7 @@ function renderPuzzleCard() {
     </div>
     <div class="meter" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><div class="fill" style="width:${Math.max(3, pct)}%"></div></div>
     <p class="caption">${solved ? 'Every cell matches.' : `${pct}% of the way there. Matching areas glow softly.`}</p>
+    ${!solved ? `<p class="caption" style="margin-top:2px">${ui.puzzle.note ? esc(ui.puzzle.note) : 'Set the threading, tie-up and treadling in the draft below; your cloth follows.'}</p>` : ''}
     <div class="seg" id="pzView" role="group" aria-label="Cloth view" style="margin-bottom:8px">
       ${['cloth', 'grid', 'color'].map((v) => `<button data-act="view" data-v="${v}" aria-pressed="${ui.view === v}">${{ cloth: 'Cloth', grid: 'Grid', color: 'Colors' }[v]}</button>`).join('')}
     </div>
@@ -1100,6 +1154,7 @@ function bindPuzzleCard() {
       const n = puzzleStore.hints[pz.id] || 0;
       if (n >= stages.length) return;
       puzzleStore.hints[pz.id] = n + 1;
+      ui.puzzle.note = `The ${stages[n]} is filled in for you in the draft below.`;
       commit(Z.applyHint(draft, pz, stages[n]));
     }
   });
@@ -1128,21 +1183,24 @@ function renderSelBar() {
   bar.style.display = ui.selecting ? 'block' : 'none';
   if (!ui.selecting) return;
   const s = ui.sel;
-  let text = 'Tap the first and last end in the threading, or the first and last pick in the treadling.';
+  let text = 'Tap the first and last end (threading) or pick (treadling).';
   if (s) {
     const lo = Math.min(s.a, s.b) + 1;
     const hi = Math.max(s.a, s.b) + 1;
-    text = `${s.kind === 'ends' ? 'Ends' : 'Picks'} ${lo}${hi > lo ? `–${hi}` : ''} selected${s.done ? '' : ' (tap another to extend)'}.`;
+    text = `${s.kind === 'ends' ? 'Ends' : 'Picks'} ${lo}${hi > lo ? `–${hi}` : ''} selected${s.done ? '.' : '. Tap another to extend.'}`;
   }
-  bar.innerHTML = `<div class="hint">${esc(text)}</div>
-    <div class="row">
-      <button class="btn small" data-sel="repeat" ${s ? '' : 'aria-disabled="true"'}>Repeat</button>
-      <button class="btn small" data-sel="mirror" ${s ? '' : 'aria-disabled="true"'}>Mirror</button>
-      <button class="btn small" data-sel="up" ${s ? '' : 'aria-disabled="true"'}>Shift +1</button>
-      <button class="btn small" data-sel="down" ${s ? '' : 'aria-disabled="true"'}>Shift &minus;1</button>
-      <button class="btn small" data-sel="clear">Clear selection</button>
+  if (ui.selNote) text = ui.selNote;
+  const dis = s ? '' : 'aria-disabled="true"';
+  // Compact: this bar sticks to the top of the screen while she taps in the draft.
+  bar.innerHTML = `<div class="selhead"><div class="hint" role="status">${esc(text)}</div><button class="btn small primary" data-sel="done">Done</button></div>
+    <div class="selrow">
+      <button class="btn small" data-sel="repeat" ${dis} title="Fill everything after the range with repeats of it">Repeat</button>
+      <button class="btn small" data-sel="mirror" ${dis} title="Write a reversed copy after the range">Mirror</button>
+      <button class="btn small" data-sel="up" ${dis} title="Move the range up one shaft (or treadle)">Shift +1</button>
+      <button class="btn small" data-sel="down" ${dis} title="Move the range down one shaft (or treadle)">Shift &minus;1</button>
+      <button class="btn small" data-sel="clear">Clear</button>
     </div>
-    <div class="hint" style="margin-top:6px">Repeat fills everything after the range. Mirror writes a reversed copy after it. Shift moves shafts (or treadles) up or down.</div>`;
+    <details class="selhelp"><summary>What these do</summary>Repeat fills everything after the range with copies of it. Mirror writes a reversed copy after it. Shift moves its shafts (or treadles) up or down by one.</details>`;
 }
 function bindSelBar() {
   $('selBar').addEventListener('click', (ev) => {
@@ -1151,6 +1209,7 @@ function bindSelBar() {
     const s = ui.sel;
     const op = b.dataset.sel;
     if (op === 'clear') { ui.sel = null; renderAll(); return; }
+    if (op === 'done') return; // handled in bindControls
     if (!s) return;
     const fn = { repeat: () => D.repeatRange(draft, s.kind, s.a, s.b), mirror: () => D.mirrorRange(draft, s.kind, s.a, s.b), up: () => D.shiftRange(draft, s.kind, s.a, s.b, 1), down: () => D.shiftRange(draft, s.kind, s.a, s.b, -1) }[op];
     commit(fn());
@@ -1207,13 +1266,200 @@ function openLibrary() {
     meta.innerHTML = `<b>${esc(it.name)}</b><span>${d.threading.length} ends &middot; ${d.treadling.length} picks &middot; ${d.shafts} shafts</span>`;
     const mk = (t, fn, cls = '') => { const b = document.createElement('button'); b.className = `btn small ${cls}`; b.textContent = t; b.onclick = fn; return b; };
     row.append(cv, meta,
-      mk('Open', () => { closeSheet(); history.push(draft); draft = d; ui.shown = D.wovenCount(draft); save(); renderAll(); }, 'primary'),
+      mk('Open', () => { closeSheet(); history.push(draft); draft = d; ui.shown = D.wovenCount(draft); save(); renderAll(); alignDraft(); }, 'primary'),
       mk('Duplicate', () => { library.splice(library.indexOf(it) + 1, 0, { id: `d${Date.now().toString(36)}${library.length}`, name: `${it.name} (copy)`, draft: JSON.parse(JSON.stringify(it.draft)) }); saveLibrary(); openLibrary(); }),
-      mk('Remove', () => { library = library.filter((x) => x !== it); saveLibrary(); openLibrary(); }));
+      mk('Remove', (ev) => {
+        const b = ev.currentTarget;
+        if (!b.dataset.armed) { b.dataset.armed = '1'; b.textContent = 'Tap again to remove'; setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.textContent = 'Remove'; } }, 3000); return; }
+        library = library.filter((x) => x !== it); saveLibrary(); openLibrary();
+      }));
     wrap.append(row);
     requestAnimationFrame(() => thumb(cv, d, 56));
   });
   openSheet('Draft library', wrap);
+}
+
+/* ----------------------------------------------------------------- tartan */
+// A tartan macro: pick a known sett or write one, dye its letters, and weave it in 2/2 twill.
+
+const tartanUI = { text: TT.TARTANS[0].sett, name: TT.TARTANS[0].name, symmetric: true, scale: null, colors: {}, open: null };
+
+function tartanResult() {
+  const parsed = TT.parseSett(tartanUI.text);
+  const scale = tartanUI.scale || TT.defaultScale(parsed.stripes, tartanUI.symmetric);
+  return { scale, r: TT.tartanDraft(tartanUI.text, { symmetric: tartanUI.symmetric, scale, colors: tartanUI.colors }) };
+}
+
+function openTartan() {
+  const wrap = document.createElement('div');
+  wrap.className = 'stack';
+  wrap.id = 'tartanSheet';
+  // 1. the library
+  const lib = document.createElement('div');
+  const h1 = document.createElement('div');
+  h1.className = 'hint';
+  h1.textContent = 'Choose a tartan, or write a sett below. It is woven in 2/2 twill, the same stripes in warp and weft.';
+  lib.append(h1);
+  TT.TARTANS.forEach((t) => {
+    const b = document.createElement('button');
+    b.className = 'preset';
+    b.dataset.tartan = t.id;
+    const cv = document.createElement('canvas');
+    const tx = document.createElement('div');
+    tx.style.minWidth = '0';
+    tx.innerHTML = '<div class="t"></div><div class="n"></div><div class="n sett"></div>';
+    tx.children[0].textContent = t.name;
+    tx.children[1].textContent = t.note;
+    tx.children[2].textContent = t.sett;
+    b.append(cv, tx);
+    b.setAttribute('aria-pressed', String(tartanUI.name === t.name));
+    b.onclick = () => {
+      tartanUI.text = t.sett; tartanUI.name = t.name; tartanUI.symmetric = !t.asymmetric; tartanUI.scale = null; tartanUI.colors = {}; tartanUI.open = null;
+      lib.querySelectorAll('.preset').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+      input.value = t.sett;
+      refresh();
+      editor.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+    lib.append(b);
+    const pv = TT.tartanDraft(t.sett, { symmetric: !t.asymmetric, scale: 'quarter', repeats: 2 });
+    if (pv.ok) requestAnimationFrame(() => thumb(cv, pv.draft, 64));
+  });
+  // 2. the editor
+  const editor = document.createElement('div');
+  editor.className = 'stack tartan-ed';
+  const lab = document.createElement('label');
+  lab.className = 'lbl';
+  lab.textContent = 'Thread count (sett)';
+  lab.htmlFor = 'settText';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.id = 'settText';
+  input.value = tartanUI.text;
+  input.autocapitalize = 'characters';
+  input.spellcheck = false;
+  input.setAttribute('autocomplete', 'off');
+  const help = document.createElement('div');
+  help.className = 'hint';
+  help.textContent = 'Letter and threads, like K4 R24. A slash marks a pivot: R/8 G24 K/4 mirrors at R and K (each pivot woven once).';
+  const symSeg = document.createElement('div');
+  symSeg.className = 'seg';
+  symSeg.setAttribute('role', 'group');
+  symSeg.setAttribute('aria-label', 'Symmetry');
+  [['sym', 'Mirror at pivots'], ['asym', 'Repeat as written']].forEach(([v, t]) => {
+    const b = document.createElement('button'); b.dataset.v = v; b.textContent = t; symSeg.append(b);
+  });
+  const scaleSeg = document.createElement('div');
+  scaleSeg.className = 'seg';
+  scaleSeg.setAttribute('role', 'group');
+  scaleSeg.setAttribute('aria-label', 'Thread-count scale');
+  TT.SCALES.forEach((sc) => { const b = document.createElement('button'); b.dataset.v = sc.id; b.textContent = sc.label; scaleSeg.append(b); });
+  const legend = document.createElement('div');
+  legend.className = 'legend';
+  const dyes = document.createElement('div');
+  dyes.className = 'brushes';
+  dyes.style.display = 'none';
+  const msg = document.createElement('div');
+  msg.className = 'msg';
+  const prev = document.createElement('canvas');
+  prev.className = 'tartan-prev';
+  const sum = document.createElement('p');
+  sum.className = 'caption';
+  const go = document.createElement('button');
+  go.className = 'btn primary';
+  go.id = 'tartanGo';
+  go.textContent = 'Weave this tartan';
+  const row1 = document.createElement('div'); row1.className = 'row'; row1.append(symSeg);
+  const row2 = document.createElement('div'); row2.className = 'row'; row2.append(scaleSeg);
+  editor.append(lab, input, help, row1, row2, legend, dyes, msg, prev, sum, go);
+  wrap.append(lib, editor);
+
+  function refresh() {
+    const parsed = TT.parseSett(tartanUI.text);
+    const { scale, r } = tartanResult();
+    [...symSeg.children].forEach((b) => b.setAttribute('aria-pressed', String((b.dataset.v === 'sym') === tartanUI.symmetric)));
+    [...scaleSeg.children].forEach((b) => {
+      const st = TT.scaleStripes(parsed.stripes, TT.SCALES.find((x) => x.id === b.dataset.v).f);
+      const n = TT.settThreads(st, { symmetric: tartanUI.symmetric });
+      const tooWide = n > 200;
+      b.setAttribute('aria-pressed', String(b.dataset.v === scale));
+      b.setAttribute('aria-disabled', String(tooWide));
+      b.title = tooWide ? `${n} threads: wider than the loom` : `${n} threads a repeat`;
+    });
+    // legend: one chip per letter in the sett
+    legend.replaceChildren();
+    const codes = [...new Set(parsed.stripes.map((x) => x.code))];
+    codes.forEach((code) => {
+      const b = document.createElement('button');
+      b.className = 'lchip';
+      b.setAttribute('aria-pressed', String(tartanUI.open === code));
+      const hex = tartanUI.colors[code] || TT.TARTAN_COLORS[code]?.hex || TT.UNKNOWN_HEX;
+      b.innerHTML = '<i></i><span></span>';
+      b.firstChild.style.background = hex;
+      b.lastChild.textContent = `${code} ${TT.TARTAN_COLORS[code]?.name || '(unknown)'}`;
+      b.setAttribute('aria-label', `${code}: ${TT.TARTAN_COLORS[code]?.name || 'unknown letter'}. Tap to dye it.`);
+      b.onclick = () => { tartanUI.open = tartanUI.open === code ? null : code; refresh(); };
+      legend.append(b);
+    });
+    // her dyes, for the letter that is open
+    dyes.replaceChildren();
+    dyes.style.display = tartanUI.open ? 'flex' : 'none';
+    if (tartanUI.open) {
+      const code = tartanUI.open;
+      D.PALETTE.forEach((c) => {
+        const b = swatch(c, (tartanUI.colors[code] || '').toLowerCase() === c.hex.toLowerCase());
+        b.onclick = () => { tartanUI.colors[code] = c.hex; refresh(); };
+        dyes.append(b);
+      });
+      const reset = document.createElement('button');
+      reset.className = 'btn small';
+      reset.textContent = 'Tartan colour';
+      reset.onclick = () => { delete tartanUI.colors[code]; refresh(); };
+      dyes.append(reset);
+    }
+    const warn = r.warnings || [];
+    msg.textContent = warn.join(' ');
+    msg.style.display = warn.length ? 'block' : 'none';
+    go.setAttribute('aria-disabled', String(!r.ok));
+    if (r.ok) {
+      sum.textContent = `${r.ends} ends × ${r.ends} picks: ${r.repeats} ${r.repeats === 1 ? 'repeat' : 'repeats'} of ${r.settLen} threads, 2/2 twill on 4 shafts.`;
+      const W0 = Math.min(420, (wrap.clientWidth || 320));
+      const cell = Math.max(1, Math.min(6, W0 / r.ends));
+      const ctx = fit(prev, Math.ceil(r.ends * cell), Math.ceil(r.ends * cell));
+      const rows = [];
+      for (let p2 = 0; p2 < r.ends; p2++) rows.push({ p: p2, y: (r.ends - 1 - p2) * cell });
+      drawClothRows(ctx, r.draft, D.drawdown(r.draft), { x0: 0, cell, rows, view: cell >= 3 ? 'cloth' : 'color', back: false });
+      prev.style.display = 'block';
+    } else {
+      sum.textContent = '';
+      prev.style.display = 'none';
+    }
+  }
+  input.addEventListener('input', () => {
+    tartanUI.text = input.value;
+    tartanUI.name = '';
+    tartanUI.symmetric = TT.parseSett(input.value).pivots; // slashes mean pivots; she can still switch
+    tartanUI.scale = null;
+    lib.querySelectorAll('.preset').forEach((x) => x.setAttribute('aria-pressed', 'false'));
+    refresh();
+  });
+  symSeg.onclick = (e) => { const v = e.target.closest('button')?.dataset.v; if (v) { tartanUI.symmetric = v === 'sym'; tartanUI.scale = null; refresh(); } };
+  scaleSeg.onclick = (e) => { const b = e.target.closest('button'); if (b && b.getAttribute('aria-disabled') !== 'true') { tartanUI.scale = b.dataset.v; refresh(); } };
+  go.onclick = () => {
+    const { r } = tartanResult();
+    if (!r.ok) return;
+    closeSheet();
+    finishAnim();
+    if (r.ends > 60 && ui.cell > 20) ui.cell = 16; // a tartan is big: start the draft zoomed out
+    ui.view = 'cloth'; ui.side = 'face';
+    commit(r.draft); // one undo puts the previous draft back
+    ui.shown = D.wovenCount(draft);
+    renderAll();
+    alignDraft();
+    $('info').insertAdjacentHTML('beforeend', `<span class="note">${esc(tartanUI.name || 'Your tartan')}: ${r.ends} ends</span>`);
+    $('clothCard').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+  };
+  openSheet('Tartan', wrap);
+  refresh();
 }
 
 /* -------------------------------------------------------------------- WIF */
@@ -1269,6 +1515,7 @@ function openWif() {
       ui.shown = D.wovenCount(draft);
       save();
       renderAll();
+      alignDraft();
       say(`Opened ${r.title ? `“${r.title}”: ` : ''}${r.draft.threading.length} ends, ${r.draft.treadling.length} picks, ${r.draft.shafts} shafts.${r.warnings.length ? ' Notes: ' + r.warnings.join(' ') : ''}`);
     } catch (e) {
       say(`That text didn't read as a WIF draft yet. ${e.message}`);
@@ -1277,6 +1524,87 @@ function openWif() {
   wrap.append(head, msg);
   if (!ui.puzzle) wrap.append(ta, file, imp);
   openSheet('WIF: weaving information file', wrap);
+}
+
+/* ------------------------------------------------------------- peek bar */
+// While she works in the draft, the cloth (or the order and her cloth) is far above.
+// A slim bar at the top keeps the result of every tap in sight, and says when it matches.
+
+function zoomTo(cell) {
+  const box = $('draftBox');
+  const right = box.scrollWidth - box.scrollLeft - box.clientWidth;
+  const top = box.scrollTop;
+  const k = cell / ui.cell;
+  ui.cell = cell;
+  renderAll();
+  box.scrollLeft = box.scrollWidth - box.clientWidth - right * k;
+  box.scrollTop = top * k;
+}
+/** Weavers read a draft from the right: show end 1, the tie-up and the treadling first. */
+function alignDraft() {
+  const box = $('draftBox');
+  box.scrollLeft = box.scrollWidth;
+  box.scrollTop = 0;
+}
+
+function drawMini(cv, d, size, view, mask) {
+  const E = d.threading.length;
+  const P = d.treadling.length;
+  const cell = size / Math.max(E, P);
+  const ctx = fit(cv, Math.max(1, Math.ceil(E * cell)), Math.max(1, Math.ceil(P * cell)));
+  const rows = [];
+  for (let p = 0; p < P; p++) rows.push({ p, y: (P - 1 - p) * cell });
+  drawClothRows(ctx, d, D.drawdown(d), { x0: 0, cell, rows, view, back: false });
+  if (mask) overlayCells(ctx, mask, { x0: 0, y0: 0, cell, E, P, back: false, fill: 'rgba(255,222,130,.38)' });
+}
+
+let peekOn = false;
+function peekWanted() {
+  if (ui.weaving || ui.selecting || $('sheet').classList.contains('open')) return false; // the sticky selection bar has the top while selecting
+  const ref = ui.puzzle ? document.querySelector('.pz-cloths') : $('clothWrap');
+  if (!ref) return false;
+  const rb = ref.getBoundingClientRect();
+  const db = $('draftCard').getBoundingClientRect();
+  return rb.bottom < 24 && db.top < window.innerHeight - 80 && db.bottom > 140;
+}
+function updatePeek() {
+  const want = peekWanted();
+  if (want !== peekOn) { peekOn = want; $('peek').classList.toggle('on', want); }
+  if (want) drawPeek();
+}
+function drawPeek() {
+  if (!peekOn) return;
+  const pz = ui.puzzle;
+  const t = $('pkT');
+  t.style.display = pz ? '' : 'none';
+  if (pz) {
+    const z = Z.getPuzzle(pz.id);
+    drawMini(t, pz.target, 46, ui.view);
+    drawMini($('pkM'), draft, 46, ui.view, Z.matchMask(draft, pz.target, { structureOnly: z.structureOnly }));
+    const solved = Z.bestMatch(draft, pz.target, { structureOnly: z.structureOnly }).score >= 1;
+    $('pkTitle').textContent = solved ? 'It matches!' : `${pz.pct ?? 0}% matched`;
+    $('pkSub').textContent = solved ? 'Just what they hoped for.' : 'The order, and your cloth';
+    $('pkNext').style.display = solved ? '' : 'none';
+    $('peek').classList.toggle('glow', solved);
+  } else {
+    drawMini($('pkM'), draft, 46, ui.view === 'grid' ? 'grid' : 'cloth');
+    $('pkTitle').textContent = 'Your cloth';
+    $('pkSub').textContent = 'Tap to see it full size';
+    $('pkNext').style.display = 'none';
+    $('peek').classList.remove('glow');
+  }
+}
+function initPeek() {
+  const el = document.createElement('div');
+  el.id = 'peek';
+  el.innerHTML = `<div class="inner"><button class="pk-show" id="pkShow" aria-label="Show the cloth"><canvas id="pkT"></canvas><canvas id="pkM"></canvas><span class="pk-t"><b id="pkTitle"></b><span id="pkSub"></span></span></button><button class="btn primary" id="pkNext">Next puzzle</button></div>`;
+  document.body.append(el);
+  $('pkShow').onclick = () => {
+    const ref = ui.puzzle ? document.querySelector('#puzzleCard') : $('clothCard');
+    ref?.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+  };
+  $('pkNext').onclick = () => { if (ui.puzzle) enterPuzzle(nextPuzzleId()); };
+  window.addEventListener('scroll', updatePeek, { passive: true });
 }
 
 /* -------------------------------------------------------------------- main */
@@ -1291,6 +1619,7 @@ function renderAll() {
     renderBrushes();
     renderSelBar();
   }
+  updatePeek();
 }
 
 load();
@@ -1298,7 +1627,9 @@ loadStores();
 ui.shown = D.wovenCount(draft);
 bindControls();
 initDraftInput();
+initPeek();
 renderAll();
+alignDraft();
 let lastW = window.innerWidth;
 window.addEventListener('resize', () => { if (window.innerWidth !== lastW) { lastW = window.innerWidth; renderAll(); } });
 if (document.fonts?.ready) document.fonts.ready.then(() => { if (!ui.weaving) drawDraft(); });
