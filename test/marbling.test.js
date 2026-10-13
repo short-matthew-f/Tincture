@@ -8,7 +8,8 @@ import {
 } from '../proto/marbling/marble.js';
 import {
   createStack, planStep, planOp, foldStack, buildStates, finalState, area, invert, applyM, det, mul, reflectionMatrix,
-  splitConvex, creaseLine, stackBounds, creaseSegments, SHEET_M, stepOps, modelBounds,
+  splitConvex, creaseLine, stackBounds, creaseSegments, SHEET_M, stepOps, modelBounds, sheetFraction, poseItems,
+  finalPull, finishBounds, edgeFlags, planHints, isPullStep,
 } from '../proto/marbling/fold.js';
 import { MODELS, LEVELS, getModel } from '../proto/marbling/models.js';
 const H = 2 / (2 + Math.SQRT2);
@@ -228,44 +229,64 @@ test('reflection matrices are involutions with det -1', () => {
   near(p[0], 0.3); near(p[1], 0.7);
 });
 
-test('every model: each step moves paper, area is conserved, texture stays on the sheet', () => {
-  assert.ok(MODELS.length >= 16);
-  for (const model of MODELS) {
-    assert.ok(model.steps.length >= 3 && model.steps.length <= 12, model.id + ' steps');
-    assert.ok(LEVELS.includes(model.level), model.id + ' level');
+// The invariants every flat state must keep: the layers tile the sheet exactly once, every texture coordinate lies on
+// the sheet, every layer is convex and positively wound, and the face flag follows the parity of the placement.
+function checkStack(model, stack, label) {
+  let sheetArea = 0;
+  for (const l of stack) {
+    assert.ok(area(l.poly) > 1e-7, `${label} has a degenerate layer`);
+    const d = det(l.m);
+    assert.equal(Math.sign(d) * (model.startFace ?? 1), l.face, `${label} face parity`);
+    sheetArea += area(l.poly) / Math.abs(d);
+    assert.ok(l.poly.length >= 3);
+    const inv = invert(l.m);
+    for (const [x, y] of l.poly) {
+      const [u, v] = applyM(inv, x, y);
+      assert.ok(u > -1e-6 && u < 1 + 1e-6 && v > -1e-6 && v < 1 + 1e-6, `${label} texture off the sheet`);
+    }
+    for (let i = 0; i < l.poly.length; i++) { // convex and positively wound
+      const a = l.poly[i], b = l.poly[(i + 1) % l.poly.length], c = l.poly[(i + 2) % l.poly.length];
+      assert.ok((b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]) > -1e-7, `${label} not convex`);
+    }
+  }
+  near(sheetArea, sheetFraction(model.pose), 1e-6); // the layers always tile the whole sheet exactly once
+}
+
+test('the model list: enough faithful models, every level, sources noted, unique ids', () => {
+  assert.ok(MODELS.length >= 12);
+  assert.equal(new Set(MODELS.map((m) => m.id)).size, MODELS.length);
+  for (const level of LEVELS) assert.ok(MODELS.some((m) => m.level === level), level);
+  for (const m of MODELS) {
+    assert.ok(LEVELS.includes(m.level), m.id + ' level');
+    assert.ok(m.source && /\.(com|org)\//.test(m.source), m.id + ' notes its source');
+    assert.ok(m.steps.length >= 3 && m.steps.length <= 40, m.id + ' steps');
+    for (const st of m.steps) assert.ok(typeof st.text === 'string' && st.text.length > 8, m.id + ' step text');
+  }
+});
+
+for (const model of MODELS) {
+  test(`${model.id}: every flat state is valid and every fold moves paper`, () => {
     const states = buildStates(model);
     assert.equal(states.length, model.steps.length + 1);
-    states.forEach((stack, si) => {
-      let sheetArea = 0;
-      for (const l of stack) {
-        assert.ok(area(l.poly) > 1e-7, `${model.id} state ${si} has a degenerate layer`);
-        const d = det(l.m);
-        // face follows the reflection parity
-        assert.equal(Math.sign(d) * model.startFace, l.face, `${model.id} face parity`);
-        sheetArea += area(l.poly) / Math.abs(d);
-        assert.ok(l.poly.length >= 3);
-        const inv = invert(l.m);
-        for (const [x, y] of l.poly) {
-          const [u, v] = applyM(inv, x, y);
-          assert.ok(u > -1e-6 && u < 1 + 1e-6 && v > -1e-6 && v < 1 + 1e-6, `${model.id} state ${si} texture off the sheet`);
-        }
-        for (let i = 0; i < l.poly.length; i++) { // convex and positively wound
-          const a = l.poly[i], b = l.poly[(i + 1) % l.poly.length], c = l.poly[(i + 2) % l.poly.length];
-          assert.ok((b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]) > -1e-7, `${model.id} not convex`);
-        }
-      }
-      near(sheetArea, 1, 1e-6); // the layers always tile the whole sheet exactly once
-    });
+    states.forEach((stack, si) => checkStack(model, stack, `${model.id} state ${si}`));
     model.steps.forEach((step, i) => {
-      const { plans } = planStep(states[i], step);
+      const { plans, result } = planStep(states[i], step);
       plans.forEach((plan, k) => {
         assert.ok(plan.moving.length > 0, `${model.id} step ${i + 1} op ${k + 1} moves nothing`);
         const movedArea = plan.moving.reduce((s, l) => s + area(l.poly), 0);
         assert.ok(movedArea > 0.004, `${model.id} step ${i + 1} op ${k + 1} moves almost nothing`);
+        // and it visibly moves during the animation
+        const mid = poseItems(plan, 0.5);
+        assert.ok(mid.some((o) => o.moved && o.M.some((v, j) => Math.abs(v - [1, 0, 0, 1, 0, 0][j]) > 1e-3)), `${model.id} step ${i + 1} op ${k + 1} does not animate`);
       });
+      if (isPullStep(step)) assert.equal(result, states[i], 'a pull step leaves the flat state alone');
     });
-  }
-});
+    // only the last step may open the piece out of the plane
+    model.steps.forEach((st, i) => { if (isPullStep(st)) assert.equal(i, model.steps.length - 1, model.id + ' pull is last'); });
+    const fb = finishBounds(model);
+    assert.ok(Number.isFinite(fb.x0 + fb.x1 + fb.y0 + fb.y1));
+  });
+}
 
 test('cup: finished silhouette is the expected trapezoid', () => {
   const cup = MODELS.find((m) => m.id === 'cup');
@@ -276,13 +297,12 @@ test('cup: finished silhouette is the expected trapezoid', () => {
   near(b.y1, 0, 1e-6);
 });
 
-test('heart: two lobes rise above a central cleft, point at the bottom', () => {
+test('heart: two lobes rise above a central cleft, point at the bottom, colour side out', () => {
   const heart = MODELS.find((m) => m.id === 'heart');
   const fin = finalState(heart);
   const b = stackBounds(fin);
-  near(b.y1, 1, 1e-6); // the point
-  assert.ok(b.y0 < -0.1 && b.y0 > -0.35); // lobes
-  // sample the top edge: the silhouette at x=0 is lower than at the lobes
+  near(b.y1, 0.25, 1e-6); // the point
+  near(b.x1, -b.x0, 1e-9); // symmetric
   const topAt = (x) => {
     let top = Infinity;
     for (const l of fin) {
@@ -297,8 +317,9 @@ test('heart: two lobes rise above a central cleft, point at the bottom', () => {
     }
     return top;
   };
-  assert.ok(topAt(0) > topAt(0.4) + 0.05, 'cleft at the centre');
-  assert.ok(topAt(0) > topAt(-0.4) + 0.05);
+  assert.ok(topAt(0) > topAt(0.3) + 0.05, 'cleft at the centre');
+  assert.ok(topAt(0) > topAt(-0.3) + 0.05);
+  assert.equal(fin.at(-1).face, 1, 'the top layer shows the marbled side');
 });
 
 test('envelope starts back-side up and ends as a unit square showing the colour side', () => {
@@ -320,10 +341,10 @@ test('crease segments clip the line to the paper', () => {
   near(Math.abs(segs[0][0][0] - segs[0][1][0]), 2, 1e-6);
 });
 
-test('building all models is fast', () => {
+test('building every model is quick', () => {
   const t = Date.now();
-  for (let i = 0; i < 200; i++) for (const m of MODELS) foldStack(createStack(m.startFace), m.steps[0]);
-  assert.ok(Date.now() - t < 500);
+  for (const m of MODELS) { let st = createStack(m.startFace, m.pose); for (const step of m.steps) st = foldStack(st, step); }
+  assert.ok(Date.now() - t < 4000);
 });
 
 // ------------------------------------------------------------------ the new fold types
@@ -383,29 +404,170 @@ test('rotate op turns chosen layers rigidly; mirror turns them over', () => {
   near(det(mir.result[1].m), -det(s[1].m));
 });
 
-test('crane: the square base has four equal layers, the bird base four flaps, and the wings open', () => {
-  const crane = getModel('crane');
-  const st = buildStates(crane);
-  // after the second fold: four stacked layers of the same small square
-  assert.equal(st[2].length, 4);
-  st[2].forEach((l) => near(area(l.poly), 0.5, 1e-9));
-  assert.deepEqual(st[2].map((l) => l.grp), [0, 1, 2, 3]);
-  // bird base: a long kite, 0.707 above and below the waist
-  const bb = stackBounds(st[5]);
-  near(bb.y0, -0.41421, 1e-4); near(bb.y1, 1, 1e-9);
-  near(bb.x1 - bb.x0, 2 * (1 - Math.SQRT1_2), 1e-4);
-  // the finished crane is wider than the bird base: the wings are open
-  const fin = stackBounds(st.at(-1));
-  assert.ok(fin.x1 - fin.x0 > 0.7);
-  assert.ok(crane.steps.some((s) => stepOps(s).some((o) => o.place === 'inside')), 'has reverse folds');
-  assert.ok(crane.steps.some((s) => stepOps(s).length >= 3), 'has a compound petal step');
+// layers (bottom to top) that cover a point
+function layersAt(stack, pt) {
+  const inside = (poly) => poly.every((a, i) => {
+    const b = poly[(i + 1) % poly.length];
+    return (b[0] - a[0]) * (pt[1] - a[1]) - (b[1] - a[1]) * (pt[0] - a[0]) > 1e-9;
+  });
+  return stack.filter((l) => inside(l.poly));
+}
+const crane = () => getModel('crane');
+const stepIndex = (model, re) => model.steps.findIndex((s) => re.test(s.text)) + 1; // state index after that step
+
+test('squash fold: the square base from a folded triangle (true squash, not a fake)', () => {
+  const m = crane();
+  const st = buildStates(m);
+  const tri = st[2]; // folded in half twice: four layers of one small triangle
+  assert.equal(tri.length, 4);
+  const s1 = st[3]; // the first squash
+  // the squashed flap is now a square standing on the hinge: two layers each side of it, above the bottom triangle
+  const b = stackBounds(s1);
+  near(b.x0, -0.5, 1e-9); near(b.x1, 1, 1e-9);
+  assert.equal(layersAt(s1, [-0.2, 0.5]).length, 2, 'the open wall swung across, with its spine half folded over it');
+  assert.equal(layersAt(s1, [0.2, 0.5]).length, 4, 'the stay wall and its spine half lie over the two bottom layers');
+  const pre = st[5]; // second squash: the square (preliminary) base
+  const pb = stackBounds(pre);
+  near(pb.x0, -0.5, 1e-9); near(pb.x1, 0.5, 1e-9); near(pb.y0, 0, 1e-9); near(pb.y1, 1, 1e-9);
+  for (const pt of [[-0.2, 0.5], [0.2, 0.5], [-0.05, 0.2], [0.05, 0.8]]) {
+    const here = layersAt(pre, pt);
+    assert.equal(here.length, 4, 'four layers everywhere in a square base');
+    assert.equal(here.at(-1).face, 1, 'marbled side out in front');
+    assert.equal(here[0].face, -1, 'and behind (its underside is the marbled side)');
+  }
+  // the closed point is the centre of the sheet, the four sheet corners meet at the open end
+  for (const l of pre) {
+    const inv = invert(l.m);
+    for (const [x, y] of l.poly) {
+      const [u, v] = applyM(inv, x, y);
+      if (Math.abs(x) < 1e-9 && Math.abs(y) < 1e-9) { near(u, 0.5, 1e-9); near(v, 0.5, 1e-9); }
+      if (Math.abs(x) < 1e-9 && Math.abs(y - 1) < 1e-9) assert.ok([0, 1].includes(Math.round(u)) && [0, 1].includes(Math.round(v)) && Math.abs(u - Math.round(u)) < 1e-9 && Math.abs(v - Math.round(v)) < 1e-9, 'a sheet corner');
+    }
+  }
 });
 
-test('models are grouped by difficulty and bounds include the pen marks', () => {
+test('petal fold: the bird base has four flaps of equal length, wings outermost, marbled outside', () => {
+  const m = crane();
+  const st = buildStates(m);
+  const bb = st[12];
+  const b = stackBounds(bb);
+  const W = 1 - Math.SQRT1_2;
+  near(b.y0, -0.41421356, 1e-6); near(b.y1, 1, 1e-9);
+  near(b.x1 - b.x0, 2 * W, 1e-6);
+  // upper flaps (the petals, future wings) reach from the waist to y = -0.414, the legs from the waist to y = 1
+  near(W - b.y0, 1 - W, 1e-6);
+  const wings = bb.filter((l) => l.tag === 'wingF' || l.tag === 'wingB');
+  assert.ok(wings.length >= 6, 'both petals are made of three pieces each');
+  for (const pt of [[0.05, -0.2], [-0.05, 0.1]]) {
+    const here = layersAt(bb, pt);
+    assert.ok(['wingF', 'wingB'].includes(here.at(-1).tag) && ['wingF', 'wingB'].includes(here[0].tag), 'petals are the outermost layers');
+    assert.equal(here.at(-1).face, 1); assert.equal(here[0].face, -1);
+  }
+  for (const pt of [[0.05, 0.6], [-0.05, 0.6]]) {
+    const here = layersAt(bb, pt);
+    assert.ok(['legF', 'legB'].includes(here.at(-1).tag) && ['legF', 'legB'].includes(here[0].tag), 'the folded-in sides are the outer layers of the legs');
+    assert.equal(here.at(-1).face, 1);
+  }
+  // the petal fold is one compound move: centre up, sides turned under it (mountain), inner layers folded in (valley)
+  const petal = m.steps.find((s) => /Petal fold/.test(s.text));
+  assert.equal(stepOps(petal)[0].type, 'multi');
+  const { plans } = planStep(st[7], petal);
+  const hints = planHints(plans[0]);
+  assert.ok(hints.some((h) => h.dir === 'valley') && hints.some((h) => h.dir === 'mountain'));
+});
+
+test('waterbomb base: the known triangle, marbled outside, four layers each side', () => {
+  const m = getModel('balloon');
+  const st = buildStates(m);
+  const i = stepIndex(m, /waterbomb base/);
+  const wb = st[i];
+  const s = Math.SQRT1_2;
+  const b = stackBounds(wb);
+  near(b.x0, -s, 1e-9); near(b.x1, s, 1e-9); near(b.y0, 0, 1e-9); near(b.y1, s, 1e-9);
+  for (const l of wb) for (const [x, y] of l.poly) assert.ok(y >= Math.abs(x) - 1e-9, 'inside the triangle');
+  for (const pt of [[-0.3, 0.5], [0.3, 0.5]]) {
+    const here = layersAt(wb, pt);
+    assert.equal(here.length, 4);
+    assert.equal(here.at(-1).face, 1);
+  }
+});
+
+test('squash folds keep the area and make the house roof overhang the walls', () => {
+  const m = getModel('house');
+  const st = buildStates(m);
+  const before = st[st.length - 3], after = st.at(-1);
+  near(before.reduce((a, l) => a + area(l.poly), 0), after.reduce((a, l) => a + area(l.poly), 0), 1e-9);
+  const h = Math.SQRT1_2 / 2;
+  const b = stackBounds(after);
+  near(b.x0, -2 * h, 1e-9); near(b.x1, 2 * h, 1e-9); // the eaves
+  assert.equal(layersAt(after, [-0.6, 0.02]).length, 0, 'walls stay narrow below the eaves');
+  assert.ok(layersAt(after, [-0.5, -0.03]).length >= 2, 'eave');
+});
+
+test('inside reverse fold of a four-layer flap: each half turns in, outer layers wrapping the inner ones', () => {
+  let st = createStack(1);
+  st = foldStack(st, { a: [-4, 0], b: [4, 0], move: [0, -1], dir: 'valley' });
+  st = foldStack(st, { a: [0, -4], b: [0, 4], move: [-1, 0], dir: 'valley' }); // four layers: triangle O, R, B
+  assert.equal(st.length, 4);
+  const plan = planOp(st, { a: [0, 0.7], b: [1, 0.2], move: [0, 1], dir: 'valley', place: 'inside' });
+  const res = plan.result;
+  assert.equal(res.length, 8);
+  const moved = new Set(res.filter((l) => !st.some((o) => o.m.every((v, k) => Math.abs(v - l.m[k]) < 1e-12))).map((l) => l.id));
+  // order: two staying back layers, the four turned pieces, two staying front layers
+  assert.deepEqual(res.map((l) => moved.has(l.id)), [false, false, true, true, true, true, false, false]);
+  // the back half's pieces come in reverse order (the outer one wraps round)
+  const ids = res.slice(2, 6).map((l) => plan.moving.findIndex((m) => m.id === l.id - 0)); // ids are fresh; compare faces instead
+  void ids;
+  assert.deepEqual(res.slice(2, 6).map((l) => l.face), [st[1].face, st[0].face, st[3].face, st[2].face].map((f) => -f));
+  const out = planOp(st, { a: [0, 0.7], b: [1, 0.2], move: [0, 1], dir: 'valley', place: 'outside' }).result;
+  assert.deepEqual(out.map((l) => moved.has(l.id) || !st.some((o) => o.m.every((v, k) => Math.abs(v - l.m[k]) < 1e-12))), [true, true, false, false, false, false, true, true]);
+});
+
+test('fold and unfold leaves a crease: same tiling, nothing moved, the crease drawn faintly', () => {
+  const s0 = createStack(1);
+  const s1 = foldStack(s0, { a: [-4, 0], b: [4, 0], move: [0, 1], dir: 'valley', unfold: true });
+  assert.equal(s1.length, 2);
+  for (const l of s1) assert.deepEqual(l.m, s0[0].m);
+  near(s1.reduce((a, l) => a + area(l.poly), 0), 2);
+  const flags = edgeFlags(s1);
+  assert.equal(flags.flat().filter(Boolean).length, 2, 'the shared edge is a crease on both pieces');
+});
+
+test('layers split by an earlier crease still count as one layer when folding "the front layer"', () => {
+  const hat = getModel('hat');
+  const st = buildStates(hat);
+  const i = stepIndex(hat, /band up again, over/);
+  const s = st[i];
+  assert.equal(layersAt(s, [-0.4, 0.55]).length, layersAt(s, [0.4, 0.55]).length, 'the band went up on both sides of the centre crease');
+  near(sheetFraction(hat.pose), 1 / Math.SQRT2, 1e-9); // an A4-shaped sheet cut from the square texture
+});
+
+test('pull steps end in a three-dimensional pose and are drawn from the exact flat state before them', () => {
+  for (const id of ['cup', 'crane', 'flapping', 'balloon', 'frog']) {
+    const m = getModel(id);
+    const pull = finalPull(m);
+    assert.ok(pull, id + ' ends by opening out');
+    const pose = poseItems(pull, 1);
+    assert.ok(pose.some((o) => Math.abs(o.nz) < 0.98), id + ' has paper turned out of the plane');
+    // every piece of the flat state is drawn exactly once
+    const total = pose.reduce((a, o) => a + area(o.piece.poly), 0);
+    near(total, finalState(m).reduce((a, l) => a + area(l.poly), 0), 1e-9);
+  }
+  // the opening is smooth: halfway is between the flat state and the end pose
+  const p = finalPull(getModel('crane'));
+  const a = poseItems(p, 0).every((o) => Math.abs(o.nz - 1) < 1e-9);
+  assert.ok(a, 'starts flat');
+});
+
+test('models are grouped by difficulty and the camera bounds include the finished pose and pen marks', () => {
   for (const level of LEVELS) assert.ok(MODELS.some((m) => m.level === level), level);
-  const kite = getModel('kite');
-  const b = modelBounds(kite);
-  assert.ok(b.y1 > 1.5, 'the kite tail is inside the camera bounds');
+  for (const m of MODELS) {
+    const b = modelBounds(m), f = finishBounds(m);
+    assert.ok(b.x0 <= f.x0 + 1e-9 && b.y0 <= f.y0 + 1e-9 && b.x1 >= f.x1 - 1e-9 && b.y1 >= f.y1 - 1e-9, m.id);
+  }
+  // longer models sit in the patient group
+  const avg = (lv) => { const l = MODELS.filter((m) => m.level === lv); return l.reduce((a, m) => a + m.steps.length, 0) / l.length; };
+  assert.ok(avg('Easy') < avg('Medium') && avg('Medium') < avg('Patient'));
 });
 
 test('the comb spans the whole basin in any direction, diagonals included', async () => {

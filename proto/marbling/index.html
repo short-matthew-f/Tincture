@@ -80,7 +80,21 @@
   .dots i { width: 9px; height: 9px; border-radius: 50%; background: var(--line); display: block; }
   .dots i.done { background: var(--ink-soft); }
   .dots i.now { background: var(--gold); box-shadow: 0 0 0 3px #F3E3B8; }
-  .steptext { font-size: 16px; font-weight: 500; margin: 10px 2px; min-height: 46px; }
+  .steptext { font-size: 16px; font-weight: 500; margin: 4px 2px 10px; min-height: 46px; }
+  .stepkind { display: inline-block; margin: 10px 2px 0; padding: 2px 9px; border-radius: 999px; background: #F3E3B8; color: #5B4210; font: 700 12px var(--font-ui); letter-spacing: .04em; text-transform: uppercase; }
+  .dots.many { gap: 3px; flex-wrap: wrap; max-width: 150px; justify-content: center; }
+  .dots.many i { width: 6px; height: 6px; }
+  .dots.many i.now { box-shadow: 0 0 0 2px #F3E3B8; }
+  #foldBtns .btn { min-height: 48px; }
+  #foldGo.pull { background: var(--gold); color: var(--ink); border-color: var(--gold); font-size: 16px; min-height: 56px; }
+  #foldGo.nudge { animation: nudge 1.6s ease-in-out infinite; }
+  @keyframes nudge { 0%, 100% { box-shadow: var(--shadow); transform: none; } 50% { box-shadow: 0 0 0 5px rgba(226,176,74,.45), var(--shadow); transform: translateY(-1px); } }
+  #stage.pullstep { cursor: grab; }
+  .stage-note { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); margin: 0; padding: 6px 12px; border-radius: 999px; background: rgba(251,248,241,.92); color: var(--ink); font: 600 13px var(--font-ui); white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity .3s; box-shadow: 0 2px 0 rgba(42,38,34,.12); }
+  .stage-note.on { opacity: 1; }
+  .stephead .btn { padding: 0 10px; white-space: nowrap; font-size: 14px; flex: 0 0 auto; }
+  .stephead .dots { flex: 1 1 auto; min-width: 0; justify-content: center; }
+  .stephead .hint { white-space: nowrap; flex: 0 0 auto; }
   .name { text-align: center; background: #FFF3D6; border: 2px solid var(--gold); animation: warm 1.6s ease-out; }
   .name h3 { font: 400 26px var(--font-display); margin: 0 0 2px; }
   .name p { margin: 0 0 10px; color: var(--ink-soft); font-size: 14px; }
@@ -105,7 +119,7 @@
   #fly.on { display: block; }
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   [hidden] { display: none !important; }
-  @media (prefers-reduced-motion: reduce) { .thumb.landed, .name { animation: none; } * { transition: none !important; } }
+  @media (prefers-reduced-motion: reduce) { .thumb.landed, .name, #foldGo.nudge { animation: none; } * { transition: none !important; } }
 </style>
 </head>
 <body>
@@ -182,7 +196,8 @@
         <div class="dots" id="dots" aria-hidden="true"></div>
         <span class="hint" id="stepCount"></span>
       </div>
-      <div class="stage-wrap"><canvas id="stage" role="img" aria-label="Paper being folded"></canvas></div>
+      <div class="stage-wrap"><canvas id="stage" role="img" aria-label="Paper being folded. Tap to fold, or drag the paper along the arrow."></canvas><p class="stage-note" id="stageNote" aria-hidden="true"></p></div>
+      <span class="stepkind" id="stepKind"></span>
       <p class="steptext" id="stepText" aria-live="polite"></p>
       <div class="row tight" id="foldBtns">
         <button class="btn" id="foldUndo" aria-disabled="true">Unfold a step</button>

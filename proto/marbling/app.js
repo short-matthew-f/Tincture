@@ -5,8 +5,8 @@ import {
   resample, basinOffsets, starterOps, applyOp, STARTERS, mulberry32, runStarter, countVerts, pathNormal, combOffsets, dropInk,
 } from './marble.js';
 import {
-  buildStates, finalState, modelBounds, stackBounds, planStep, stepOps, creaseSegments, applyM, mul, rotationMatrix,
-  modelDecor, decorBounds, unionBounds, reflectionMatrix,
+  buildStates, finalState, modelBounds, stackBounds, planStep, stepOps, creaseSegments, applyM, mul, modelDecor,
+  poseItems, planHints, edgeFlags, finalPull, finishBounds, isPullStep, centroid, area, reflectPoint, poseBounds, unionBounds,
 } from './fold.js';
 import { MODELS, LEVELS, getModel } from './models.js';
 
@@ -638,26 +638,21 @@ function camMatrix(cam, d) {
 
 const PAPER_BACK = '#EFE6D2';
 
-// G maps world -> device pixels. extra: { shade, shadow:{blur,dy,alpha}, face }
-function drawLayer(ctx, G, layer, img, extra = {}) {
-  const poly = layer.poly;
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.beginPath();
+function tracePoly(ctx, G, poly) {
   for (let i = 0; i < poly.length; i++) {
     const [x, y] = applyM(G, poly[i][0], poly[i][1]);
     if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
   }
   ctx.closePath();
+}
+
+// G maps world -> device pixels. extra: { shade, face, edges (per-edge: true = a flat crease, drawn faintly) }
+function drawLayer(ctx, G, layer, img, extra = {}) {
+  const poly = layer.poly;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.beginPath();
+  tracePoly(ctx, G, poly);
   const face = extra.face ?? layer.face;
-  if (extra.shadow) {
-    ctx.save();
-    ctx.shadowColor = `rgba(42,30,18,${extra.shadow.alpha})`;
-    ctx.shadowBlur = extra.shadow.blur;
-    ctx.shadowOffsetY = extra.shadow.dy;
-    ctx.fillStyle = PAPER_BACK;
-    ctx.fill();
-    ctx.restore();
-  }
   ctx.save();
   ctx.clip();
   if (face > 0 && img) {
@@ -677,69 +672,68 @@ function drawLayer(ctx, G, layer, img, extra = {}) {
     ctx.globalAlpha = 1;
   }
   if (extra.shade) {
-    ctx.fillStyle = `rgba(36,24,12,${extra.shade})`;
+    ctx.fillStyle = `rgba(36,24,12,${Math.min(0.6, extra.shade)})`;
+    ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  }
+  if (extra.light) {
+    ctx.fillStyle = `rgba(255,252,244,${Math.min(0.3, extra.light)})`;
     ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
   }
   ctx.restore();
-  ctx.lineWidth = Math.max(1, ctx.canvas.width / 420);
-  ctx.strokeStyle = 'rgba(60,40,20,.34)';
+  // edges: real edges and folds firmly, flat creases (folded and opened again) faintly
+  const lw = Math.max(1, ctx.canvas.width / 420);
+  const n = poly.length;
+  const pts = poly.map(([x, y]) => applyM(G, x, y));
   ctx.lineJoin = 'round';
-  ctx.stroke();
+  ctx.lineCap = 'round';
+  for (const crease of [true, false]) {
+    ctx.beginPath();
+    let any = false;
+    for (let i = 0; i < n; i++) {
+      const isCrease = !!(extra.edges && extra.edges[i]);
+      if (isCrease !== crease) continue;
+      const a = pts[i], b = pts[(i + 1) % n];
+      ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]);
+      any = true;
+    }
+    if (!any) continue;
+    ctx.lineWidth = crease ? lw * 0.8 : lw;
+    ctx.strokeStyle = crease ? (face > 0 ? 'rgba(255,250,240,.28)' : 'rgba(60,40,20,.16)') : 'rgba(60,40,20,.38)';
+    ctx.stroke();
+  }
+}
+
+// one soft shadow under the whole piece (cheaper and calmer than a shadow per layer)
+function drawShadow(ctx, list, opts) {
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.shadowColor = `rgba(42,30,18,${opts.alpha ?? 0.24})`;
+  ctx.shadowBlur = (opts.blur ?? 6) * (opts.d || 1);
+  ctx.shadowOffsetY = (opts.dy ?? 3) * (opts.d || 1);
+  ctx.fillStyle = PAPER_BACK;
+  ctx.beginPath();
+  for (const [G, poly] of list) tracePoly(ctx, G, poly);
+  ctx.fill('nonzero');
+  ctx.restore();
 }
 
 function drawStackTo(ctx, G, stack, img, opts = {}) {
-  for (let i = 0; i < stack.length; i++) {
-    drawLayer(ctx, G, stack[i], img, { shadow: opts.shadow === false ? null : { blur: (opts.blur ?? 5) * (opts.d || 1), dy: (opts.dy ?? 2) * (opts.d || 1), alpha: opts.alpha ?? 0.22 } });
+  if (opts.shadow !== false) drawShadow(ctx, stack.map((l) => [G, l.poly]), opts);
+  const flags = edgeFlags(stack);
+  for (let i = 0; i < stack.length; i++) drawLayer(ctx, G, stack[i], img, { edges: flags[i] });
+}
+
+// a posed plan (fold in progress, or a three-dimensional pulled piece)
+function drawPose(ctx, base, plan, t, img, opts = {}) {
+  const items = poseItems(plan, t);
+  if (!plan.itemFlags) plan.itemFlags = new Map(edgeFlags(plan.items.map((it) => it.piece)).map((f, i) => [plan.items[i].piece, f]));
+  if (opts.shadow !== false) drawShadow(ctx, items.map((o) => [mul(base, o.M), o.piece.poly]), opts);
+  for (const o of items) {
+    drawLayer(ctx, mul(base, o.M), o.piece, img, { face: o.face, shade: o.shade, light: o.light, edges: o.moved && t > 0.02 && t < 0.98 ? null : plan.itemFlags.get(o.piece) });
   }
 }
 
-// affine of the swinging flap at progress t (0..1) about the crease line
-function flapMatrix(line, t, mountain) {
-  const th = Math.PI * t, c = Math.cos(th), sn = Math.sin(th);
-  const [ux, uy] = line.u, [nx, ny] = line.n;
-  const k = (mountain ? -1 : 1) * 0.16 * sn;
-  // A = u u^T + k u n^T + c n n^T  (x' = A (x - p) + p + lift)
-  const a00 = ux * ux + k * ux * nx + c * nx * nx;
-  const a01 = ux * uy + k * ux * ny + c * nx * ny;
-  const a10 = uy * ux + k * uy * nx + c * ny * nx;
-  const a11 = uy * uy + k * uy * ny + c * ny * ny;
-  const px = line.p[0], py = line.p[1];
-  const lift = (mountain ? 0.04 : -0.14) * sn;
-  return { M: [a00, a10, a01, a11, px - (a00 * px + a01 * py), py - (a10 * px + a11 * py) + lift], c, sn };
-}
-
-function drawPlanFrame(ctx, cam, d, plan, t, img) {
-  const base = camMatrix(cam, d);
-  const shadowStay = { blur: 5 * d, dy: 2 * d, alpha: 0.22 };
-  if (plan.kind === 'rotate') { // wings opening: the chosen layers turn about a point
-    const sn = Math.sin(Math.PI * t);
-    const G = mul(base, plan.mirror ? mul(rotationMatrix(plan.pivot, plan.angle * t), reflectionMatrix(plan.pivot, [1, 0])) : rotationMatrix(plan.pivot, plan.angle * t));
-    const moving = new Set(plan.moving);
-    for (const l of plan.before) {
-      if (moving.has(l)) drawLayer(ctx, G, l, img, { shadow: { blur: (5 + 8 * sn) * d, dy: (2 + 5 * sn) * d, alpha: 0.26 } });
-      else drawLayer(ctx, base, l, img, { shadow: shadowStay });
-    }
-    return;
-  }
-  const mountain = plan.dir === 'mountain';
-  const inside = plan.place === 'inside';
-  const { M, c, sn } = flapMatrix(plan.line, t, mountain);
-  const G = mul(base, M);
-  const flap = c >= 0 ? plan.moving : plan.moving.slice().reverse();
-  const drawStay = () => { for (const l of plan.stay) drawLayer(ctx, base, l, img, { shadow: shadowStay }); };
-  const drawFlap = () => {
-    for (const l of flap) {
-      drawLayer(ctx, G, l, img, {
-        face: c >= 0 ? l.face : -l.face,
-        shade: (mountain || inside ? 0.3 : 0.22) * sn,
-        shadow: { blur: (5 + 16 * sn) * d, dy: (2 + 12 * sn) * d, alpha: 0.22 + 0.12 * sn },
-      });
-    }
-  };
-  if (mountain || inside) { drawFlap(); drawStay(); } else { drawStay(); drawFlap(); }
-}
-
-// ---- pen marks (eyes, noses, windows) on a finished model
+// ---- pen marks (eyes, noses) on a finished model
 function drawDecor(ctx, G, shapes, alpha = 1) {
   if (!shapes || !shapes.length) return;
   const s = Math.hypot(G[0], G[1]);
@@ -772,62 +766,188 @@ function drawDecor(ctx, G, shapes, alpha = 1) {
   }
   ctx.restore();
 }
-function finishBounds(model, stack) { return unionBounds(stackBounds(stack), decorBounds(modelDecor(model, stack))); }
 
-// ---- dashed crease + arrow
-function drawHints(ctx, cam, d, stack, op, now, plan) {
+// the finished piece: flat, or in the pose its last "pull" step leaves it in
+function drawFinished(ctx, G, model, img, opts = {}) {
+  const pull = finalPull(model);
+  const stack = finalState(model);
+  const shapes = modelDecor(model, stack);
+  if (!pull) {
+    drawStackTo(ctx, G, stack, img, opts);
+    drawDecor(ctx, G, shapes, opts.decorAlpha ?? 1);
+    return;
+  }
+  drawPose(ctx, G, pull, 1, img, opts);
+  // pen marks ride on the piece of paper they were drawn on
+  const items = poseItems(pull, 1);
+  for (const sh of shapes) {
+    const at = sh.t === 'dot' || sh.t === 'ellipse' ? [sh.x, sh.y] : sh.pts[0];
+    for (let i = items.length - 1; i >= 0; i--) {
+      if (insidePoly(items[i].piece.poly, at)) { if (items[i].nz > 0) drawDecor(ctx, mul(G, items[i].M), [sh], opts.decorAlpha ?? 1); break; }
+    }
+  }
+}
+function insidePoly(poly, p) {
+  return poly.every((a, i) => { const b = poly[(i + 1) % poly.length]; return (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]) >= -1e-9; });
+}
+
+// ---- what a step does, in origami words (shown above the instruction)
+function stepKind(step) {
+  if (step.kind) return step.kind;
+  const ops = stepOps(step);
+  const o = ops[0];
+  if (o.type === 'pull') return 'Open it out';
+  if (o.type === 'turn') return 'Turn over';
+  if (o.type === 'rotate') return 'Rotate';
+  if (o.kind) return o.kind;
+  if (o.type === 'multi') return o.parts.every((p) => p.z === 'same') ? 'Fold and unfold' : 'Collapse';
+  if (o.unfold) return 'Fold and unfold';
+  if (o.place === 'inside') return 'Inside reverse fold';
+  if (o.place === 'outside') return 'Outside reverse fold';
+  return ops.every((x) => x.dir === 'mountain') ? 'Mountain fold' : 'Valley fold';
+}
+
+// ---- diagram marks: crease lines (valley dashed, mountain dash-dot) and an arrow for the motion
+function arrowFor(stepPlan, step) {
+  const p = stepPlan.plans[0];
+  if (step.arrow) return { from: step.arrow[0], to: step.arrow[1] };
+  if (p.kind === 'fold') {
+    const from = p.op.move;
+    return { from, to: p.unfold ? reflectPoint(from, p.line) : p.landing(from), back: p.unfold };
+  }
+  if (p.kind === 'turn' || p.kind === 'rotate') return null;
+  // the piece that travels furthest shows the way
+  const crease = p.kind === 'multi' && p.op.parts.every((q) => q.z === 'same');
+  const tt = crease ? 0.5 : 1;
+  let best = null;
+  const items = poseItems(p, tt, [0, 0]);
+  for (const o of items) {
+    if (!o.moved) continue;
+    const c = centroid(o.piece.poly);
+    const e = applyM(o.M, c[0], c[1]);
+    const dd = Math.hypot(e[0] - c[0], e[1] - c[1]) * Math.sqrt(area(o.piece.poly));
+    if (!best || dd > best.dd) best = { dd, from: c, to: e };
+  }
+  return best && { from: best.from, to: best.to, back: crease };
+}
+
+function drawArrow(ctx, P, from, to, d, now, back) {
+  const [fx, fy] = P(from), [tx, ty] = P(to);
+  const len = Math.hypot(tx - fx, ty - fy);
+  if (len < 6 * d) return;
+  const mx = (fx + tx) / 2, my = (fy + ty) / 2;
+  let px = -(ty - fy) / len, py = (tx - fx) / len;
+  if (py > 0) { px = -px; py = -py; } // bow upward on screen
+  const bow = Math.min(len * 0.32, 60 * d);
+  const cx = mx + px * bow, cy = my + py * bow;
+  const grow = reduce.matches ? 1 : 0.5 + 0.5 * Math.sin(now / 420);
+  const head = (x, y, ang, hl) => {
+    ctx.moveTo(x, y); ctx.lineTo(x - Math.cos(ang - 0.45) * hl, y - Math.sin(ang - 0.45) * hl);
+    ctx.moveTo(x, y); ctx.lineTo(x - Math.cos(ang + 0.45) * hl, y - Math.sin(ang + 0.45) * hl);
+  };
+  const stroke = (w, col) => {
+    ctx.lineWidth = w * d; ctx.strokeStyle = col;
+    ctx.beginPath(); ctx.moveTo(fx, fy); ctx.quadraticCurveTo(cx, cy, tx, ty);
+    head(tx, ty, Math.atan2(ty - cy, tx - cx), (11 + 2 * grow) * d);
+    if (back) head(fx, fy, Math.atan2(fy - cy, fx - cx), (9 + 2 * grow) * d); // fold and unfold: it comes back
+    ctx.stroke();
+  };
+  stroke(6.5, 'rgba(251,248,241,.95)');
+  stroke(3, '#8C6512');
+  ctx.fillStyle = '#8C6512';
+  if (!back) { ctx.beginPath(); ctx.arc(fx, fy, 4.5 * d, 0, 6.2832); ctx.fill(); }
+}
+
+function drawHints(ctx, cam, d, stack, step, now, stepPlan) {
   const base = camMatrix(cam, d);
-  const line = plan.line;
-  const segs = plan.kind === 'fold' ? creaseSegments(stack, line) : [];
   const P = (pt) => applyM(base, pt[0], pt[1]);
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.lineCap = 'round';
-  const dash = op.dir === 'mountain' && !op.place ? [10 * d, 4 * d, 2 * d, 4 * d] : [9 * d, 6 * d];
   const off = reduce.matches ? 0 : -(now / 40) * d;
-  for (const [a, b] of segs) {
-    const [x0, y0] = P(a), [x1, y1] = P(b);
-    ctx.setLineDash([]);
-    ctx.strokeStyle = 'rgba(251,248,241,.92)';
-    ctx.lineWidth = 5 * d;
-    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
-    ctx.setLineDash(dash);
-    ctx.lineDashOffset = off;
-    ctx.strokeStyle = '#2A2622';
-    ctx.lineWidth = 2.2 * d;
-    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+  const kind = stepPlan.plans[0].kind;
+  for (const p of stepPlan.plans) {
+    let segs;
+    if (p.kind === 'fold') segs = creaseSegments(p.before, p.line).map(([a, b]) => ({ a, b, dir: p.dir === 'mountain' && !p.place ? 'mountain' : 'valley' }));
+    else segs = planHints(p);
+    for (const sg of segs) {
+      const [x0, y0] = P(sg.a), [x1, y1] = P(sg.b);
+      ctx.setLineDash([]);
+      ctx.strokeStyle = 'rgba(251,248,241,.92)';
+      ctx.lineWidth = 5 * d;
+      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+      ctx.setLineDash(sg.dir === 'mountain' ? [10 * d, 4 * d, 2 * d, 4 * d] : [9 * d, 6 * d]);
+      ctx.lineDashOffset = off;
+      ctx.strokeStyle = '#2A2622';
+      ctx.lineWidth = 2.2 * d;
+      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+    }
   }
   ctx.setLineDash([]);
-  // arrow from the moving point to where it will land
-  const from = op.move;
-  const to = plan.landing(from);
-  const [fx, fy] = P(from), [tx, ty] = P(to);
-  const mx = (fx + tx) / 2, my = (fy + ty) / 2;
-  const len = Math.hypot(tx - fx, ty - fy);
-  if (len > 6 * d) {
-    let px = -(ty - fy) / len, py = (tx - fx) / len;
-    if (py > 0) { px = -px; py = -py; } // bow upward on screen
-    const bow = Math.min(len * 0.32, 60 * d);
-    const cx = mx + px * bow, cy = my + py * bow;
+  if (kind === 'turn' || kind === 'rotate') {
+    // a turning arrow under the paper
+    const b = stackBounds(stack);
+    const [cx, cy0] = P([(b.x0 + b.x1) / 2, b.y1]);
+    const r = Math.min(70 * d, (b.x1 - b.x0) * cam.s * d * 0.45);
+    const cy = Math.min(cy0, ctx.canvas.height - r * 0.28 - 30 * d);
     const grow = reduce.matches ? 1 : 0.5 + 0.5 * Math.sin(now / 420);
-    const stroke = (w, col) => {
+    for (const [w, col] of [[6.5, 'rgba(251,248,241,.95)'], [3, '#8C6512']]) {
       ctx.lineWidth = w * d; ctx.strokeStyle = col;
-      ctx.beginPath(); ctx.moveTo(fx, fy); ctx.quadraticCurveTo(cx, cy, tx, ty); ctx.stroke();
-      const ang = Math.atan2(ty - cy, tx - cx);
-      const hl = (11 + 2 * grow) * d;
       ctx.beginPath();
-      ctx.moveTo(tx, ty);
-      ctx.lineTo(tx - Math.cos(ang - 0.45) * hl, ty - Math.sin(ang - 0.45) * hl);
-      ctx.moveTo(tx, ty);
-      ctx.lineTo(tx - Math.cos(ang + 0.45) * hl, ty - Math.sin(ang + 0.45) * hl);
+      ctx.ellipse(cx, cy + 14 * d, r, r * 0.28, 0, Math.PI * 0.15, Math.PI * 0.95);
+      const ex = cx + r * Math.cos(Math.PI * 0.15), ey = cy + 14 * d + r * 0.28 * Math.sin(Math.PI * 0.15);
+      const hl = (11 + 2 * grow) * d;
+      ctx.moveTo(ex, ey); ctx.lineTo(ex + hl * 0.2, ey - hl);
+      ctx.moveTo(ex, ey); ctx.lineTo(ex - hl * 0.9, ey + hl * 0.2);
       ctx.stroke();
-    };
-    stroke(6.5, 'rgba(251,248,241,.95)');
-    stroke(3, '#8C6512');
-    ctx.fillStyle = '#8C6512';
-    ctx.beginPath(); ctx.arc(fx, fy, 4.5 * d, 0, 6.2832); ctx.fill();
+    }
+  } else if (kind === 'pull') {
+    // gentle arrows from where the paper will move
+    const p = stepPlan.plans[0];
+    const pulse = reduce.matches ? 1 : 0.6 + 0.4 * Math.sin(now / 300);
+    const items = poseItems(p, 0.35);
+    const seen = [];
+    for (const o of items) {
+      if (!o.moved) continue;
+      const c = centroid(o.piece.poly);
+      const e = applyM(o.M, c[0], c[1]);
+      if (Math.hypot(e[0] - c[0], e[1] - c[1]) < 0.03 || seen.some((q) => Math.hypot(q[0] - c[0], q[1] - c[1]) < 0.35)) continue;
+      seen.push(c);
+      // at least a finger's length on screen
+      const [sx, sy] = P(c), [ex, ey] = P(e);
+      const k = Math.max(1.6, (64 * d) / Math.max(1, Math.hypot(ex - sx, ey - sy)));
+      ctx.globalAlpha = pulse;
+      drawArrow(ctx, P, c, [c[0] + (e[0] - c[0]) * k, c[1] + (e[1] - c[1]) * k], d, now, false);
+      ctx.globalAlpha = 1;
+      if (seen.length >= 3) break;
+    }
+  } else {
+    const ar = stepPlan.arrow;
+    if (ar) drawArrow(ctx, P, ar.from, ar.to, d, now, ar.back);
   }
+  for (const [from, to] of step.arrows || []) drawArrow(ctx, P, from, to, d, now, false);
   ctx.restore();
+}
+
+// ---- framing: each step gets a camera that fits what happens in it; the camera eases between steps, never mid-fold
+function stepCam(f, i) {
+  f.cams = f.cams || [];
+  if (f.cams[i]) return f.cams[i];
+  let b = unionBounds(stackBounds(f.states[i]), stackBounds(f.states[Math.min(i + 1, f.states.length - 1)]));
+  if (i < f.model.steps.length) {
+    const { plans } = planStep(f.states[i], f.model.steps[i]);
+    for (const p of plans) for (const t of [0.25, 0.5, 0.75, 1]) b = unionBounds(b, poseBounds(p, t));
+  }
+  const cam = camFor(b, f.W, f.H, 1.3);
+  cam.s = Math.min(cam.s, f.baseCam.s * 2.4);
+  f.cams[i] = cam;
+  return cam;
+}
+function aimCam(f, now, instant) {
+  if (!f.W) return;
+  const to = f.finished ? f.finishCam : stepCam(f, f.step);
+  if (instant || reduce.matches || !f.cam) { f.cam = to; f.camMove = null; return; }
+  f.camMove = { from: { ...f.cam }, to, t0: now };
 }
 
 // ---- stage
@@ -840,7 +960,11 @@ function resizeStage() {
   const d = dprOf();
   stage.width = Math.round(r.width * d);
   stage.height = Math.round(r.height * d);
-  if (fold) { fold.W = r.width; fold.H = r.height; fold.baseCam = camFor(fold.bounds, r.width, r.height, 1.22); if (!fold.finished) fold.cam = fold.baseCam; }
+  if (fold) {
+    fold.W = r.width; fold.H = r.height; fold.baseCam = camFor(fold.bounds, r.width, r.height, 1.18); fold.cams = [];
+    fold.finishCam = camFor(finishBounds(fold.model), r.width, r.height, 1.4);
+    aimCam(fold, performance.now(), true);
+  }
 }
 new ResizeObserver(() => { resizeStage(); }).observe(stage);
 
@@ -852,12 +976,14 @@ function startModel(modelId) {
   const states = buildStates(model);
   $('#foldPick').hidden = true;
   $('#foldStage').hidden = false;
-  fold = { model, states, step: 0, stack: states[0], sheet: selSheet, t: 0, anim: null, drag: null, finished: false, finishT: 0, bounds: modelBounds(model), plan: null, W: 0, H: 0 };
+  fold = { model, states, step: 0, stack: states[0], sheet: selSheet, t: 0, anim: null, drag: null, finished: false, finishT: 0, bounds: modelBounds(model), plan: null, W: 0, H: 0, idle: performance.now(), nudge: null };
   resizeStage();
   const r = stage.getBoundingClientRect();
   fold.W = r.width; fold.H = r.height;
-  fold.baseCam = camFor(fold.bounds, r.width, r.height, 1.22);
-  fold.cam = fold.baseCam;
+  fold.baseCam = camFor(fold.bounds, r.width, r.height, 1.18);
+  fold.cams = [];
+  fold.cam = null;
+  aimCam(fold, performance.now(), true);
   syncFoldUI();
   window.scrollTo({ top: 0, behavior: 'auto' });
 }
@@ -872,13 +998,16 @@ function leaveStage() {
 function curPlan() {
   if (!fold || fold.finished) return null;
   if (!fold.plan || fold.plan.stackRef !== fold.stack) {
-    fold.plan = planStep(fold.stack, fold.model.steps[fold.step]);
+    const step = fold.model.steps[fold.step];
+    fold.plan = planStep(fold.stack, step);
     fold.plan.stackRef = fold.stack;
+    fold.plan.arrow = arrowFor(fold.plan, step);
   }
   return fold.plan;
 }
 
-function singleMountain(step) { const o = stepOps(step); return o.length === 1 && o[0].dir === 'mountain' && !o[0].place && o[0].type !== 'rotate'; }
+function singleMountain(step) { const o = stepOps(step); return o.length === 1 && o[0].dir === 'mountain' && !o[0].place && !o[0].type && !o[0].unfold; }
+const isPull = (f) => !f.finished && isPullStep(f.model.steps[f.step]);
 
 function syncFoldUI() {
   const f = fold;
@@ -890,25 +1019,42 @@ function syncFoldUI() {
     el.className = i < f.step ? 'done' : i === f.step && !f.finished ? 'now' : '';
     dots.appendChild(el);
   }
+  dots.classList.toggle('many', n > 12);
   $('#stepCount').textContent = f.finished ? 'Finished' : `Step ${f.step + 1} of ${n}`;
-  $('#stepText').textContent = f.finished ? `Your ${f.model.name.toLowerCase()} is done.` : f.model.steps[f.step].text + (singleMountain(f.model.steps[f.step]) ? ' (Fold it backwards, away from you.)' : '');
+  const step = f.finished ? null : f.model.steps[f.step];
+  $('#stepKind').textContent = step ? stepKind(step) : '';
+  $('#stepKind').hidden = !step;
+  $('#stepText').textContent = f.finished ? `Your ${f.model.name.toLowerCase()} is done.` : step.text + (singleMountain(step) ? ' (Fold it backwards, away from you.)' : '');
   $('#foldUndo').setAttribute('aria-disabled', f.step > 0 && !f.anim ? 'false' : 'true');
-  $('#foldGo').hidden = f.finished;
+  const go = $('#foldGo');
+  go.hidden = f.finished;
+  go.textContent = step ? (step.cta || (stepKind(step) === 'Turn over' ? 'Turn it over' : stepKind(step) === 'Rotate' ? 'Turn it' : 'Fold it')) : 'Fold it';
+  go.classList.toggle('pull', !!step && isPullStep(step));
+  const sn = $('#stageNote');
+  sn.textContent = step && isPullStep(step) ? (step.prompt || 'Tap, press and hold, or drag the paper') : '';
+  sn.classList.toggle('on', !!step && isPullStep(step) && !f.anim);
+  $('#stage').classList.toggle('pullstep', !!step && isPullStep(step));
   $('#nameCard').hidden = !f.finished;
   if (f.finished) {
     $('#mName').textContent = f.model.name;
     $('#mNote').textContent = f.model.blurb;
     say(`Finished: ${f.model.name}.`);
-  } else say($('#stepText').textContent);
+  } else say($('#stepKind').textContent + '. ' + $('#stepText').textContent);
 }
+
+function touch() { if (fold) { fold.idle = performance.now(); fold.nudge = null; $('#foldGo').classList.remove('nudge'); } }
 
 function beginFoldAnim(to) {
   const f = fold;
   if (!f || f.finished) return;
+  touch();
   const from = f.t;
   if (reduce.matches) { f.t = to; if (to >= 1) completeFold(); else f.t = 0; return; }
-  const nOps = stepOps(f.model.steps[f.step]).length;
-  const dur = Math.max(120, 620 * Math.pow(nOps, 0.7) * Math.abs(to - from));
+  const step = f.model.steps[f.step];
+  const ops = stepOps(step);
+  const heavy = ops.some((o) => o.type === 'multi' || o.type === 'pull' || o.place);
+  const base = isPullStep(step) ? 1900 : heavy ? 1500 : ops[0].type === 'turn' ? 900 : 700;
+  const dur = Math.max(140, base * Math.pow(ops.length, 0.6) * Math.abs(to - from));
   f.anim = { from, to, t0: performance.now(), dur };
   syncFoldUI();
 }
@@ -921,14 +1067,34 @@ function completeFold() {
   f.t = 0;
   f.anim = null;
   f.plan = null;
+  touch();
   vibrate(10);
   if (f.step >= f.model.steps.length) {
     f.finished = true;
     f.finishT = reduce.matches ? 1 : 0;
-    f.finishCam = camFor(finishBounds(f.model, f.stack), f.W, f.H, 1.5);
+    f.finishCam = camFor(finishBounds(f.model), f.W, f.H, 1.4);
+    f.camFinishFrom = { ...f.cam };
     if (reduce.matches) f.cam = f.finishCam;
-  }
+  } else aimCam(f, performance.now());
   syncFoldUI();
+}
+
+// a gentle show of the motion when she pauses on a step (never a timer she can see, never a failure)
+const IDLE_MS = 5200, IDLE_PULL_MS = 3200, NUDGE_MS = 1300;
+function stepIdle(f, now) {
+  if (f.finished || f.anim || f.drag) return;
+  const pull = isPull(f);
+  if (f.nudge) {
+    const u = (now - f.nudge.t0) / NUDGE_MS;
+    if (u >= 1) { f.nudge = null; f.t = 0; f.idle = now; return; }
+    f.t = (pull ? 0.32 : 0.2) * Math.sin(Math.PI * u) * (u < 0.5 ? 1 : 1);
+    return;
+  }
+  if (now - f.idle > (pull ? IDLE_PULL_MS : IDLE_MS)) {
+    $('#foldGo').classList.add('nudge');
+    if (!reduce.matches) f.nudge = { t0: now };
+    else f.idle = now;
+  }
 }
 
 function foldFrame(now) {
@@ -943,11 +1109,19 @@ function foldFrame(now) {
       f.anim = null;
       if (a.to >= 1) completeFold(); else { f.t = 0; syncFoldUI(); }
     }
+  } else if (f.hold) {
+    f.t = Math.min(1, f.t + 0.016 / 1.6);
+    if (f.t >= 1) { f.hold = null; completeFold(); }
+  } else stepIdle(f, now);
+  if (f.camMove) {
+    const u = clamp((now - f.camMove.t0) / 520, 0, 1), e = ease(u), A = f.camMove.from, B = f.camMove.to;
+    f.cam = { s: A.s + (B.s - A.s) * e, cx: A.cx + (B.cx - A.cx) * e, cy: A.cy + (B.cy - A.cy) * e, W: B.W, H: B.H };
+    if (u >= 1) f.camMove = null;
   }
   if (f.finished && f.finishT < 1) {
     f.finishT = clamp(f.finishT + 0.016 / 0.9, 0, 1);
     const e = ease(f.finishT);
-    const A = f.baseCam, B = f.finishCam;
+    const A = f.camFinishFrom || f.baseCam, B = f.finishCam;
     f.cam = { s: A.s + (B.s - A.s) * e, cx: A.cx + (B.cx - A.cx) * e, cy: A.cy + (B.cy - A.cy) * e, W: A.W, H: A.H };
   }
   const d = dprOf();
@@ -961,36 +1135,44 @@ function foldFrame(now) {
     g.addColorStop(1, 'rgba(243,217,139,0)');
     sctx.fillStyle = g;
     sctx.fillRect(0, 0, stage.width, stage.height);
-    const G = camMatrix(f.cam, d);
-    drawStackTo(sctx, G, f.stack, img, { d, blur: 5 + 14 * e, dy: 2 + 9 * e, alpha: 0.22 + 0.12 * e });
-    drawDecor(sctx, G, modelDecor(f.model, f.stack), e);
+    drawFinished(sctx, camMatrix(f.cam, d), f.model, img, { d, blur: 6 + 12 * e, dy: 3 + 8 * e, alpha: 0.24 + 0.1 * e, decorAlpha: e });
     return;
   }
   const plan = curPlan();
+  const base = camMatrix(f.cam, d);
   if (f.t > 0.0001) {
     const N = plan.plans.length;
     const u = Math.min(f.t * N, N - 1e-6);
     const i = Math.floor(u);
-    drawPlanFrame(sctx, f.cam, d, plan.plans[i], u - i, img);
+    drawPose(sctx, base, plan.plans[i], u - i, img, { d });
   } else {
-    drawStackTo(sctx, camMatrix(f.cam, d), f.stack, img, { d });
-    drawHints(sctx, f.cam, d, f.stack, stepOps(f.model.steps[f.step])[0], now, plan.plans[0]);
+    drawStackTo(sctx, base, f.stack, img, { d });
+    drawHints(sctx, f.cam, d, f.stack, f.model.steps[f.step], now, plan);
   }
 }
 
-// ---- stage interaction: tap folds, drag moves the flap by hand
+// ---- stage interaction: tap folds, drag moves the paper by hand, press and hold pulls it open
+function dragVector(f) {
+  const plan = curPlan();
+  const toScreen = (pt) => [(pt[0] - f.cam.cx) * f.cam.s + f.cam.W / 2, (pt[1] - f.cam.cy) * f.cam.s + f.cam.H / 2];
+  const ar = plan.arrow;
+  if (ar && !isPull(f)) {
+    const a = toScreen(ar.from), b = toScreen(ar.to);
+    const vx = b[0] - a[0], vy = b[1] - a[1], l = Math.hypot(vx, vy);
+    if (l > 20) return { vx, vy, len: l };
+  }
+  return { vx: 0, vy: -1, len: 0, free: true }; // turning over or opening out: any steady drag moves it along
+}
 stage.addEventListener('pointerdown', (e) => {
   const f = fold;
   if (!f || f.finished || f.anim || f.drag) return;
   e.preventDefault();
+  touch();
+  if (f.t > 0) f.t = 0; // a nudge was showing
   try { stage.setPointerCapture(e.pointerId); } catch { /* ok */ }
   const r = stage.getBoundingClientRect();
-  const op0 = stepOps(f.model.steps[f.step])[0];
-  const plan = curPlan();
-  const toScreen = (pt) => [(pt[0] - f.cam.cx) * f.cam.s + f.cam.W / 2, (pt[1] - f.cam.cy) * f.cam.s + f.cam.H / 2];
-  const a = toScreen(op0.move), b = toScreen(plan.plans[0].landing(op0.move));
-  const vx = b[0] - a[0], vy = b[1] - a[1];
-  f.drag = { id: e.pointerId, x0: e.clientX - r.left, y0: e.clientY - r.top, vx, vy, len: Math.hypot(vx, vy) || 1, moved: false };
+  f.drag = { id: e.pointerId, x0: e.clientX - r.left, y0: e.clientY - r.top, moved: false, ...dragVector(f), t0: performance.now() };
+  if (isPull(f)) f.drag.holdTimer = setTimeout(() => { if (fold && fold.drag && !fold.drag.moved) fold.hold = true; }, 220);
 });
 stage.addEventListener('pointermove', (e) => {
   const f = fold;
@@ -999,38 +1181,45 @@ stage.addEventListener('pointermove', (e) => {
   const dx = e.clientX - r.left - f.drag.x0, dy = e.clientY - r.top - f.drag.y0;
   if (!f.drag.moved && Math.hypot(dx, dy) < 8) return;
   f.drag.moved = true;
-  const proj = (dx * f.drag.vx + dy * f.drag.vy) / (f.drag.len * f.drag.len);
-  f.t = clamp(proj, 0, 1);
+  f.hold = null;
+  touch();
+  if (f.drag.free) f.t = clamp(Math.hypot(dx, dy) / Math.min(f.W, 320), 0, 1);
+  else f.t = clamp((dx * f.drag.vx + dy * f.drag.vy) / (f.drag.len * f.drag.len), 0, 1);
 });
 function endStage(e, cancel) {
   const f = fold;
   if (!f || !f.drag || e.pointerId !== f.drag.id) return;
-  const moved = f.drag.moved;
+  const { moved, holdTimer } = f.drag;
+  clearTimeout(holdTimer);
   f.drag = null;
+  const held = f.hold;
+  f.hold = null;
   if (cancel) { beginFoldAnim(0); return; }
-  if (!moved) beginFoldAnim(1); else beginFoldAnim(f.t > 0.4 ? 1 : 0);
+  if (held || !moved) beginFoldAnim(1);
+  else beginFoldAnim(f.t > (isPull(f) ? 0.15 : 0.4) ? 1 : 0);
 }
 stage.addEventListener('pointerup', (e) => endStage(e, false));
 stage.addEventListener('pointercancel', (e) => endStage(e, true));
 
-$('#foldGo').addEventListener('click', () => { if (fold && !fold.anim && !fold.finished) beginFoldAnim(1); });
+$('#foldGo').addEventListener('click', () => { if (fold && !fold.anim && !fold.finished) { fold.nudge = null; fold.t = 0; beginFoldAnim(1); } });
 $('#foldUndo').addEventListener('click', () => {
   const f = fold;
   if (!f || f.anim || f.step === 0) return;
   f.step = f.finished ? f.model.steps.length - 1 : f.step - 1;
   f.finished = false;
   f.finishT = 0;
-  f.cam = f.baseCam;
   f.stack = f.states[f.step];
   f.t = 0;
   f.plan = null;
+  touch();
+  aimCam(f, performance.now());
   syncFoldUI();
 });
 $('#choose').addEventListener('click', () => { leaveStage(); renderPicker(); });
 $('#again').addEventListener('click', () => { leaveStage(); renderPicker(); window.scrollTo({ top: 0 }); });
 
 // ---- picker
-const LEVEL_NOTE = { Easy: 'a few folds', Medium: 'a little patience', Patient: 'reverse folds and petals' };
+const LEVEL_NOTE = { Easy: 'a few folds', Medium: 'squash and reverse folds', Patient: 'long ones, petal folds' };
 
 function renderPicker() {
   const box = $('#sheetPick');
@@ -1076,11 +1265,8 @@ function drawPreview(canvas, model, img) {
   const c = canvas.getContext('2d');
   c.setTransform(1, 0, 0, 1, 0, 0);
   c.clearRect(0, 0, canvas.width, canvas.height);
-  const stack = finalState(model);
-  const cam = camFor(finishBounds(model, stack), canvas.width, canvas.height, 1.25);
-  const G = camMatrix({ ...cam }, 1);
-  drawStackTo(c, G, stack, img, { d: canvas.width / 76, blur: 3, dy: 2 });
-  drawDecor(c, G, modelDecor(model, stack));
+  const cam = camFor(finishBounds(model), canvas.width, canvas.height, 1.22);
+  drawFinished(c, camMatrix({ ...cam }, 1), model, img, { d: canvas.width / 76, blur: 3, dy: 2 });
 }
 
 function refreshImages() {
@@ -1113,10 +1299,8 @@ function makeThumb(model, img) {
   const c = document.createElement('canvas');
   c.width = c.height = 240;
   const g = c.getContext('2d');
-  const stack = finalState(model);
-  const cam = camFor(finishBounds(model, stack), 240, 240, 1.3);
-  drawStackTo(g, camMatrix(cam, 1), stack, img, { d: 2, blur: 8, dy: 5, alpha: 0.3 });
-  drawDecor(g, camMatrix(cam, 1), modelDecor(model, stack));
+  const cam = camFor(finishBounds(model), 240, 240, 1.3);
+  drawFinished(g, camMatrix(cam, 1), model, img, { d: 2, blur: 8, dy: 5, alpha: 0.3 });
   return c.toDataURL('image/png');
 }
 
@@ -1180,8 +1364,8 @@ window.addEventListener('resize', () => { dirty = true; });
 window.__marbling = {
   get bath() { return bath; },
   get fold() { return fold; },
-  jump(n) { const f = fold; if (!f) return; f.step = n; f.stack = f.states[n]; f.t = 0; f.plan = null; f.finished = n >= f.model.steps.length; if (f.finished) { f.finishCam = camFor(finishBounds(f.model, f.stack), f.W, f.H, 1.5); f.cam = f.finishCam; f.finishT = 1; } else { f.cam = f.baseCam; } syncFoldUI(); },
-  setT(t) { if (fold) fold.t = t; },
+  jump(n) { const f = fold; if (!f) return; f.step = n; f.stack = f.states[n]; f.t = 0; f.plan = null; f.anim = null; f.nudge = null; f.finished = n >= f.model.steps.length; if (f.finished) { f.finishCam = camFor(finishBounds(f.model), f.W, f.H, 1.4); f.cam = f.finishCam; f.finishT = 1; } else { aimCam(f, 0, true); } touch(); syncFoldUI(); },
+  setT(t) { if (fold) { fold.t = t; fold.idle = performance.now() + 1e9; } },
   store, paint() { paintBath(bctx, bath, bathCanvas.width); bctx.getImageData(0, 0, 1, 1); }, setTool, startStarter, layPaper, openFold, startModel, showTab,
   get busy() { return busy; }, countVerts: () => countVerts(bath), dropInk: (x, y, r, c) => dropInk(bath, x, y, r, c), applyOp: (op) => applyOp(bath, op), setBath: (b) => { bath = b; dirty = true; },
 };
