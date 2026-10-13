@@ -27,7 +27,7 @@ function tile(c, { tag = 'span', cls = '', attrs = '' } = {}) {
 // ---------- state ----------
 let G, sel = null, undoSnap = null, pending = false, busy = false, timer = 0;
 let idaMsg = 'Morning! I take the dish with the most of one glaze. Ties go to the left.';
-let confirmNew = 0;
+let confirmNew = 0, busyMsg = '';
 
 const randSeed = () => ((Date.now() ^ Math.floor(Math.random() * 4294967296)) >>> 0) || 1;
 
@@ -82,7 +82,7 @@ function render() {
   if (G.over) { renderSummary(fs); return; }
 
   const canUndo = !!undoSnap && !busy;
-  $('#status').innerHTML = `<span class="msg" role="status">${pending && !sel ? 'Placed. Ida takes a dish next. You can still change your mind.' : hintFor()}</span>` +
+  $('#status').innerHTML = `<span class="msg" role="status">${busy ? busyMsg : pending && !sel ? 'Placed. Ida takes a dish next. You can still change your mind.' : hintFor()}</span>` +
     (canUndo ? '<button class="btn small" type="button" data-undo>Undo</button>' : '');
 
   let dishes = '';
@@ -230,7 +230,7 @@ async function place(line) {
   const before = G;
   const res = take(G, { ...s, line });
   if (!res.ok) return;
-  busy = true;
+  busy = true; busyMsg = '';
   const srcSel = s.source === 'center' ? '#center .tile' : `#dishes .tile[data-i="${s.index}"]`;
   const all = $$(srcSel).map((el) => ({ c: +el.dataset.c, rect: rectOf(el), el }));
   all.forEach((a) => { a.el.style.visibility = 'hidden'; });
@@ -295,8 +295,8 @@ async function idaMove() {
 async function finishRound() {
   const e = endRound(G);
   sel = null;
+  busyMsg = 'The round is done. Tiles settle into the wall.';
   render();
-  $('#status').innerHTML = '<span class="msg" role="status">The round is done. Tiles settle into the wall.</span>';
   await sleep(reduced() ? 60 : 300);
   let shown = G.score;
   for (const p of e.placements) {
@@ -342,6 +342,7 @@ async function resolve() {
   if (!pending) return;
   clearTimeout(timer);
   busy = true; undoSnap = null; sel = null;
+  busyMsg = roundOver(G) ? '' : 'Ida is choosing a dish.';
   render();
   if (!roundOver(G)) await idaMove();
   if (roundOver(G)) await finishRound();
