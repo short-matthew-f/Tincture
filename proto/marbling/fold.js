@@ -1,17 +1,33 @@
-// fold.js - flat-folding geometry and origami model definitions. PURE: no DOM, no randomness.
+// fold.js - flat-folding engine. PURE: no DOM, no randomness. (Model definitions live in models.js.)
 //
 // The paper is a stack of flat convex polygon layers (index 0 = bottom, last = top). Each layer is
-//   { id, poly: [[x,y]...] (world, positive area), m: affine sheet-unit -> world, face: +1 front / -1 back }
-// "Front" is the marbled side. World units are "diamond units": the sheet is laid corner-up, so its
-// half-diagonal is 1 and its side is sqrt(2); the unit square (u,v) maps to world x = u - v, y = u + v - 1.
-//
+//   { id, poly: [[x,y]...] (world, positive area), m: affine sheet-unit -> world, face: +1 front / -1 back,
+//     grp: label used to pick layers later, tag: optional label set by a step }
+// "Front" is the marbled side. World units are "diamond units": the sheet half-diagonal is 1, its side is sqrt(2).
 // An affine is [a, b, c, d, e, f] with x' = a x + c y + e, y' = b x + d y + f (the canvas convention).
+//
+// A step is { text, ops: [op, ...], label? } (or a single op written inline). Ops run one after another
+// (a petal fold is three of them); the UI animates them in sequence.
+//
+//   fold op   { a, b, move, dir:'valley'|'mountain', sel, clip, place, tag }
+//       crease through a and b; the side holding `move` swings over.
+//       sel:   'all' | {top:n} | {bottom:n} | {half:'top'|'bottom'} | {grp:[..]} | {tag:'..'} | combined, among
+//              the layers that actually reach the moving side.
+//       clip:  [{a,b,keep}] extra lines: only the part of the moving side that is also on the `keep` side moves
+//              (a partial fold of a flap: the rest of the layer stays where it is).
+//       place: 'inside' tucks the swung pieces between the layers they came from (inside-reverse fold).
+//              Without it a valley fold lands them on top (reversed), a mountain fold behind. Valley with every
+//              layer of a flap selected is an outside-reverse fold.
+//       tag:   label put on the swung pieces (so a later op can pick them with sel:{tag}).
+//   rotate op { type:'rotate', pivot, angle, sel, move, mirror? }  rigid turn of the chosen layers about a point (used to
+//       spread the wings of a finished bird); mirror also turns them over, so both wings show their colour.
+//   step.label: after the step, give every layer grp = its position in the stack.
 
 export const EPS = 1e-7;
-export const H = 2 / (2 + Math.SQRT2); // cup rim height used below
-
 export const IDENTITY = [1, 0, 0, 1, 0, 0];
-export const SHEET_M = [1, 1, -1, 1, 0, -1];
+export const SHEET_M = [1, 1, -1, 1, 0, -1]; // diamond pose: unit square -> world (x = u - v, y = u + v - 1)
+const R2 = Math.SQRT2;
+export const SQUARE_M = [R2, 0, 0, R2, -R2 / 2, -R2 / 2]; // upright square pose
 
 export function mul(A, B) { // apply B first, then A
   return [
@@ -27,12 +43,14 @@ export function invert(M) {
   const a = M[3] / d, b = -M[1] / d, c = -M[2] / d, dd = M[0] / d;
   return [a, b, c, dd, -(a * M[4] + c * M[5]), -(b * M[4] + dd * M[5])];
 }
-
 export function reflectionMatrix(p, n) {
   const k = 2 * (p[0] * n[0] + p[1] * n[1]);
   return [1 - 2 * n[0] * n[0], -2 * n[0] * n[1], -2 * n[0] * n[1], 1 - 2 * n[1] * n[1], k * n[0], k * n[1]];
 }
-
+export function rotationMatrix(pivot, angle) {
+  const c = Math.cos(angle), s = Math.sin(angle);
+  return [c, s, -s, c, pivot[0] - (c * pivot[0] - s * pivot[1]), pivot[1] - (s * pivot[0] + c * pivot[1])];
+}
 export function area(poly) {
   let s = 0;
   for (let i = 0; i < poly.length; i++) {
@@ -42,21 +60,23 @@ export function area(poly) {
   return s / 2;
 }
 
-// ---------------------------------------------------------------- creating the sheet
-export function createStack(startFace = 1) {
-  return [{ id: 0, poly: [[0, -1], [1, 0], [0, 1], [-1, 0]], m: SHEET_M.slice(), face: startFace }];
+// ---------------------------------------------------------------- the sheet
+export function createStack(startFace = 1, pose = 'diamond') {
+  if (pose === 'square') {
+    const s = R2 / 2;
+    return [{ id: 0, poly: [[-s, -s], [s, -s], [s, s], [-s, s]], m: SQUARE_M.slice(), face: startFace, grp: 0 }];
+  }
+  return [{ id: 0, poly: [[0, -1], [1, 0], [0, 1], [-1, 0]], m: SHEET_M.slice(), face: startFace, grp: 0 }];
 }
 
 // ---------------------------------------------------------------- lines and splitting
-// step: { a:[x,y], b:[x,y], move:[x,y] } - a crease through a and b; the side holding `move` swings over.
-export function creaseLine(step) {
-  const dx = step.b[0] - step.a[0], dy = step.b[1] - step.a[1];
+export function creaseLine(op) {
+  const dx = op.b[0] - op.a[0], dy = op.b[1] - op.a[1];
   const l = Math.hypot(dx, dy);
   let n = [-dy / l, dx / l];
-  if ((step.move[0] - step.a[0]) * n[0] + (step.move[1] - step.a[1]) * n[1] < 0) n = [-n[0], -n[1]];
-  return { p: step.a.slice(), n, u: [-n[1], n[0]] };
+  if ((op.move[0] - op.a[0]) * n[0] + (op.move[1] - op.a[1]) * n[1] < 0) n = [-n[0], -n[1]];
+  return { p: op.a.slice(), n, u: [-n[1], n[0]] };
 }
-
 export function signedDist(line, pt) { return (pt[0] - line.p[0]) * line.n[0] + (pt[1] - line.p[1]) * line.n[1]; }
 
 function cleanPoly(poly) {
@@ -69,7 +89,7 @@ function cleanPoly(poly) {
   return out;
 }
 
-// Sutherland-Hodgman against one side of the line (sign = +1 keeps the moving side, -1 the staying side).
+// Sutherland-Hodgman against one side of the line (sign +1 keeps the moving side, -1 the staying side).
 export function clipSide(poly, line, sign) {
   const out = [];
   const n = poly.length;
@@ -92,172 +112,124 @@ export function splitConvex(poly, line) {
   return { pos: clipSide(poly, line, 1), neg: clipSide(poly, line, -1) };
 }
 
+// moving part = moving side of the crease AND inside every clip line; everything else stays.
+function partition(poly, line, clips) {
+  const { pos, neg } = splitConvex(poly, line);
+  const rest = [];
+  if (neg) rest.push(neg);
+  let mov = pos;
+  if (pos) {
+    for (const c of clips) {
+      if (!mov) break;
+      const inn = clipSide(mov, c, 1), out = clipSide(mov, c, -1);
+      if (out) rest.push(out);
+      mov = inn;
+    }
+  }
+  return { mov, rest };
+}
+
 function reflectPoly(poly, R) {
   const out = poly.map(([x, y]) => applyM(R, x, y));
   out.reverse(); // reflection flips orientation; keep area positive
   return out;
 }
-
 export function reflectPoint(pt, line) {
   const d = signedDist(line, pt);
   return [pt[0] - 2 * d * line.n[0], pt[1] - 2 * d * line.n[1]];
 }
 
-// ---------------------------------------------------------------- folding
-// step.dir: 'valley' (flap lands on top) | 'mountain' (flap goes behind)
-// step.sel: 'all' (default) | { top: n } | { bottom: n } - among the layers that reach the moving side.
-export function planFold(stack, step) {
-  const line = creaseLine(step);
+function pick(reach, stack, sel) {
+  if (!sel || sel === 'all') return reach;
+  let r = reach;
+  if (sel.grp) r = r.filter((i) => sel.grp.includes(stack[i].grp));
+  if (sel.tag) r = r.filter((i) => stack[i].tag === sel.tag);
+  if (sel.top) r = r.slice(-sel.top);
+  if (sel.bottom) r = r.slice(0, sel.bottom);
+  if (sel.half === 'top') r = r.slice(Math.ceil(r.length / 2));
+  if (sel.half === 'bottom') r = r.slice(0, Math.ceil(r.length / 2));
+  return r;
+}
+
+// ---------------------------------------------------------------- one op
+function planFoldOp(stack, op) {
+  const line = creaseLine(op);
+  const clips = (op.clip || []).map((c) => creaseLine({ a: c.a, b: c.b, move: c.keep }));
+  const parts = stack.map((l) => partition(l.poly, line, clips));
   const reach = [];
-  stack.forEach((l, i) => {
-    let mx = -Infinity;
-    for (const p of l.poly) mx = Math.max(mx, signedDist(line, p));
-    if (mx > EPS) reach.push(i);
-  });
-  const sel = step.sel || 'all';
-  let chosen = reach;
-  if (sel.top) chosen = reach.slice(-sel.top);
-  else if (sel.bottom) chosen = reach.slice(0, sel.bottom);
-  const set = new Set(chosen);
+  parts.forEach((p, i) => { if (p.mov) reach.push(i); });
+  const chosen = new Set(pick(reach, stack, op.sel));
   const stay = [], moving = [];
+  let lowestStay = -1;
   for (let i = 0; i < stack.length; i++) {
     const l = stack[i];
-    if (!set.has(i)) { stay.push(l); continue; }
-    const { pos, neg } = splitConvex(l.poly, line);
-    if (pos) moving.push({ ...l, poly: pos });
-    if (neg) stay.push({ ...l, poly: neg });
+    if (!chosen.has(i)) { stay.push(l); continue; }
+    if (parts[i].mov) moving.push({ ...l, poly: parts[i].mov });
+    for (const r of parts[i].rest) { stay.push({ ...l, poly: r }); if (lowestStay < 0) lowestStay = stay.length - 1; }
   }
   const R = reflectionMatrix(line.p, line.n);
   let nextId = 1 + stack.reduce((m, l) => Math.max(m, l.id), 0);
-  const flipped = moving.map((l) => ({ id: nextId++, poly: reflectPoly(l.poly, R), m: mul(R, l.m), face: -l.face }));
-  flipped.reverse();
-  const result = step.dir === 'mountain' ? flipped.concat(stay) : stay.concat(flipped);
-  return { line, stay, moving, result, R, dir: step.dir === 'mountain' ? 'mountain' : 'valley' };
+  const flipped = moving.map((l) => {
+    const n = { ...l, id: nextId++, poly: reflectPoly(l.poly, R), m: mul(R, l.m), face: -l.face };
+    if (op.tag) n.tag = op.tag;
+    return n;
+  });
+  let result;
+  if (op.place === 'inside' && lowestStay >= 0) {
+    result = stay.slice(0, lowestStay + 1).concat(flipped, stay.slice(lowestStay + 1)); // tucked between its own layers
+  } else if (op.dir === 'mountain') {
+    result = flipped.slice().reverse().concat(stay);
+  } else {
+    result = stay.concat(flipped.slice().reverse());
+  }
+  return { kind: 'fold', line, stay, moving, result, R, dir: op.dir === 'mountain' ? 'mountain' : 'valley', place: op.place || null, landing: (pt) => reflectPoint(pt, line) };
 }
 
-export function foldStack(stack, step) { return planFold(stack, step).result; }
-
-// ---------------------------------------------------------------- helpers for describing models
-function bis(P, Q) { // crease that lands P on Q
-  const mx = (P[0] + Q[0]) / 2, my = (P[1] + Q[1]) / 2;
-  const dx = -(Q[1] - P[1]), dy = Q[0] - P[0];
-  const l = Math.hypot(dx, dy);
-  return { a: [mx - (dx / l) * 4, my - (dy / l) * 4], b: [mx + (dx / l) * 4, my + (dy / l) * 4], move: P };
-}
-function horiz(y, move) { return { a: [-4, y], b: [4, y], move }; }
-function through(a, b, move) { return { a, b, move }; }
-function refl(P, a, b) {
-  const dx = b[0] - a[0], dy = b[1] - a[1];
-  const l = Math.hypot(dx, dy);
-  const n = [-dy / l, dx / l];
-  const d = (P[0] - a[0]) * n[0] + (P[1] - a[1]) * n[1];
-  return [P[0] - 2 * d * n[0], P[1] - 2 * d * n[1]];
-}
-function toward(from, to, dist) {
-  const dx = to[0] - from[0], dy = to[1] - from[1];
-  const l = Math.hypot(dx, dy);
-  return [from[0] + (dx / l) * dist, from[1] + (dy / l) * dist];
-}
-const B_PT = [0, 1];
-const T_PT = [0, -1];
-const L_PT = [-1, 0];
-const R_PT = [1, 0];
-const O_PT = [0, 0];
-
-// the sheet is folded in half into a triangle with its point at the bottom (base on top)
-const triDown = () => ({ ...horiz(0, T_PT), dir: 'mountain', text: 'Fold the top point down and behind, to meet the bottom point.' });
-
-// "wings": fold both side points across the middle from creases at x = -+a (point at B)
-function wings(a, textL, textR) {
-  return [
-    { ...through([-a, 0], B_PT, L_PT), dir: 'valley', text: textL },
-    { ...through([a, 0], B_PT, R_PT), dir: 'valley', sel: { bottom: 2 }, text: textR },
-  ];
+function planRotateOp(stack, op) {
+  const reach = stack.map((_, i) => i);
+  const chosen = new Set(pick(reach, stack, op.sel));
+  let Rm = rotationMatrix(op.pivot, op.angle);
+  if (op.mirror) Rm = mul(Rm, reflectionMatrix(op.pivot, [1, 0])); // turn the layer over (about the vertical line through the pivot), then rotate
+  const flips = det(Rm) < 0;
+  const stay = [], moving = [];
+  const result = stack.map((l, i) => {
+    if (!chosen.has(i)) { stay.push(l); return l; }
+    moving.push(l);
+    const poly = l.poly.map(([x, y]) => applyM(Rm, x, y));
+    if (flips) poly.reverse();
+    return { ...l, poly, m: mul(Rm, l.m), face: flips ? -l.face : l.face };
+  });
+  return { kind: 'rotate', mirror: !!op.mirror, pivot: op.pivot, angle: op.angle, stay, moving, result, Rm, dir: 'valley', landing: (pt) => applyM(Rm, pt[0], pt[1]) };
 }
 
-function chamfer(tip, p, q, k) { // fold a small corner behind: crease between points k from the tip along each edge
-  const a = toward(tip, p, k), b = toward(tip, q, k);
-  return { a, b, move: tip };
+export function planOp(stack, op) { return op.type === 'rotate' ? planRotateOp(stack, op) : planFoldOp(stack, op); }
+export function stepOps(step) { return step.ops || [step]; }
+
+export function planStep(stack, step) {
+  const plans = [];
+  let cur = stack;
+  for (const op of stepOps(step)) {
+    const p = planOp(cur, op);
+    p.before = cur;
+    plans.push(p);
+    cur = p.result;
+  }
+  if (step.label) cur = cur.map((l, i) => ({ ...l, grp: i }));
+  return { plans, result: cur };
 }
+export function foldStack(stack, step) { return planStep(stack, step).result; }
 
-function heartSteps() {
-  const A1 = [-0.15, 0], A2 = [0.15, 0];
-  const tipR = refl(L_PT, A1, B_PT); // the left wing's point lands on the right side, up high
-  const tipL = refl(R_PT, A2, B_PT);
-  return [
-    triDown(),
-    ...wings(0.15, 'Fold the left point across, along a crease from near the middle down to the bottom point.', 'Now the right point, the same way. It lands over the first.'),
-    { ...chamfer(tipR, A1, B_PT, 0.26), dir: 'mountain', text: 'Tuck the tip of the right lobe behind to round it.' },
-    { ...chamfer(tipL, A2, B_PT, 0.26), dir: 'mountain', text: 'Tuck the other lobe behind too.' },
-  ];
-}
-
-function cupSteps() {
-  const Ql = [H - 1, -H], Qr = [1 - H, -H];
-  return [
-    { ...horiz(0, B_PT), dir: 'mountain', text: 'Fold the bottom point up and behind, to meet the top point.' },
-    { ...bis(L_PT, Qr), dir: 'valley', text: 'Fold the left point across so it just touches the right edge.' },
-    { ...bis(R_PT, Ql), dir: 'valley', text: 'Fold the right point across so it just touches the left edge.' },
-    { ...horiz(-H, T_PT), dir: 'valley', sel: { top: 1 }, text: 'Fold the front point down to make the cup\'s lip.' },
-    { ...horiz(-H, T_PT), dir: 'mountain', sel: { bottom: 1 }, text: 'Turn it and fold the back point down the same way.' },
-  ];
-}
-
-function tulipSteps() {
-  return [
-    triDown(),
-    ...wings(0.6, 'Fold the left point across from a wide crease. It becomes a petal.', 'Fold the right point across for the second petal.'),
-    { ...horiz(0.325, B_PT), dir: 'valley', text: 'Fold the bottom point up. This is the third petal.' },
-  ];
-}
-
-function foxSteps() {
-  return [
-    triDown(),
-    ...wings(0.45, 'Fold the left point across to make an ear.', 'Fold the right point across for the other ear.'),
-    { ...horiz(0.78, B_PT), dir: 'valley', text: 'Tip the chin up to show a pale muzzle.' },
-  ];
-}
-
-function catSteps() {
-  return [
-    triDown(),
-    ...wings(0.55, 'Fold the left point across to make an ear.', 'Fold the right point across for the other ear.'),
-    { ...horiz(0.62, B_PT), dir: 'valley', text: 'Tip the chin up for a small muzzle.' },
-  ];
-}
-
-function envelopeSteps() {
-  return [
-    { ...bis(L_PT, O_PT), dir: 'valley', text: 'The colour side is face down. Fold the left point to the middle.' },
-    { ...bis(R_PT, O_PT), dir: 'valley', text: 'Fold the right point to the middle.' },
-    { ...bis(B_PT, O_PT), dir: 'valley', text: 'Fold the bottom point up to the middle.' },
-    { ...bis(T_PT, O_PT), dir: 'valley', text: 'Close the flap: the top point comes down to the middle.' },
-  ];
-}
-
-export const MODELS = [
-  { id: 'cup', name: 'Cup', blurb: 'A little drinking cup for the studio.', startFace: 1, steps: cupSteps() },
-  { id: 'heart', name: 'Heart', blurb: 'Two lobes and a point, from three folds.', startFace: 1, steps: heartSteps() },
-  { id: 'tulip', name: 'Tulip', blurb: 'A flower head with three petals.', startFace: 1, steps: tulipSteps() },
-  { id: 'fox', name: 'Fox face', blurb: 'Tall ears and a pale chin.', startFace: 1, steps: foxSteps() },
-  { id: 'cat', name: 'Cat face', blurb: 'Round-cheeked, with two small ears.', startFace: 1, steps: catSteps() },
-  { id: 'envelope', name: 'Envelope', blurb: 'Folded colour-side in, so the patterns meet in the middle.', startFace: -1, steps: envelopeSteps() },
-];
-
-export function getModel(id) { return MODELS.find((m) => m.id === id) || null; }
-
+// ---------------------------------------------------------------- states
 const stateCache = new Map();
 
 // states[0] is the flat sheet; states[i] is after step i.
 export function buildStates(model) {
   if (stateCache.has(model.id)) return stateCache.get(model.id);
-  const states = [createStack(model.startFace)];
-  for (const step of model.steps) states.push(foldStack(states[states.length - 1], step));
+  const states = [createStack(model.startFace ?? 1, model.pose || 'diamond')];
+  for (const step of model.steps) states.push(planStep(states[states.length - 1], step).result);
   stateCache.set(model.id, states);
   return states;
 }
-
 export function finalState(model) {
   const s = buildStates(model);
   return s[s.length - 1];
@@ -274,13 +246,33 @@ export function stackBounds(stack) {
   return { x0, y0, x1, y1 };
 }
 
-export function modelBounds(model) { // union over every state, so the camera never has to move mid-fold
+export function decorBounds(shapes) {
   let b = null;
-  for (const s of buildStates(model)) {
-    const q = stackBounds(s);
-    b = b ? { x0: Math.min(b.x0, q.x0), y0: Math.min(b.y0, q.y0), x1: Math.max(b.x1, q.x1), y1: Math.max(b.y1, q.y1) } : q;
+  const add = (x, y, r = 0) => {
+    b = b ? { x0: Math.min(b.x0, x - r), y0: Math.min(b.y0, y - r), x1: Math.max(b.x1, x + r), y1: Math.max(b.y1, y + r) } : { x0: x - r, y0: y - r, x1: x + r, y1: y + r };
+  };
+  for (const s of shapes || []) {
+    if (s.t === 'dot') add(s.x, s.y, s.r);
+    else if (s.t === 'ellipse') add(s.x, s.y, Math.max(s.rx, s.ry));
+    else for (const p of s.pts) add(p[0], p[1], (s.w || 0) / 2);
   }
   return b;
+}
+
+export function modelDecor(model, stack) {
+  return typeof model.decor === 'function' ? model.decor(stack) : model.decor || [];
+}
+
+export function unionBounds(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  return { x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1) };
+}
+
+export function modelBounds(model) { // union over every state (and the decoration), so the camera never moves mid-fold
+  let b = null;
+  for (const s of buildStates(model)) b = unionBounds(b, stackBounds(s));
+  return unionBounds(b, decorBounds(modelDecor(model, finalState(model))));
 }
 
 // Segments of a crease line that lie on the paper (for drawing the dashed line).
@@ -291,7 +283,6 @@ export function creaseSegments(stack, line) {
     const n = l.poly.length;
     for (let i = 0; i < n; i++) {
       const a = l.poly[i], b = l.poly[(i + 1) % n];
-      // polygon is positively oriented: inside is where cross(b-a, p-a) >= 0
       const ex = b[0] - a[0], ey = b[1] - a[1];
       const c0 = ex * (line.p[1] - a[1]) - ey * (line.p[0] - a[0]);
       const cd = ex * line.u[1] - ey * line.u[0];

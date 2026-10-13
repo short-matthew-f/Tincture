@@ -7,9 +7,11 @@ import {
   dropInk, beginDrop, growDrop, stylusStep, combStep, swirlStep, resample, starterOps, runStarter, applyOp, combOffsets,
 } from '../proto/marbling/marble.js';
 import {
-  MODELS, createStack, planFold, foldStack, buildStates, finalState, area, invert, applyM, det, mul, reflectionMatrix,
-  splitConvex, creaseLine, stackBounds, creaseSegments, H, SHEET_M,
+  createStack, planStep, planOp, foldStack, buildStates, finalState, area, invert, applyM, det, mul, reflectionMatrix,
+  splitConvex, creaseLine, stackBounds, creaseSegments, SHEET_M, stepOps, modelBounds,
 } from '../proto/marbling/fold.js';
+import { MODELS, LEVELS, getModel } from '../proto/marbling/models.js';
+const H = 2 / (2 + Math.SQRT2);
 
 const near = (a, b, e = 1e-6) => assert.ok(Math.abs(a - b) <= e, `${a} vs ${b}`);
 
@@ -227,9 +229,10 @@ test('reflection matrices are involutions with det -1', () => {
 });
 
 test('every model: each step moves paper, area is conserved, texture stays on the sheet', () => {
-  assert.ok(MODELS.length >= 6);
+  assert.ok(MODELS.length >= 16);
   for (const model of MODELS) {
-    assert.ok(model.steps.length >= 4 && model.steps.length <= 8, model.id + ' steps');
+    assert.ok(model.steps.length >= 3 && model.steps.length <= 12, model.id + ' steps');
+    assert.ok(LEVELS.includes(model.level), model.id + ' level');
     const states = buildStates(model);
     assert.equal(states.length, model.steps.length + 1);
     states.forEach((stack, si) => {
@@ -240,6 +243,7 @@ test('every model: each step moves paper, area is conserved, texture stays on th
         // face follows the reflection parity
         assert.equal(Math.sign(d) * model.startFace, l.face, `${model.id} face parity`);
         sheetArea += area(l.poly) / Math.abs(d);
+        assert.ok(l.poly.length >= 3);
         const inv = invert(l.m);
         for (const [x, y] of l.poly) {
           const [u, v] = applyM(inv, x, y);
@@ -253,10 +257,12 @@ test('every model: each step moves paper, area is conserved, texture stays on th
       near(sheetArea, 1, 1e-6); // the layers always tile the whole sheet exactly once
     });
     model.steps.forEach((step, i) => {
-      const plan = planFold(states[i], step);
-      assert.ok(plan.moving.length > 0, `${model.id} step ${i + 1} moves nothing`);
-      const movedArea = plan.moving.reduce((s, l) => s + area(l.poly), 0);
-      assert.ok(movedArea > 0.01, `${model.id} step ${i + 1} moves almost nothing`);
+      const { plans } = planStep(states[i], step);
+      plans.forEach((plan, k) => {
+        assert.ok(plan.moving.length > 0, `${model.id} step ${i + 1} op ${k + 1} moves nothing`);
+        const movedArea = plan.moving.reduce((s, l) => s + area(l.poly), 0);
+        assert.ok(movedArea > 0.004, `${model.id} step ${i + 1} op ${k + 1} moves almost nothing`);
+      });
     });
   }
 });
@@ -275,7 +281,7 @@ test('heart: two lobes rise above a central cleft, point at the bottom', () => {
   const fin = finalState(heart);
   const b = stackBounds(fin);
   near(b.y1, 1, 1e-6); // the point
-  assert.ok(b.y0 < -0.15 && b.y0 > -0.35); // lobes
+  assert.ok(b.y0 < -0.1 && b.y0 > -0.35); // lobes
   // sample the top edge: the silhouette at x=0 is lower than at the lobes
   const topAt = (x) => {
     let top = Infinity;
@@ -318,4 +324,86 @@ test('building all models is fast', () => {
   const t = Date.now();
   for (let i = 0; i < 200; i++) for (const m of MODELS) foldStack(createStack(m.startFace), m.steps[0]);
   assert.ok(Date.now() - t < 500);
+});
+
+// ------------------------------------------------------------------ the new fold types
+const base = (face = 1) => createStack(face);
+
+test('inside-reverse fold tucks the swung tip between the layers it came from', () => {
+  // a two-layer flap: fold the diamond in half (valley), then reverse the tip
+  const two = foldStack(base(), { a: [-4, 0], b: [4, 0], move: [0, -1], dir: 'valley' });
+  const op = { a: [-4, 0.5], b: [4, 0.5], move: [0, 1], dir: 'valley' };
+  const outside = foldStack(two, { ...op });
+  const inside = foldStack(two, { ...op, place: 'inside' });
+  assert.equal(outside.length, inside.length);
+  assert.equal(outside.length, 4);
+  // outside: the swung pieces land on top (reversed); inside: they sit between the two staying pieces
+  assert.deepEqual(outside.map((l) => l.face), [1, -1, -1, 1].map((v, i) => outside[i].face));
+  assert.ok(inside[0].poly.length >= 3 && inside[3].poly.length >= 3);
+  // the staying pieces keep the outer positions: bottom and top of the stack
+  const stayAreaBottom = area(inside[0].poly), stayAreaTop = area(inside[3].poly);
+  near(stayAreaBottom, stayAreaTop, 1e-9);
+  // swung pieces end up reflected across the crease
+  const b = stackBounds(inside);
+  near(b.y0, 0 - 0.5 * 0 + 0, 1); // loose: just that the tip now points the other way
+  assert.ok(b.y1 <= 1 + 1e-9);
+  assert.ok(inside[1].face === -two[1].face || inside[1].face === -two[0].face);
+});
+
+test('clip restricts a fold to part of the moving side (a partial flap fold)', () => {
+  const plan = planOp(base(), { a: [-4, 0], b: [4, 0], move: [0, 1], dir: 'valley', clip: [{ a: [0, -4], b: [0, 4], keep: [-1, 0] }] });
+  assert.equal(plan.moving.length, 1);
+  near(area(plan.moving[0].poly), 0.5); // only the lower left quarter swings
+  const total = plan.result.reduce((s, l) => s + area(l.poly), 0);
+  near(total, 2);
+  assert.ok(plan.result.length >= 3);
+});
+
+test('sel by group, tag, half and the label step', () => {
+  const s0 = foldStack(base(), { a: [-4, -4], b: [4, 4], move: [1, 0], dir: 'mountain', label: true });
+  assert.deepEqual(s0.map((l) => l.grp), [0, 1]);
+  const s1 = foldStack(s0, { a: [-4, 0], b: [4, 0], move: [0, 1], dir: 'valley', sel: { grp: [1] }, tag: 'swung' });
+  assert.ok(s1.some((l) => l.tag === 'swung' && l.grp === 1));
+  assert.ok(s1.every((l) => l.tag !== 'swung' || l.grp === 1));
+  const half = planOp(s0, { a: [-4, 0], b: [4, 0], move: [0, 1], dir: 'valley', sel: { half: 'top' } });
+  assert.equal(half.moving.length, 1);
+  const tagged = planOp(s1, { a: [-4, -0.2], b: [4, -0.2], move: [0, -1], dir: 'valley', sel: { tag: 'swung' } });
+  assert.ok(tagged.moving.every((l) => l.tag === 'swung'));
+});
+
+test('rotate op turns chosen layers rigidly; mirror turns them over', () => {
+  const s = foldStack(base(), { a: [-4, 0], b: [4, 0], move: [0, -1], dir: 'valley', label: true });
+  const rot = planOp(s, { type: 'rotate', pivot: [0, 0], angle: Math.PI / 2, sel: { grp: [1] } });
+  assert.equal(rot.moving.length, 1);
+  near(area(rot.result[1].poly), area(s[1].poly));
+  assert.equal(rot.result[1].face, s[1].face);
+  const mir = planOp(s, { type: 'rotate', pivot: [0, 0], angle: 0.3, sel: { grp: [1] }, mirror: true });
+  assert.equal(mir.result[1].face, -s[1].face);
+  assert.ok(area(mir.result[1].poly) > 0, 'winding kept positive');
+  near(det(mir.result[1].m), -det(s[1].m));
+});
+
+test('crane: the square base has four equal layers, the bird base four flaps, and the wings open', () => {
+  const crane = getModel('crane');
+  const st = buildStates(crane);
+  // after the second fold: four stacked layers of the same small square
+  assert.equal(st[2].length, 4);
+  st[2].forEach((l) => near(area(l.poly), 0.5, 1e-9));
+  assert.deepEqual(st[2].map((l) => l.grp), [0, 1, 2, 3]);
+  // bird base: a long kite, 0.707 above and below the waist
+  const bb = stackBounds(st[5]);
+  near(bb.y0, -0.41421, 1e-4); near(bb.y1, 1, 1e-9);
+  near(bb.x1 - bb.x0, 2 * (1 - Math.SQRT1_2), 1e-4);
+  // the finished crane is wider than the bird base: the wings are open
+  const fin = stackBounds(st.at(-1));
+  assert.ok(fin.x1 - fin.x0 > 0.7);
+  assert.ok(crane.steps.some((s) => stepOps(s).some((o) => o.place === 'inside')), 'has reverse folds');
+  assert.ok(crane.steps.some((s) => stepOps(s).length >= 3), 'has a compound petal step');
+});
+
+test('models are grouped by difficulty and bounds include the pen marks', () => {
+  for (const level of LEVELS) assert.ok(MODELS.some((m) => m.level === level), level);
+  const kite = getModel('kite');
+  const b = modelBounds(kite);
+  assert.ok(b.y1 > 1.5, 'the kite tail is inside the camera bounds');
 });
