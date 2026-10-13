@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#F4EFE4">
+<title>Dye Studio</title>
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Young+Serif&amp;family=Figtree:wght@400;500;600;700&amp;display=swap">
+<link rel="stylesheet" href="../shared.css">
+<style>
+:root { --line-strong: #CFC4AD; --glow: #FFF3D6; --wood: #B98A57; --table: #E9E0CD; }
+body { padding: 0 12px calc(150px + env(safe-area-inset-bottom)); line-height: 1.4; }
+.wrap { max-width: 460px; margin: 0 auto; }
+.top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+h1 { font: 400 26px/1.15 var(--font-display); margin: 0; }
+.sub { color: var(--ink-soft); margin: 2px 0 10px; font-size: 14px; }
+button { font: inherit; color: inherit; }
+.btn { border: 1.5px solid var(--line-strong); box-shadow: 0 2px 0 rgba(42,38,34,.14); display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 44px; }
+.btn.primary { border-color: var(--ink); }
+.btn[aria-disabled="true"] { opacity: .45; box-shadow: none; }
+.btn .ico { width: 18px; height: 18px; flex: 0 0 auto; }
+
+#stashBtn { position: relative; padding: 0 10px 0 6px; gap: 8px; }
+#stashBtn .stack { display: inline-flex; }
+#stashBtn .stack img { width: 26px; height: 26px; border-radius: 6px; border: 2px solid var(--card); margin-left: -12px; box-shadow: 0 1px 0 rgba(0,0,0,.15); object-fit: cover; }
+#stashBtn .stack img:first-child { margin-left: 0; }
+#stashBtn.bump { animation: bump .5s ease-out; }
+@keyframes bump { 30% { transform: scale(1.12); } 100% { transform: none; } }
+
+.chips { display: flex; gap: 6px; overflow-x: auto; padding: 2px 2px 6px; margin: 0 -2px 6px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.chips::-webkit-scrollbar { display: none; }
+.chip { flex: 0 0 auto; min-height: 44px; border-radius: 999px; border: 1.5px solid var(--line-strong); background: var(--card); padding: 0 12px 0 5px; display: inline-flex; align-items: center; gap: 7px; font-weight: 600; font-size: 14px; box-shadow: 0 2px 0 rgba(42,38,34,.12); cursor: pointer; }
+.chip canvas { width: 32px; height: 32px; border-radius: 50%; background: #eee5d2; }
+.chip[aria-pressed="true"] { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+
+.stage { position: relative; width: 100%; aspect-ratio: 1 / 1; max-height: 56vh; margin: 0 auto; border-radius: 14px; overflow: hidden; background: var(--table); box-shadow: inset 0 0 0 1px rgba(42,38,34,.08); touch-action: none; user-select: none; -webkit-user-select: none; }
+@supports not (aspect-ratio: 1 / 1) { .stage { height: 0; padding-bottom: 100%; } }
+.stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.stageWrap { display: flex; justify-content: center; }
+.stageWrap .stage { max-width: 56vh; }
+.tag { position: absolute; left: 8px; bottom: 8px; background: rgba(251,248,241,.9); border-radius: 999px; padding: 3px 10px; font-size: 12px; font-weight: 600; color: var(--ink-soft); pointer-events: none; }
+.say { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); background: rgba(42,38,34,.86); color: var(--paper); border-radius: 999px; padding: 6px 14px; font-size: 13px; font-weight: 600; pointer-events: none; white-space: nowrap; max-width: calc(100% - 20px); overflow: hidden; text-overflow: ellipsis; opacity: 0; transition: opacity .25s; }
+.say.on { opacity: 1; }
+
+.bar { display: flex; gap: 6px; align-items: center; margin: 8px 0 12px; flex-wrap: wrap; }
+.bar .grow { flex: 1 1 auto; }
+.bar .btn { padding: 0 10px; }
+
+.card { margin: 0 0 12px; }
+.card h2 { font: 700 12px var(--font-ui); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-soft); margin: 0 0 8px; }
+.step { border-top: 1px solid var(--line); padding: 10px 0 4px; }
+.step:first-of-type { border-top: 0; padding-top: 0; }
+.step .h { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+.step .n { flex: 0 0 auto; width: 22px; height: 22px; border-radius: 50%; background: var(--paper); border: 1.5px solid var(--line-strong); font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; transform: translateY(3px); }
+.step .t { font-weight: 700; font-size: 15px; }
+.step .d { color: var(--ink-soft); font-size: 13px; margin: -2px 0 8px; }
+.step .body { margin-left: 0; }
+.row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.row + .row { margin-top: 8px; }
+
+.bases { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 5px; }
+.base { position: relative; padding: 0; border: 0; background: none; border-radius: 10px; aspect-ratio: 1 / 1; min-height: 44px; cursor: pointer; }
+.base canvas { width: 100%; height: 100%; border-radius: 10px; display: block; box-shadow: 0 2px 0 rgba(42,38,34,.15), inset 0 0 0 1px rgba(0,0,0,.08); }
+.base[aria-pressed="true"]::after { content: ''; position: absolute; inset: -4px; border: 2.5px solid var(--ink); border-radius: 13px; }
+.baseNote { font-size: 13px; color: var(--ink-soft); margin: 8px 0 0; min-height: 2.6em; }
+.baseNote b { color: var(--ink); }
+
+.dock { position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; background: var(--card); border-radius: 18px 18px 0 0; box-shadow: 0 -3px 0 rgba(42,38,34,.1), 0 -8px 24px rgba(42,38,34,.08); padding: 6px 0 calc(10px + env(safe-area-inset-bottom)); }
+.dock .inner { max-width: 460px; margin: 0 auto; }
+.dock .lbl { font-size: 12px; color: var(--ink-soft); font-weight: 600; padding: 0 14px; display: flex; justify-content: space-between; }
+.dock .lbl b { color: var(--ink); }
+.pots { display: flex; gap: 2px; overflow-x: auto; padding: 4px 10px 6px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.pots::-webkit-scrollbar { display: none; }
+.dock .act { display: flex; gap: 8px; padding: 0 12px; }
+.dock .act > * { flex: 1 1 auto; }
+.dock .act .hold { flex: 1 1 auto; }
+.pot { flex: 0 0 auto; border: 0; background: none; padding: 2px; display: flex; flex-direction: column; align-items: center; gap: 1px; min-height: 44px; min-width: 48px; cursor: pointer; }
+.pot i { position: relative; width: 40px; height: 40px; border-radius: 50%; display: block; box-shadow: inset 0 0 0 4px #8d8578, inset 0 0 0 5px rgba(0,0,0,.25), 0 2px 0 rgba(42,38,34,.18); }
+.pot i::after { content: ''; position: absolute; left: 10px; top: 9px; width: 11px; height: 6px; border-radius: 50%; background: rgba(255,255,255,.35); transform: rotate(-25deg); }
+.pot span { font-size: 11px; color: var(--ink-soft); font-weight: 600; }
+.pot[aria-pressed="true"] i { outline: 2.5px solid var(--ink); outline-offset: 2px; }
+.pot[aria-pressed="true"] span { color: var(--ink); }
+
+.seg { display: inline-flex; border: 1.5px solid var(--line-strong); border-radius: 12px; overflow: hidden; background: var(--paper); max-width: 100%; flex-wrap: wrap; }
+.seg button { min-height: 44px; min-width: 44px; padding: 0 11px; border: 0; background: transparent; font-weight: 600; font-size: 14px; border-right: 1px solid var(--line); cursor: pointer; }
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+
+.hold { position: relative; overflow: hidden; min-height: 52px; padding: 0 18px; border-radius: 14px; font-size: 16px; touch-action: none; -webkit-user-select: none; user-select: none; }
+.hold .fill { position: absolute; left: 0; bottom: 0; height: 100%; width: 0; background: rgba(255,255,255,.18); pointer-events: none; }
+.hold .sw { width: 22px; height: 22px; border-radius: 50%; box-shadow: inset 0 0 0 2px rgba(255,255,255,.6); flex: 0 0 auto; }
+.hold span { position: relative; }
+
+.picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 8px; }
+.pick { border: 1.5px solid var(--line-strong); background: var(--paper); border-radius: 12px; padding: 5px 4px 6px; display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; cursor: pointer; min-height: 44px; }
+.pick canvas { width: 56px; height: 56px; border-radius: 8px; }
+.pick[aria-pressed="true"] { border-color: var(--ink); box-shadow: 0 0 0 1.5px var(--ink); background: var(--glow); }
+
+.hint { font-size: 13px; color: var(--ink-soft); margin: 6px 0 0; }
+.fine { font-size: 12px; color: var(--ink-soft); }
+
+#overlay { position: fixed; inset: 0; background: rgba(42,38,34,.35); display: none; z-index: 20; }
+.toast { bottom: calc(150px + env(safe-area-inset-bottom)) !important; }
+#overlay.open { display: block; }
+#sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 21; max-height: 86vh; overflow-y: auto; background: var(--card); border-radius: 18px 18px 0 0; box-shadow: 0 -3px 0 rgba(42,38,34,.12); padding: 14px 14px calc(18px + env(safe-area-inset-bottom)); transform: translateY(105%); transition: transform .28s ease; visibility: hidden; }
+#sheet.open { transform: none; visibility: visible; }
+#sheet .inner { max-width: 460px; margin: 0 auto; }
+#sheet h3 { font: 400 22px var(--font-display); margin: 0; }
+.sheetTop { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; }
+.swatches { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 12px 0; }
+.swatch { border: 0; background: none; padding: 0; text-align: left; cursor: pointer; min-width: 0; }
+.swatch img { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border-radius: 10px; display: block; box-shadow: 0 2px 0 rgba(42,38,34,.18); background: #eee; }
+.swatch b { display: block; font-size: 12px; font-weight: 600; margin-top: 4px; line-height: 1.25; overflow-wrap: anywhere; }
+.swatch small { display: block; font-size: 11px; color: var(--ink-soft); }
+.swatch.new img { box-shadow: 0 0 0 3px var(--gold), 0 2px 0 rgba(42,38,34,.18); }
+.detail { display: flex; gap: 12px; align-items: flex-start; background: var(--paper); border-radius: 12px; padding: 10px; margin: 10px 0; flex-wrap: wrap; }
+.detail img { width: 112px; height: 112px; border-radius: 10px; object-fit: cover; flex: 0 0 auto; }
+.detail .meta { flex: 1 1 160px; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.detail input { font: inherit; width: 100%; min-height: 44px; padding: 8px 10px; border-radius: 12px; border: 1.5px solid var(--line-strong); background: #fff; color: var(--ink); }
+.quiltLink { display: flex; align-items: center; justify-content: center; min-height: 48px; border-radius: 12px; background: var(--ink); color: var(--paper); font-weight: 700; text-decoration: none; margin-top: 4px; }
+
+.fly { position: fixed; z-index: 30; border-radius: 10px; box-shadow: 0 6px 18px rgba(0,0,0,.25); pointer-events: none; transition: transform .7s cubic-bezier(.5,-0.1,.4,1), opacity .7s; }
+.toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom)); transform: translate(-50%, 20px); background: var(--glow); border: 2px solid var(--gold); color: var(--ink); border-radius: 14px; padding: 10px 14px; font-weight: 600; font-size: 14px; z-index: 25; opacity: 0; transition: opacity .3s, transform .3s; width: max-content; max-width: calc(100vw - 32px); text-align: center; pointer-events: none; }
+.toast.on { opacity: 1; transform: translate(-50%, 0); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <a class="back" href="../">&larr; Fiber prototypes</a>
+    <button class="btn small" id="stashBtn" aria-haspopup="dialog"><span class="stack" id="stashStack"></span><span>Your stash</span></button>
+  </div>
+  <h1>Dye Studio</h1>
+  <p class="sub">Dye your own quilting cloth. Every piece you make is yours to keep.</p>
+
+  <div class="chips" id="techs" role="group" aria-label="Technique"></div>
+
+  <div class="stageWrap"><div class="stage" id="stage">
+    <canvas id="view" aria-label="Your cloth"></canvas>
+    <div class="tag" id="tag"></div>
+    <div class="say" id="say" aria-live="polite"></div>
+  </div></div>
+
+  <div class="bar">
+    <button class="btn small" id="undoBtn" aria-disabled="true" aria-label="Undo" title="Undo">
+      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg></button>
+    <button class="btn small" id="resetBtn">Start over</button>
+    <button class="btn small" id="loupeBtn" aria-pressed="false">
+      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg>Closer</button>
+    <span class="grow"></span>
+    <button class="btn small primary" id="keepBtn">Keep it</button>
+  </div>
+
+  <section class="card" id="panel"></section>
+
+  <section class="card">
+    <div class="row" style="justify-content:space-between">
+      <div><b>Not sure where to start?</b><div class="fine">Watch a piece get made, start to finish.</div></div>
+      <button class="btn" id="surpriseBtn">Surprise me</button>
+    </div>
+  </section>
+</div>
+
+<div class="dock" id="dock" role="region" aria-label="Dye pots"><div class="inner">
+  <div class="lbl"><span id="dockLabel">Dye pots</span><span id="dockDye"></span></div>
+  <div class="pots" id="pots" role="group" aria-label="Dye pots"></div>
+  <div class="act" id="dockAct"></div>
+</div></div>
+<div id="overlay"></div>
+<div id="sheet" role="dialog" aria-modal="true" aria-label="Your stash"><div class="inner" id="sheetInner"></div></div>
+<div class="toast" id="toast" role="status"></div>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>
