@@ -16,7 +16,7 @@ import { dayKey, isoWeekKey } from '../format.js';
 import { stateRng, randInt, weightedPick, pick, uuid } from '../rng.js';
 import { emit } from './bus.js';
 import { addBoost } from './factory.js';
-import { discover } from './discovery.js';
+import { discover, discoverableColors } from './discovery.js';
 import {
   unlocked as huntersUnlocked, familyOfColor, colorInfo, knowsColor, postcardsForRegion, addPostcard,
 } from './hunters.js';
@@ -37,7 +37,7 @@ function ensureQuests(state) {
   return q;
 }
 
-/** unlocksOf(state) -> {phase, hunters, gallery, shelf, fleet} for quest eligibility. */
+/** unlocksOf(state) -> {phase, hunters, gallery, shelf, fleet, tiles} for quest eligibility. */
 export function unlocksOf(state) {
   const shelfCells = state.shelf && Array.isArray(state.shelf.cells) ? state.shelf.cells : [];
   return {
@@ -45,7 +45,10 @@ export function unlocksOf(state) {
     hunters: huntersUnlocked(state),
     gallery: state.unlocks ? !!state.unlocks.gallery : !!(state.gallery && state.gallery.unlocked),
     shelf: !!(state.unlocks && state.unlocks.shelf) || shelfCells.some((c) => c),
-    fleet: !!(state.stations && Array.isArray(state.stations.fleet) && state.stations.fleet.length > 0),
+    tiles: !!(state.unlocks && state.unlocks.tiles),
+    // Shipping needs the Loading Yard (the handcart waits in the drawer until then).
+    fleet: !!(state.stations && Array.isArray(state.stations.fleet) && state.stations.fleet.length > 0)
+      && (!!(state.unlocks && state.unlocks.shipping) || (state.rooms || []).includes('loading-yard')),
   };
 }
 
@@ -242,20 +245,44 @@ const STEP_NEEDS = {
   batchPurified: (u) => u.phase >= 2,
 };
 
+/** Colors of a hue family she can still discover this era (catalog pages + the running event's page). */
+function undiscoveredInFamily(state, family) {
+  try {
+    return discoverableColors(state).filter((c) => familyOfColor(c.id) === family).length;
+  } catch { return 0; }
+}
+
 function weeklyFeasible(state, wq) {
+  return weeklyBlockers(state, wq) === 0;
+}
+
+/**
+ * How many steps of a weekly quest she cannot do yet (0: all doable now). A step that
+ * can never be done this run (too few colors of a family left to find) weighs 100, so
+ * the fallback prefers steps that only wait for something she can buy.
+ */
+function weeklyBlockers(state, wq) {
   const u = unlocksOf(state);
   const open = (state.hunters && state.hunters.regionsUnlocked) || [];
-  return wq.steps.every((s) => {
-    const need = STEP_NEEDS[s.event];
-    if (need && !need(u)) return false;
-    if (s.region && !open.includes(s.region)) return false;
-    if (s.commission) {
-      const c = state.commissions || {};
-      if ((c.done || []).includes(s.commission)) return false;
-      if (!(c.open || []).some((x) => x.id === s.commission)) return false;
-    }
-    return true;
-  });
+  let n = 0;
+  for (const s of wq.steps) {
+    if (s.event === 'colorDiscovered' && s.family && undiscoveredInFamily(state, s.family) < s.n) n += 100;
+    else if (!stepDoable(state, s, u, open)) n += 1;
+  }
+  return n;
+}
+
+function stepDoable(state, s, u, open) {
+  const need = STEP_NEEDS[s.event];
+  if (need && !need(u)) return false;
+  if (s.region && !open.includes(s.region)) return false;
+  if (s.commission) {
+    const c = state.commissions || {};
+    if ((c.done || []).includes(s.commission)) return false;
+    if (!(c.open || []).some((x) => x.id === s.commission)) return false;
+  }
+  if (s.event === 'colorDiscovered' && s.family && undiscoveredInFamily(state, s.family) < s.n) return false;
+  return true;
 }
 
 /** rollWeekly(state, now) — a new weekly quest each ISO week (rotation, skipping ones she can't do yet). */
@@ -271,7 +298,16 @@ export function rollWeekly(state, now = 0) {
     const wq = WEEKLY_QUESTS[(start + i) % WEEKLY_QUESTS.length];
     if (weeklyFeasible(state, wq)) { chosen = wq; break; }
   }
-  if (!chosen) chosen = getWeeklyQuest('blue-hour') ?? first;
+  if (!chosen) {
+    // Nothing fits every step yet: the one with the fewest steps still to open (ties: rotation order).
+    let best = Infinity;
+    for (let i = 0; i < WEEKLY_QUESTS.length; i++) {
+      const wq = WEEKLY_QUESTS[(start + i) % WEEKLY_QUESTS.length];
+      const b = weeklyBlockers(state, wq);
+      if (b < best) { best = b; chosen = wq; }
+    }
+  }
+  if (!chosen) chosen = first;
   q.weekly = {
     id: chosen.id,
     weekKey: wk,

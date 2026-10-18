@@ -12,8 +12,19 @@
  * timer; nothing here counts down. Progress reads "3 more", never "2 / 5".
  * The event track is a fade-edged, snapping strip that opens on the current step.
  *
- * data-actions: claim, reroll, claim-weekly, claim-step, go-map, go-workshop.
- * Opens with params `{section: 'daily' | 'weekly' | 'event'}` (optional scroll target).
+ * data-actions: claim, reroll, claim-weekly, claim-step, go-map, go-workshop, how (data-kind
+ * daily|weekly|event, data-id / data-index: opens the how-to sheet), go (data-screen, data-params:
+ * navigate), how-close.
+ * Opens with params `{section: 'daily' | 'weekly' | 'event'}` (optional scroll target) and
+ * `{how: 'event'}` (opens the event sheet).
+ *
+ * How-to sheets (playtest: "tapping a quest should explain how to do it and take you there"):
+ * every daily card, every weekly step and the event card open a bottom sheet built from
+ * sim/howto.js: one or two plain sentences, progress, what to open first (with its price and
+ * a button: never a dead end) and a "Take me there" button to the exact screen. The event
+ * sheet lists every way to earn event points (with Go buttons), how to get the limited colors,
+ * the twist and where to see it, any Era preview, and the reward track in words; the next step
+ * is shown in actions ("about 1 board or 2 orders"), not just points.
  *
  * First-open guide 'quests': `data-coach="quests-daily"` (the Daily heading, a got-it step), then
  * `data-coach="quests-claim"` (the first Claim button, waits for a claimable quest, ends when a daily
@@ -26,9 +37,10 @@
  * starts, and claimable steps arrive softly when the page opens.
  */
 
-import { h, raw, backButton, button, progressBar, fadeStrip, iconSvg, swatch, safeHex, containerSvg } from './kit.js';
+import { h, raw, backButton, button, progressBar, fadeStrip, iconSvg, swatch, safeHex, containerSvg, tag } from './kit.js';
 import { pennantSvg } from './map.js';
 import { howThisWorksHtml, markGuideSeen, isSeen } from './guide.js';
+import { questGuide, eventGuide } from '../sim/howto.js';
 
 const CSS = `
 section[data-screen="quests"] .screen-head .title { font-family:var(--font-ui); font-weight:600; font-size:18px; }
@@ -65,7 +77,7 @@ section[data-screen="quests"] .how-link::before { content:''; position:absolute;
 .qs-step.is-reached .qs-node { background:var(--paper); color:var(--ink); box-shadow:0 3px 0 var(--shadow), inset 0 0 0 2px var(--ink); }
 .qs-step.is-claimed .qs-node { background:var(--ink); color:var(--paper); box-shadow:0 3px 0 rgba(0,0,0,.35); }
 .qs-step.is-claimable .qs-node { background:var(--glow); box-shadow:0 0 0 3px var(--glow-ring), 0 3px 0 var(--shadow); animation:glow-breathe 2.8s ease-in-out infinite; }
-button.qs-step { cursor:pointer; }
+button.qs-step { cursor:pointer; border:0; background:none; font:inherit; color:inherit; }
 button.qs-step:active .qs-node { transform:translateY(2px); }
 .qs-ticket { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; width:100%; min-height:62px; padding:6px 4px; border-radius:8px 8px 8px 8px;
   background:var(--paper); box-shadow:var(--cut-sm); font-size:11px; font-weight:600; line-height:1.15; }
@@ -77,6 +89,41 @@ button.qs-step:active .qs-node { transform:translateY(2px); }
 .qs-evhead { display:flex; align-items:center; gap:12px; }
 .qs-big { font-family:var(--font-ui); font-weight:700; font-size:30px; line-height:1; }
 .qs-hl { animation:qs-flash 1.4s ease-out 1; }
+.qs-intro { display:flex; align-items:flex-start; gap:10px; padding:10px 12px; border-radius:var(--radius-sm); background:var(--paper); box-shadow:var(--cut-sm); font-size:13px; line-height:1.4; }
+.qs-intro b { font-weight:700; }
+.qs-intro > span:first-child, .qs-note > span:first-child { flex:0 0 auto; display:inline-flex; }
+.qs-quest.is-tap, .qs-evtap { cursor:pointer; touch-action:manipulation; }
+.qs-howlink { display:inline-flex; align-items:center; gap:4px; font-size:13px; font-weight:600; color:var(--ink-soft); text-decoration:underline; text-underline-offset:3px; }
+.qs-howlink svg { transform:rotate(180deg); }
+button.qs-step-row { width:100%; border:0; background:none; padding:4px 0; font:inherit; color:inherit; text-align:left; min-height:44px; cursor:pointer; }
+button.qs-step-row .qs-chev { flex:0 0 auto; color:var(--ink-soft); }
+button.qs-step-row .qs-chev svg { transform:rotate(180deg); }
+.qs-next { font-size:13px; color:var(--ink-soft); }
+.qs-next b { color:var(--ink); }
+.qs-evtap { display:flex; align-items:center; gap:12px; width:100%; border:0; background:none; padding:0; font:inherit; color:inherit; text-align:left; }
+.qs-sheet-host { position:absolute; inset:0; z-index:55; display:flex; align-items:flex-end; justify-content:center; background:rgba(42,38,34,.45); animation: fade-in 160ms ease-out both; }
+.qs-sheet { position:relative; min-height:0; gap:12px; }
+.qs-sheet .qs-x { position:absolute; right:12px; top:10px; }
+.qs-sheet-title { font-family:var(--font-ui); font-weight:700; font-size:19px; line-height:1.2; padding-right:48px; }
+.qs-sheet-sub { font-size:13px; color:var(--ink-soft); }
+.qs-sheet p { margin:0; line-height:1.45; }
+.qs-lbl { font-size:12px; font-weight:700; letter-spacing:.3px; text-transform:uppercase; color:var(--ink-soft); margin-top:4px; }
+.qs-need { display:flex; flex-direction:column; gap:8px; padding:10px 12px; border-radius:var(--radius-sm); background:#FBF1D4; box-shadow:inset 0 0 0 1.5px var(--gold); font-size:13px; }
+.qs-need .semi { font-size:14px; }
+.qs-src { display:flex; flex-direction:column; gap:6px; padding:10px 12px; border-radius:var(--radius-sm); background:var(--plaster); }
+.qs-src .row { gap:10px; }
+.qs-src .pts { flex:0 0 auto; font-weight:700; font-size:13px; }
+.qs-src .hint { line-height:1.35; }
+.qs-src .btn { align-self:flex-start; }
+.qs-steps { display:flex; flex-direction:column; gap:6px; }
+.qs-tstep { display:flex; align-items:flex-start; gap:10px; font-size:13px; line-height:1.35; }
+.qs-tstep .n { flex:0 0 28px; height:28px; border-radius:50%; display:grid; place-items:center; font-weight:700; background:var(--plaster); box-shadow:inset 0 0 0 1.5px var(--plaster-line); }
+.qs-tstep.is-reached .n { background:var(--ink); color:var(--paper); box-shadow:none; }
+.qs-tstep .pts { color:var(--ink-soft); white-space:nowrap; }
+.qs-sheet-acts { display:flex; flex-direction:column; gap:8px; position:sticky; bottom:calc(-18px - var(--safe-bottom)); margin:0 -18px calc(-18px - var(--safe-bottom)); padding:10px 18px calc(18px + var(--safe-bottom)); background:var(--paper); box-shadow:0 -2px 0 rgba(42,38,34,.08); }
+.qs-sheet .swatch.is-faint { opacity:.4; }
+.qs-prev { display:flex; flex-wrap:wrap; gap:10px; }
+.qs-prev .it { display:flex; align-items:center; gap:6px; font-size:13px; }
 @keyframes qs-flash { 0% { box-shadow:0 0 0 4px var(--glow-ring), var(--cut); } 100% { box-shadow:var(--cut); } }
 `;
 
@@ -152,8 +199,9 @@ function questCard(q, state) {
   else if (q.done) action = button('Claim', { variant: 'primary', attrs: { 'data-action': 'claim', 'data-quest-id': q.id, 'data-coach': 'quests-claim' } });
   else if (!used) action = button('Try another', { attrs: { 'data-action': 'reroll', 'data-quest-id': q.id, 'aria-label': 'Try another quest in its place, free once a day' } });
   else action = '';
-  return h`<div class="card qs-quest ${q.done && !q.claimed ? 'is-done' : ''} ${q.claimed ? 'is-claimed' : ''}" data-quest="${q.id}">
-    <div class="semi">${q.text}</div>
+  const tap = !q.claimed;
+  return h`<div class="card qs-quest ${tap ? 'is-tap' : ''} ${q.done && !q.claimed ? 'is-done' : ''} ${q.claimed ? 'is-claimed' : ''}" data-quest="${q.id}"${tap ? h` data-action="how" data-kind="daily" data-id="${q.id}" data-tap role="button" tabindex="0" aria-label="${q.text}: how to do it"` : ''}>
+    <div class="row between"><div class="semi">${q.text}</div>${tap && !q.done ? h`<span class="qs-howlink" aria-hidden="true">How${iconSvg('back', { size: 14 })}</span>` : ''}</div>
     ${q.claimed ? '' : progressBar(pct, { label: q.text })}
     <div class="row between wrap">
       <div class="qs-reward">${sealIcon(14)}<b>+${fmt(fin(reward.seals))} Seals</b>${fin(reward.boostMin) > 0 ? h`<span>and a ${reward.boostMin}-minute boost</span>` : ''}</div>
@@ -187,11 +235,12 @@ function weeklySection(state) {
     <div class="card ${w.done && !w.claimed ? 'qs-quest is-done' : ''}" data-weekly>
       <div class="row between"><div><div class="qs-h">${def ? def.name : 'This week\'s quest'}</div>${def ? h`<div class="hint">${def.blurb}</div>` : ''}</div>
         <span class="chip">${stepsLeft > 0 ? `${stepsLeft} more ${stepsLeft === 1 ? 'step' : 'steps'}` : 'All steps done'}</span></div>
-      <div class="stack stack-sm" style="gap:2px">${w.steps.map((s) => h`<div class="qs-step-row">
+      <div class="stack stack-sm" style="gap:0">${w.steps.map((s, i) => h`<button type="button" class="qs-step-row" data-action="how" data-kind="weekly" data-index="${i}" data-tap aria-label="${s.text}: how to do it">
         <span class="qs-tick ${s.done ? 'is-done' : ''}" aria-hidden="true">${s.done ? iconSvg('check', { size: 14 }) : ''}</span>
         <div class="grow ${s.done ? 'muted' : ''}"><span class="${s.done ? '' : 'semi'}">${s.text}</span></div>
         ${s.n > 1 && !s.done ? h`<span class="hint num nowrap">${Math.max(0, s.n - s.progress)} more</span>` : ''}
-        <span class="sr-only">${s.done ? 'Done' : 'Not yet'}</span></div>`)}</div>
+        <span class="sr-only">${s.done ? 'Done' : 'Not yet'}</span>${s.done ? '' : h`<span class="qs-chev" aria-hidden="true">${iconSvg('back', { size: 16 })}</span>`}</button>`)}</div>
+      ${w.done ? '' : h`<div class="hint">Tap a step to see how to do it.</div>`}
       <div class="qs-rare"><span aria-hidden="true">${sealIcon(22)}</span><div class="grow">Reward: <b>${fmt(fin(w.reward && w.reward.seals))} Seals</b> and <b>${rare}</b>.</div></div>
       ${w.claimed ? h`<span class="qs-stamp ${awaiting.has('weekly') ? 'is-await' : ''}" style="align-self:flex-start">${iconSvg('check', { size: 13 })} Claimed</span>`
         : w.done ? button('Claim reward', { variant: 'primary', block: true, attrs: { 'data-action': 'claim-weekly' } }) : ''}
@@ -227,17 +276,21 @@ function eventSection(state) {
   const claimable = ctx.sim.events.claimableSteps(state);
   const pts = fin(state.event.points);
   const next = track.find((s) => !s.reached);
-  const palette = ctx.sim.events.eventPalette(state).slice(0, 12);
+  const palette = ctx.sim.eventColors(ev.id).map((c) => c.hex).slice(0, 12);
+  const found = ctx.sim.eventColors(ev.id).filter((c) => ctx.sim.knowsColor(state, c.id)).length;
+  const guide = eventGuide(state);
   return h`<div class="qs-sec" data-section="event"><h2 class="qs-sech">This week's event</h2>
       ${claimable.length ? h`<span class="chip is-on">${claimable.length} ready to claim</span>` : ''}</div>
     <div class="card" data-event>
-      <div class="qs-evhead"><span aria-hidden="true">${pennantSvg(ev.palette, 52)}</span>
-        <div class="grow"><div class="qs-h" style="font-size:18px">${ev.name}</div><div class="hint">${region ? (ctx.sim.hunters.unlocked(state) ? `The ${region.name} is open on your map.` : `The ${region.name} opens on your map once hunters arrive.`) : ''}</div></div></div>
-      ${palette.length ? h`<div class="stack stack-sm"><div class="hint">This week's limited colors</div><div class="qs-pal">${palette.map((hx) => swatch(safeHex(hx), 22))}</div></div>` : ''}
+      <button type="button" class="qs-evtap" data-action="how" data-kind="event" data-tap aria-label="${ev.name}: how the event works"><span aria-hidden="true">${pennantSvg(ev.palette, 52)}</span>
+        <div class="grow"><div class="qs-h" style="font-size:18px">${ev.name}</div><div class="hint">${region ? (ctx.sim.hunters.unlocked(state) ? `The ${region.name} is open on your map. Its limited colors are found there.` : `The ${region.name} opens on your map once you have hunters.`) : ''}</div></div>
+        <span class="qs-howlink" aria-hidden="true">How${iconSvg('back', { size: 14 })}</span></button>
+      ${palette.length ? h`<div class="stack stack-sm"><div class="hint">This week's limited colors${found ? ` (${found} found)` : ''}</div><div class="qs-pal">${palette.map((hx) => swatch(safeHex(hx), 22))}</div></div>` : ''}
       <div class="hint"><b class="semi">This week's twist:</b> ${ev.twist.text}</div>
       <div class="divider"></div>
       <div class="row between"><div><div class="qs-big num">${fmt(pts)}</div><div class="hint">event points so far</div></div>
         <div class="hint" style="text-align:right;max-width:55%">${next ? `${plural(next.points - pts, 'more point')} to step ${next.step}` : 'Every step reached. Lovely.'}</div></div>
+      ${guide && guide.next ? h`<div class="qs-next" data-event-next>Next: <b>${guide.next.reward.label}</b>. ${aboutActions(guide.next.actions)}</div>` : ''}
       ${progressBar(next ? Math.min(1, (pts - (track[next.step - 2] ? track[next.step - 2].points : 0)) / Math.max(1, next.points - (track[next.step - 2] ? track[next.step - 2].points : 0))) : 1, { label: 'Progress to the next step' })}
       ${fadeStrip(track.map((s) => {
         const can = s.reached && !s.claimed;
@@ -248,17 +301,35 @@ function eventSection(state) {
           <span class="qs-pts num">${can ? 'Claim' : s.claimed ? 'Claimed' : `${fmt(s.points)} pts`}</span>`;
         return can
           ? h`<button type="button" class="${cls}" data-action="claim-step" data-step="${s.step}" data-tap aria-label="Claim step ${s.step}: ${rv.label}">${inner}</button>`
-          : h`<div class="${cls}" role="group" aria-label="Step ${s.step}: ${rv.label}${s.claimed ? ', claimed' : ''}">${inner}</div>`;
+          : h`<button type="button" class="${cls}" data-action="how" data-kind="event" data-section="track" data-tap aria-label="Step ${s.step}: ${rv.label}${s.claimed ? ', claimed' : ''}. What each step gives">${inner}</button>`;
       }), { cls: 'qs-track', label: 'Event track' })}
+      ${button('How to earn event points', { block: true, attrs: { 'data-action': 'how', 'data-kind': 'event' } })}
       <div class="hint">This event comes back in the rotation, and your points are saved, so there is never a rush.</div>
     </div>`;
+}
+
+/** "That is about 1 board or 2 orders." from eventGuide().next.actions. */
+function aboutActions(actions = []) {
+  const list = actions.slice(0, 2).map((a) => a.text);
+  if (!list.length) return '';
+  return `That is about ${list.join(' or ')}.`;
 }
 
 function build(state) {
   const q = state.quests || {};
   if (!(q.daily && q.daily.length) && !q.weekly && !(state.event && state.event.key)) return emptyQuests();
-  return h`<div class="qs-note" data-seals-note><span aria-hidden="true">${sealIcon(18)}</span><span>Seals are the wax stamps you earn for finishing little goals. Spend them below.</span></div>
+  return h`${introLine(state)}
     ${dailySection(state)}${weeklySection(state)}${sealShopSection(state)}${eventSection(state)}`;
+}
+
+/**
+ * "How quests work", for first-timers (until her first claim, then one short line).
+ */
+function introLine(state) {
+  if (isSeen(state, 'questsNext')) {
+    return h`<div class="qs-note" data-seals-note><span aria-hidden="true">${sealIcon(18)}</span><span>Tap any quest to see how to do it. Seals buy things in the shop below.</span></div>`;
+  }
+  return h`<div class="qs-intro" data-quests-intro><span aria-hidden="true">${sealIcon(22)}</span><div><b>How quests work.</b> Three little goals arrive each morning; tap one to see how to do it and go straight there. Finish it for <b>Seals</b>, the wax stamps that buy things in the shop below. Unfinished ones simply make way for new ones.</div></div>`;
 }
 
 const SHOP_WHY = { seals: 'Not enough Seals yet', shelf: 'Opens with the Merge Shelf', full: 'The shelf is full', home: 'Everyone is home' };
@@ -337,6 +408,144 @@ function springClaimable() {
 }
 
 // ---------------------------------------------------------------------------
+// How-to sheets (sim/howto.js): explain, show what is still needed, take her there
+// ---------------------------------------------------------------------------
+
+let sheet = null; // {host, kind, id, index, html}
+
+const goAttrs = (g) => ({ 'data-action': 'go', 'data-screen': g.screen, 'data-params': JSON.stringify(g.params || {}) });
+
+/** A requirement box: what to open first, its price and a button that goes there. */
+function needBox(need, { primary = true } = {}) {
+  if (!need) return '';
+  return h`<div class="qs-need" data-need="${need.need}"><div class="semi">${need.title}</div><div>${need.text}</div>
+    ${button(need.cta, { variant: primary ? 'primary' : 'paper', small: !primary, attrs: goAttrs(need.go) })}</div>`;
+}
+
+function questSheetHtml(state) {
+  const q = state.quests || {};
+  let item = null;
+  let title = '';
+  let reward = '';
+  if (sheet.kind === 'daily') {
+    item = (q.daily || []).find((x) => x.id === sheet.id) || null;
+    if (item) {
+      title = item.text;
+      const r = item.reward || {};
+      reward = `+${fmt(fin(r.seals))} Seals${fin(r.boostMin) > 0 ? ` and a ${r.boostMin}-minute boost` : ''}`;
+    }
+  } else if (sheet.kind === 'weekly') {
+    item = q.weekly && q.weekly.steps ? q.weekly.steps[sheet.index] || null : null;
+    if (item) {
+      title = item.text;
+      const w = q.weekly;
+      const def = ctx.content.getWeeklyQuest(w.id);
+      reward = `A step of ${def ? def.name : 'this week\'s quest'}: finish every step for ${fmt(fin(w.reward && w.reward.seals))} Seals and ${RARE_LABEL[w.reward && w.reward.rare] || 'a rare find'}.`;
+    }
+  }
+  if (!item) return null;
+  const g = questGuide(state, item);
+  const target = fin(item.target ?? item.n, 1);
+  const prog = Math.min(target, fin(item.progress));
+  const status = g.done ? (sheet.kind === 'daily' && !item.claimed ? 'Done! Claim it on its card for your Seals.' : 'Done. Nicely finished.')
+    : prog > 0 ? `${g.left} more to go. Lovely progress.` : (target > 1 ? `${target} to go.` : 'One to go.');
+  const main = g.done ? button('Close', { variant: 'primary', block: true, attrs: { 'data-action': 'how-close' } })
+    : g.need ? button('Close', { block: true, attrs: { 'data-action': 'how-close' } })
+      : h`${button(h`Take me there: ${g.cta}`, { variant: 'primary', block: true, attrs: { ...goAttrs(g.go), 'data-coach': 'quests-go' } })}${button('Close', { block: true, attrs: { 'data-action': 'how-close' } })}`;
+  return h`<div class="qs-sheet-title">${title}</div>
+    ${progressBar(target > 0 ? prog / target : 0, { label: title })}
+    <div class="qs-sheet-sub">${status}</div>
+    <div class="qs-lbl">How to do it</div>
+    <p data-how>${g.how}</p>
+    ${g.done ? '' : needBox(g.need)}
+    ${reward ? h`<div class="qs-reward">${sealIcon(14)}<span>${reward}</span></div>` : ''}
+    <div class="qs-sheet-acts">${main}</div>`;
+}
+
+function eventSheetHtml(state) {
+  const g = eventGuide(state);
+  if (!g) return null;
+  const S = ctx.sim;
+  const limited = S.eventColors(g.id);
+  const left = g.limited.total - g.limited.found;
+  const next = g.next;
+  const twistNeed = g.twist.need;
+  const banners = (state.cosmetics || []).filter((c) => /-banner$/.test(c)).map((c) => ctx.content.getEvent(c.replace(/-banner$/, ''))).filter(Boolean);
+  return h`<div class="qs-sheet-title">${g.name}</div>
+    <div class="qs-sheet-sub">${fmt(g.points)} event points so far. ${next ? h`Next is step ${next.step}: <b>${next.reward.label}</b>, ${plural(next.left, 'more point')} away. ${aboutActions(next.actions)}` : 'Every step of the track is reached. Lovely.'}</div>
+
+    <div class="qs-lbl" data-sheet-section="points">How to earn event points</div>
+    ${g.sources.map((src) => h`<div class="qs-src" data-source="${src.kind}">
+      <div class="row between"><span class="semi">${src.label}</span><span class="pts">+${src.points} pts</span></div>
+      <div class="hint">${src.how}</div>
+      ${src.need ? needBox(src.need, { primary: false }) : button(h`Go: ${src.cta}`, { small: true, attrs: goAttrs(src.go) })}
+    </div>`)}
+
+    <div class="qs-lbl" data-sheet-section="limited">This week's limited colors</div>
+    <div class="qs-pal">${limited.map((c) => (S.knowsColor(state, c.id) ? swatch(c.hex, 26, { label: S.displayName(state, c.id) }) : swatch(c.hex, 26, { cls: 'is-faint', label: 'A limited color to collect' })))}</div>
+    <div class="hint">${left > 0 ? `${g.limited.found ? `${g.limited.found} found, ` : ''}${plural(left, 'more color')} to collect. They join your catalog for good.` : 'Every limited color is yours. Lovely.'}</div>
+    ${left > 0 ? g.limited.ways.map((w) => h`<div class="qs-src"><div class="hint" style="color:var(--ink)">${w.how}</div>${w.need ? needBox(w.need, { primary: false }) : w.go ? button(h`Go: ${w.cta}`, { small: true, attrs: goAttrs(w.go) }) : ''}</div>`) : ''}
+
+    <div class="qs-lbl" data-sheet-section="twist">This week's twist</div>
+    <div class="qs-src"><div class="semi">${g.twist.text}</div><div class="hint">${g.twist.how}</div>
+      ${twistNeed ? needBox(twistNeed, { primary: false }) : button(h`Go: ${g.twist.cta}`, { small: true, attrs: goAttrs(g.twist.go) })}</div>
+    ${g.preview.length ? h`<div class="qs-src" data-preview><div class="semi">Era 2 preview</div>
+      <div class="qs-prev">${g.preview.map((c) => h`<span class="it">${swatch(c.hex, 26)}${c.name}</span>`)}</div>
+      <div class="hint">A peek at the Synthetics to come. They glow on this week's boards; you can collect them once Era 2 arrives.</div>${tag('Era 2: coming in a later update')}</div>` : ''}
+
+    <div class="qs-lbl" data-sheet-section="track">The reward track</div>
+    <div class="hint">Event points fill the track; each step you reach is yours to claim on the track above. Steps 1 to 6 take about 20 minutes of play over the week; the rest are for fun.</div>
+    <div class="qs-steps">${g.track.map((t) => h`<div class="qs-tstep ${t.reached ? 'is-reached' : ''}"><span class="n">${t.claimed ? iconSvg('check', { size: 14 }) : t.step}</span>
+      <div class="grow"><b>${t.reward.label}</b>${t.reward.detail ? h`: ${t.reward.detail}` : ''}</div><span class="pts num">${fmt(t.points)} pts</span></div>`)}</div>
+    ${banners.length ? h`<div class="hint">Your keepsake banners: ${banners.map((e) => e.name).join(', ')}.</div>` : ''}
+    <div class="hint">This event comes back in the rotation, and your points are saved.</div>
+    <div class="qs-sheet-acts">${button('Close', { variant: 'primary', block: true, attrs: { 'data-action': 'how-close' } })}</div>`;
+}
+
+function paintSheet() {
+  if (!sheet) return;
+  const state = ctx.game.state;
+  const inner = sheet.kind === 'event' ? eventSheetHtml(state) : questSheetHtml(state);
+  if (inner === null) { closeSheet(); return; }
+  const html = String(h`<button type="button" class="btn-back qs-x" data-action="how-close" data-tap aria-label="Close">${iconSvg('close', { size: 20 })}</button>${inner}`);
+  if (html === sheet.html) return;
+  sheet.html = html;
+  const panel = sheet.host.querySelector('.qs-sheet');
+  const top = panel.scrollTop;
+  panel.innerHTML = html;
+  panel.scrollTop = top;
+}
+
+function openSheet(kind, { id = null, index = null } = {}) {
+  closeSheet();
+  const host = document.createElement('div');
+  host.className = 'qs-sheet-host';
+  host.setAttribute('data-quest-sheet', kind);
+  host.innerHTML = '<div class="sheet qs-sheet" role="dialog" aria-modal="true" aria-label="How to do it" tabindex="-1"></div>';
+  const onKey = (e) => { if (e.key === 'Escape') closeSheet(); };
+  sheet = { host, kind, id, index, html: '', onKey };
+  document.addEventListener('keydown', onKey);
+  // Buttons inside bubble to root's click listener (onClick); a tap on the dim backdrop closes.
+  host.addEventListener('click', (e) => { if (e.target === host) closeSheet(); });
+  root.scrollTop = 0; // the section itself never scrolls (its body does); keep the sheet anchored to the screen
+  root.appendChild(host);
+  paintSheet();
+  const panel = host.querySelector('.qs-sheet');
+  try { panel.focus({ preventScroll: true }); } catch (err) { /* ignore */ }
+  if (!ctx.fx.isReducedMotion || !ctx.fx.isReducedMotion()) {
+    ctx.fx.spring(panel, { from: { transform: 'translateY(40px)', opacity: 0.4 }, to: { transform: 'translateY(0px)', opacity: 1 }, preset: 'soft' });
+  }
+}
+
+function closeSheet() {
+  if (!sheet) return;
+  const s2 = sheet;
+  sheet = null;
+  document.removeEventListener('keydown', s2.onKey);
+  s2.host.remove();
+}
+
+// ---------------------------------------------------------------------------
 // Actions
 // ---------------------------------------------------------------------------
 
@@ -377,6 +586,28 @@ function onClick(e) {
   if (!el || !root.contains(el)) return;
   const a = el.getAttribute('data-action');
   const S = ctx.sim;
+  if (a === 'how') {
+    const kind = el.getAttribute('data-kind');
+    if (kind === 'event') {
+      openSheet('event');
+      const sec = el.getAttribute('data-section');
+      const target = sec && sheet && sheet.host.querySelector(`[data-sheet-section="${sec}"]`);
+      const panel = sheet && sheet.host.querySelector('.qs-sheet');
+      if (target && panel) panel.scrollTop = target.offsetTop - 12;
+    }
+    else if (kind === 'weekly') openSheet('weekly', { index: Number(el.getAttribute('data-index')) });
+    else openSheet('daily', { id: el.getAttribute('data-id') });
+    return;
+  }
+  if (a === 'how-close') { closeSheet(); return; }
+  if (a === 'go') {
+    let params = {};
+    try { params = JSON.parse(el.getAttribute('data-params') || '{}') || {}; } catch (err) { params = {}; }
+    const screenId = el.getAttribute('data-screen');
+    closeSheet();
+    if (screenId) ctx.navigate(screenId, params);
+    return;
+  }
   if (a === 'claim') {
     const qid = el.getAttribute('data-quest-id');
     const res = withFly(el, () => ctx.game.act(S.quests.claim, { questId: qid }), { stampId: qid });
@@ -478,7 +709,7 @@ function firstClaimCard() {
     if (!visible) return;
     ctx.guide.whatsNext({
       title: 'Seals earned',
-      more: { label: 'See the weekly', run: () => { const el = root.querySelector('[data-section="weekly"]'); if (el) el.scrollIntoView({ block: 'start' }); } },
+      more: { label: 'See the weekly', run: () => { const el = bodyEl && bodyEl.querySelector('[data-section="weekly"]'); if (el) bodyEl.scrollTop += el.getBoundingClientRect().top - bodyEl.getBoundingClientRect().top - 8; } },
       next: { label: 'Back to the workshop', run: () => ctx.navigate('workshop') },
     });
   }, 1100);
@@ -497,6 +728,12 @@ const screen = {
       <div class="screen-body" data-quests-body></div>`);
     bodyEl = root.querySelector('[data-quests-body]');
     root.addEventListener('click', onClick);
+    root.addEventListener('keydown', (e) => {
+      if ((e.key === 'Enter' || e.key === ' ') && e.target.matches && e.target.matches('[role="button"][data-action]')) {
+        e.preventDefault();
+        e.target.click();
+      }
+    });
     // "How this works": rebuild with the intro step first (guide.js's own listener then runs it).
     root.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('[data-guide-replay="quests"]')) startGuide({ replay: true }); });
     bodyEl.addEventListener('scroll', (e) => {
@@ -515,15 +752,18 @@ const screen = {
     requestAnimationFrame(() => { if (visible) placeTrack(); });
     if (params.section && bodyEl) {
       requestAnimationFrame(() => {
-        const t = root.querySelector(`[data-section="${params.section}"]`);
-        if (t) t.scrollIntoView({ block: 'start' });
+        // Scroll only the screen body (scrollIntoView would also scroll #app and shift the screen).
+        const t = bodyEl.querySelector(`[data-section="${params.section}"]`);
+        if (t) bodyEl.scrollTop += t.getBoundingClientRect().top - bodyEl.getBoundingClientRect().top - 8;
       });
     } else if (bodyEl) bodyEl.scrollTop = 0;
+    if (params.how === 'event') openSheet('event');
     startGuide();
   },
 
   hide() {
     visible = false;
+    closeSheet();
     clearTimeout(nextTimer);
     nextTimer = 0;
     stopGuide();
@@ -532,6 +772,7 @@ const screen = {
   render(state) {
     if (!visible) return;
     paint(state);
+    paintSheet();
   },
 };
 

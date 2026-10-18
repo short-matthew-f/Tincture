@@ -71,18 +71,18 @@ import * as stations from './content/stations.js';
 /** Every screen module under src/ui/, matching <section data-screen> in index.html. */
 export const SCREEN_IDS = Object.freeze([
   'workshop', 'ledger', 'orders', 'matching', 'bench', 'commissions', 'puzzles', 'grading', 'purify',
-  'packing', 'map', 'hunter', 'album', 'quests', 'catalog', 'gallery', 'paint', 'shelf', 'heritage',
+  'packing', 'tiles', 'map', 'hunter', 'album', 'quests', 'catalog', 'gallery', 'paint', 'shelf', 'heritage',
   'settings', 'naming', 'phase-beat', 'onboarding',
 ]);
 
 /** Screens that are ceremonies: one at a time, others wait in a queue. */
 const CEREMONY_IDS = new Set(['naming', 'phase-beat', 'onboarding']);
 /** News toasts wait behind these (nothing blocks a ceremony or a puzzle board). */
-const NEWS_WAITS_FOR = new Set([...CEREMONY_IDS, 'grading', 'purify', 'packing']);
+const NEWS_WAITS_FOR = new Set([...CEREMONY_IDS, 'grading', 'purify', 'packing', 'tiles']);
 
 const TITLES = {
   workshop: 'Workshop', ledger: 'Morning Ledger', orders: 'Orders', matching: 'Matching', bench: 'Mixing Bench',
-  commissions: 'Commissions', puzzles: 'Puzzles', grading: 'Grading', purify: 'Purifying', packing: 'Packing',
+  commissions: 'Commissions', puzzles: 'Puzzles', grading: 'Grading', purify: 'Purifying', packing: 'Packing', tiles: 'Tile Room',
   map: 'Map', hunter: 'Hunter', album: 'Postcard Album', quests: 'Quests', catalog: 'Catalog', gallery: 'Gallery',
   paint: 'Painting', shelf: 'Merge Shelf', heritage: 'Heritage', settings: 'Settings', naming: 'A new color',
   'phase-beat': 'Something new', onboarding: 'Welcome',

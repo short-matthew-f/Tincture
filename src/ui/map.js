@@ -580,8 +580,11 @@ export function haulChips(ctx, state, haul) {
   if (haul.wild) {
     chips.push(h`<span class="mp-find is-new">${swatch(hexOfColor(ctx, haul.wild), 18, { cls: 'round' })}New wild hue: ${nameOfColor(ctx, state, haul.wild)}</span>`);
   }
+  if (haul.limited) {
+    chips.push(h`<span class="mp-find is-new">${swatch(hexOfColor(ctx, haul.limited), 18, { cls: 'round' })}Limited color: ${nameOfColor(ctx, state, haul.limited)}</span>`);
+  }
   for (const id of haul.tints || []) {
-    chips.push(h`<span class="mp-find is-new">${swatch(hexOfColor(ctx, id), 16, { cls: 'round' })}Noted: ${nameOfColor(ctx, state, id)}</span>`);
+    chips.push(h`<span class="mp-find is-new">${swatch(hexOfColor(ctx, id), 16, { cls: 'round' })}Noted:${nameOfColor(ctx, state, id)}</span>`);
   }
   for (const p of haul.postcards || []) {
     const t = postcardTitle(ctx, p.id);
@@ -658,18 +661,24 @@ function sheetHtml(ctx, state) {
         <div class="chips">${home.map((x) => h`<button type="button" class="chip" data-action="pick-hunter" data-hunter-id="${x.id}" aria-pressed="${String(x.id === s.hunterId)}" data-tap>${hunterPortrait(x.id, { size: 24, trait: x.trait })}${x.name} <span class="sub">Lv ${x.level}</span></button>`)}</div></div>`
     : h`<div class="card flat tight"><div class="semi">Everyone is out exploring</div><div class="hint">${nextHomeLine(roster, now)}</div></div>`;
 
-  const noWilds = !left.wilds.some((w) => !w.known);
+  // The running event's region: its limited colors are found here (sim/hunters.js resolveOne 3b).
+  const evRegion = region.kind === 'event' && state.event && region.event === state.event.key;
+  const limited = evRegion ? ctx.sim.eventColors(region.event).map((c) => ({ id: c.id, known: ctx.sim.knowsColor(state, c.id) })) : [];
+  const limitedLeft = limited.filter((c) => !c.known).length;
+  const noWilds = evRegion ? limitedLeft === 0 : !left.wilds.some((w) => !w.known);
   const durations = !open ? '' : h`<div class="stack stack-sm"><div class="mp-label">How long?</div>
     <div class="mp-dur" role="group" aria-label="Trip length">${ctx.content.DURATION_IDS.map((id) => {
       const d = C.DURATIONS[id];
       const ms = hunter ? ctx.sim.hunters.tripMs(hunter, id) : d.ms;
       const len = ms === d.ms ? d.label : ctx.format.duration(ms);
-      const wild = noWilds ? 'all found' : `${Math.round(ctx.sim.hunters.wildChance(sample, region.id, id) * 100)}%`;
+      const wild = noWilds ? 'all found'
+        : evRegion ? `${Math.round(((C.EVENT_HUE_CHANCE || {})[id] || 0) * 100)}%`
+          : `${Math.round(ctx.sim.hunters.wildChance(sample, region.id, id) * 100)}%`;
       const card = hunter ? `${Math.round(postcardOdds(ctx, hunter, region.id, id) * 100)}%` : `${Math.round(d.card * 100)}%`;
       return h`<button type="button" data-action="pick-duration" data-duration="${id}" aria-pressed="${String(s.duration === id)}" data-tap>
-        <b>${len}</b><span>Haul ×${d.haul}</span><span>Wild ${wild}</span><span>Card ${card}</span>${d.scouting ? h`<span class="tiny">may radio in</span>` : ''}</button>`;
+        <b>${len}</b><span>Haul ×${d.haul}</span><span>${evRegion ? 'Limited' : 'Wild'} ${wild}</span><span>Card ${card}</span>${d.scouting ? h`<span class="tiny">may radio in</span>` : ''}</button>`;
     })}</div>
-    ${hunter && hunter.pityStreak > 0 && !noWilds ? h`<div class="hint">${hunter.name}'s luck is building: +${Math.round(hunter.pityStreak * ctx.content.PITY_STEP * 100)}% wild-hue chance is already included.</div>` : ''}</div>`;
+    ${hunter && hunter.pityStreak > 0 && !noWilds && !evRegion ? h`<div class="hint">${hunter.name}'s luck is building: +${Math.round(hunter.pityStreak * ctx.content.PITY_STEP * 100)}% wild-hue chance is already included.</div>` : ''}</div>`;
 
   const palette = h`<div class="stack stack-sm"><div class="mp-label">What it is like</div>
     <div class="mp-pal">${(region.palette || []).map((f) => h`<span class="mp-p">${swatch(FAMILY_HEX[f] || FAMILY_HEX.neutral, 22)}${f[0].toUpperCase() + f.slice(1)}</span>`)}</div>
@@ -679,7 +688,11 @@ function sheetHtml(ctx, state) {
     })}</div>` : ''}</div>`;
 
   const leftBlock = h`<div class="stack stack-sm"><div class="mp-label">What is left here</div>
-    ${left.wilds.length ? h`<div class="mp-pal">${left.wilds.map((w) => (w.known
+    ${evRegion ? h`<div class="mp-pal">${limited.map((w) => (w.known
+      ? h`<span class="mp-p">${swatch(hexOfColor(ctx, w.id), 26)}</span>`
+      : h`<span class="mp-sil" role="img" aria-label="A limited color still to find"></span>`))}</div>
+      <div class="hint">${limitedLeft ? `This week's limited colors are found here: ${plural(limitedLeft, 'more color')} to bring home. Longer trips find them more often.` : 'Every limited color of this event is yours.'}</div>`
+    : left.wilds.length ? h`<div class="mp-pal">${left.wilds.map((w) => (w.known
       ? h`<span class="mp-p">${swatch(hexOfColor(ctx, w.id), 34)}<span>${nameOfColor(ctx, state, w.id)}</span></span>`
       : h`<span class="mp-sil" role="img" aria-label="A hue still to find"></span>`))}</div>
       <div class="hint">${noWilds ? 'Every hidden hue here is yours.' : `${plural(left.wilds.filter((w) => !w.known).length, 'hidden hue')} still to find.`}</div>` : h`<div class="hint">No hidden hues here, just postcards.</div>`}

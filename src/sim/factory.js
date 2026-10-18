@@ -575,6 +575,20 @@ export function setVatColor(state, args = {}) {
 }
 
 /**
+ * vatChoices(state) -> [{id, jars, making:boolean, canMix}] — every color a vat can show:
+ * everything in stock (most first), then every other color she has discovered (a vat
+ * shows it empty until a mixer makes some). Read live from state, so a color found a
+ * moment ago is already on the list.
+ */
+export function vatChoices(state) {
+  const making = new Set((state.stations?.mixers ?? []).map((m) => m && m.recipe).filter(Boolean));
+  const ids = new Set([...Object.keys(state.stock ?? {}), ...Object.keys(state.catalog?.discovered ?? {})]);
+  return [...ids].map((id) => ({ id, jars: num(state.stock?.[id]?.jars), making: making.has(id), canMix: canMix(state, id) }))
+    .filter((c) => c.jars > 0.05 || isDiscovered(state, c.id))
+    .sort((a, b) => (b.jars > 0.05) - (a.jars > 0.05) || b.jars - a.jars || b.making - a.making || b.canMix - a.canMix);
+}
+
+/**
  * claimAccident(state, {mixer}, now) -> {ok, kind, discovered?, jars?}.
  * Tint: discovers the nearby undiscovered color (method 'accident'); flawless:
  * turns 10 minutes of that mixer's output (min 20 jars) into flawless stock.

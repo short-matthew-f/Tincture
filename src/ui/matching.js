@@ -542,6 +542,7 @@ const S = {
   root: null,
   mixer: null,
   orderId: null,
+  flower: null, // bouquet orders: which flower she is mixing (show({orderId, flower}))
   order: null,
   phase: 'mixing', // 'mixing' | 'submitting' | 'done'
   newColor: null, // color id found by the delivered mix
@@ -554,7 +555,26 @@ const later = (fn, ms) => { S.timers.push(setTimeout(fn, ms)); };
 const stateOf = () => S.ctx.game.state;
 
 function findOrder() {
-  return (stateOf().orders?.open ?? []).find((o) => o.id === S.orderId) ?? null;
+  const o = (stateOf().orders?.open ?? []).find((x) => x.id === S.orderId) ?? null;
+  if (!o || o.kind !== 'bouquet') return o;
+  // A bouquet flower is mixed like a match order: a view with that flower's target.
+  const f = Number.isInteger(S.flower) ? o.flowers?.[S.flower] : null;
+  if (!f || f.filled) return null;
+  const O = S.ctx.sim.orders;
+  const pay = Math.max(Number(o.pay) || 0, O.orderBasePay(stateOf(), o.minutes ?? 3)) * (O.BOUQUET_BONUS ?? 1);
+  return { ...o, kind: 'match', target: f.target, recipe: f.recipe, pay, bouquet: { flower: S.flower, total: o.flowers.length, left: o.flowers.filter((x) => !x.filled).length } };
+}
+
+/** The next unfilled flower of a bouquet (after `from`), or null. */
+function nextFlower(orderId, from) {
+  const o = (stateOf().orders?.open ?? []).find((x) => x.id === orderId);
+  if (!o || !Array.isArray(o.flowers)) return null;
+  const n = o.flowers.length;
+  for (let k = 1; k <= n; k++) {
+    const i = (from + k) % n;
+    if (!o.flowers[i].filled) return i;
+  }
+  return null;
 }
 
 function head(title, { how = false } = {}) {
@@ -608,10 +628,11 @@ function build() {
   }
   const target = safeHex(order.target);
   const who = customerName(ctx, order);
-  root.innerHTML = String(h`${head(`Order from ${who}`, { how: true })}
+  const bq = order.bouquet;
+  root.innerHTML = String(h`${head(bq ? `Bouquet for ${who}` : `Order from ${who}`, { how: true })}
 <div class="screen-body">
 <div class="card">
-<div class="small muted">${who} would like ${wishWords(ctx, order.target)}. Anything you deliver is welcome; the needle shows what it pays.</div>
+<div class="small muted">${bq ? `Flower ${bq.flower + 1} of ${bq.total}: ${who} would like ${wishWords(ctx, order.target)}. Any mix is welcome; the needle shows what it pays.` : `${who} would like ${wishWords(ctx, order.target)}. Anything you deliver is welcome; the needle shows what it pays.`}</div>
 <div class="mx-top" data-top>
 <div class="mx-col"><div class="mx-target" style="background:${target}" role="img" aria-label="Their swatch"></div><div class="cap">Their swatch</div></div>
 <div class="mx-col" data-mine-col><div class="mx-jarbox" data-jar-slot></div><div class="cap">Your mix</div></div>
@@ -699,7 +720,7 @@ function submit() {
   const customer = customerName(ctx, order);
   const target = order.target;
   S.phase = 'submitting';
-  const res = ctx.game.act(ctx.sim.orders.submitOrder, { orderId: order.id, drops });
+  const res = ctx.game.act(ctx.sim.orders.submitOrder, order.bouquet ? { orderId: order.id, flower: order.bouquet.flower, drops } : { orderId: order.id, drops });
   if (!res || !res.ok) {
     S.phase = 'mixing';
     ctx.toast('That order is no longer on the board');
@@ -729,12 +750,19 @@ function submit() {
     good: `${customer} is happy with it.`,
     close: `${customer} says it will do nicely. Thank you!`,
   }[tier] || `${customer} says thank you.`;
-  const next = nextMatchOrder(order.id);
+  const bq = res.bouquet || null;
+  if (bq) {
+    notes.push(bq.complete
+      ? h`<li>${iconSvg('star', { size: 18 })}<span>The whole bouquet is in!${bq.points ? ` +${bq.points} event points.` : ''}</span></li>`
+      : h`<li>${iconSvg('plus', { size: 18 })}<span>${bq.left} more ${bq.left === 1 ? 'flower' : 'flowers'} for this bouquet.</span></li>`);
+  }
+  const nextF = bq && !bq.complete ? nextFlower(order.id, bq.flower) : null;
+  const next = nextF !== null ? null : nextMatchOrder(order.id);
   const waiting = (stateOf().orders?.open ?? []).length;
   const goal = SHELF_GOAL(ctx, stateOf());
   const newName = S.newColor ? ctx.sim.displayName(stateOf(), S.newColor) : '';
 
-  root.innerHTML = String(h`${head(`Order from ${customer}`)}
+  root.innerHTML = String(h`${head(order.bouquet ? `Bouquet for ${customer}` : `Order from ${customer}`)}
 <div class="screen-body" data-done>
 <div class="card mx-result" data-result>
 <div class="mx-top is-joined">
@@ -751,7 +779,7 @@ ${notes.length ? h`<div class="card"><ul class="mx-notes">${notes}</ul></div>` :
 ${S.newColor ? h`<div class="card mx-new" data-newcolor>${swatch(res.discovered.hex || mixHex, 48, { label: newName })}<div class="grow"><div class="small muted">A new color joined your catalog</div><div class="nm" data-newcolor-name>${newName}</div><button type="button" class="btn btn-paper lk" data-action="see-catalog" data-tap>See it in your catalog</button></div></div>` : ''}
 <div class="mx-goal">${waiting} ${waiting === 1 ? 'order is' : 'orders are'} waiting on the board${goal ? `. ${goal}.` : '.'}</div>
 </div>
-<div class="mx-actions" data-bar>${barHtml(next)}</div>`);
+<div class="mx-actions" data-bar>${nextF !== null ? h`${button('Back to orders', { attrs: { 'data-action': 'back-orders' } })}${button('Next flower', { variant: 'primary', cls: 'grow', attrs: { 'data-action': 'next-flower', 'data-flower': nextF } })}` : barHtml(next)}</div>`);
   // Her swatch slides in beside the target on a soft spring; then the needle swings and settles.
   const fxo = ctx.fx || defaultFx;
   const mine = root.querySelector('.mx-mine');
@@ -832,6 +860,7 @@ export default {
           else ctx.navigate('orders');
           break;
         }
+        case 'next-flower': ctx.navigate('matching', { orderId: S.orderId, flower: Number(t.getAttribute('data-flower')) }); break;
         case 'see-catalog': ctx.navigate('catalog'); break;
         default: break;
       }
@@ -842,6 +871,7 @@ export default {
     S.timers.forEach(clearTimeout);
     S.timers = [];
     S.orderId = params.orderId ?? null;
+    S.flower = Number.isInteger(params.flower) ? params.flower : null;
     S.phase = 'mixing';
     S.order = findOrder();
     build();

@@ -47,7 +47,7 @@ walk go to `$E2E_SHOTS` (default: `<tmpdir>/tincture-e2e-shots`).
 ## Shipping a new version
 
 ```sh
-node tools/bump-version.js 0.2.2
+node tools/bump-version.js 0.3.0
 ```
 
 Run it whenever shipped files change. It rewrites `src/version.js`,
@@ -111,6 +111,13 @@ and its offline cache: https://short-matthew-f.github.io/Tincture/proto/
 
 ## Status
 
+- **0.3.0** (fourth playtest): tap any quest, weekly step or the event for a
+  how-to with "Take me there"; Bloom Week's bouquet orders and Neon Night's
+  Era 2 preview work, and every event twist does what it says. Commissions
+  count every color in a family, list her colors that count, give one next
+  action and only open when she can finish them. Painting is free (no jar
+  costs). The Tile Room joins the game (20 colors, 5,000 coins) with a daily
+  quest and event points.
 - **0.2.2** (third playtest): bonus vials (Perfect orders, events, hunter
   hauls) land in the shelf's chip colors, and vials arrive every 3 minutes
   (each worth a third, so shelf income is unchanged). Seals finally buy

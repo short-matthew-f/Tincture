@@ -41,7 +41,16 @@ export const TIERS = Object.freeze({
 export const TIER_NAMES = Object.freeze(['relaxed', 'steady', 'tricky', 'master']);
 
 /** Silhouettes; any non-rect shape counts as an "odd shape" for difficulty. */
-export const SHAPES = Object.freeze(['rect', 'leaf', 'fish', 'window', 'snowflake']);
+export const SHAPES = Object.freeze(['rect', 'leaf', 'fish', 'window', 'snowflake', 'flower', 'lantern', 'sunset', 'scroll']);
+
+/**
+ * Some event frames also change how the gradient is built (createBoard's `style`
+ * defaults to this): 'sunset' (Golden Hour) is always lightest and warmest at the
+ * top and deepens toward dusk at the bottom; 'ink' (Ink and Paper) is a single
+ * ink hue read by lightness and strength (chroma) instead of a hue sweep.
+ */
+export const SHAPE_STYLE = Object.freeze({ sunset: 'sunset', scroll: 'ink' });
+export const STYLES = Object.freeze(['hue', 'sunset', 'ink']);
 
 /** Validation floor is the spec value scaled by this (see header). */
 export const FLOOR_SCALE = 0.5;
@@ -122,6 +131,28 @@ function inShape(shape, u, v) {
         if (dist <= 0.3) return true;
       }
       return false;
+    }
+    case 'flower': {
+      // Five round petals around the middle.
+      const r = Math.hypot(u, v);
+      const a = Math.atan2(v, u) + Math.PI / 2;
+      return r <= 0.95 + 0.25 * Math.cos(5 * a);
+    }
+    case 'lantern': {
+      // Round paper body with a little cap and tassel.
+      if (Math.abs(v) > 0.72) return Math.abs(u) < 0.5;
+      return (u * u) / (1.02 * 1.02) + (v * v) / (0.86 * 0.86) <= 1;
+    }
+    case 'sunset': {
+      // A sun half set: a round top over a flat horizon.
+      if (v >= -0.1) return true;
+      const dy = (v + 0.1) / 0.95;
+      return u * u + dy * dy <= 1;
+    }
+    case 'scroll': {
+      // A sheet of paper between two wider rolls.
+      if (Math.abs(v) > 0.72) return true;
+      return Math.abs(u) <= 0.7;
     }
     default:
       throw new RangeError('grading: unknown shape ' + JSON.stringify(shape));
@@ -223,6 +254,55 @@ function makeCorners(tier, palette, floor, widen, rng) {
   return { tl: corner(0, 0), tr: corner(1, 0), bl: corner(0, 1), br: corner(1, 1) };
 }
 
+/**
+ * Sunset corners: lightness falls from the top (honey light) to the bottom (dusk)
+ * and the hue drifts warm-to-rose-violet on the way down, around a sunset hue.
+ */
+function sunsetCorners(tier, floor, widen, rng) {
+  const { cols, rows, dims } = tier;
+  const target = (floor * AIM) / 100;
+  const Sl = clamp(target * (rows - 1) * range(rng, 1, 1.2) * widen, 0.12, L_MAX - L_MIN);
+  const tilt = dims.includes('l') ? range(rng, 0.05, 0.1) * widen * sign(rng) : 0;
+  const needH = target * (cols - 1) * range(rng, 0.95, 1.15);
+  const C0 = clamp(Math.max(0.13, needH / (2 * Math.sin((100 * Math.PI) / 360))), C_MIN, C_MAX);
+  const Sh = clamp((2 * Math.asin(clamp(needH / (2 * C0), 0, 1)) * 180) / Math.PI * widen, 30, 100);
+  const top = range(rng, 75, 92);        // honey at the sunny edge of the top
+  const drop = range(rng, 60, 90);       // rose to dusk violet at the bottom
+  const dirH = sign(rng);                // which side the sun sits on (warmest there)
+  const halfL = Sl / 2 + Math.abs(tilt) / 2;
+  const Lmid = clamp(0.64, L_MIN + halfL, L_MAX - halfL);
+  const corner = (u, v) => {
+    const away = dirH > 0 ? u : 1 - u;  // 0 at the sun, 1 away from it
+    const h = (((top - drop * v - Sh * away) % 360) + 360) % 360;
+    const L = clamp(Lmid - Sl * (v - 0.5) + tilt * (u - 0.5), L_MIN, L_MAX); // lightest on top, always
+    return oklchToHex(clampToGamut({ L, C: C0, h }));
+  };
+  return { tl: corner(0, 0), tr: corner(1, 0), bl: corner(0, 1), br: corner(1, 1) };
+}
+
+/**
+ * Ink corners: one hue (the palette's ink, or indigo when the palette is grey),
+ * lightness down the board and strength (chroma) plus a lightness tilt across it.
+ */
+function inkCorners(tier, palette, floor, widen, rng) {
+  const { cols, rows } = tier;
+  const inks = palette.map((hx) => hexToOklch(hx)).filter((c) => c.C >= 0.04);
+  const h = inks.length ? pick(rng, inks).h : pick(rng, [262, 255, 60, 30]);
+  const target = (floor * AIM) / 100;
+  const Sl = clamp(target * (rows - 1) * range(rng, 1, 1.15) * widen, 0.12, 0.42);
+  const needH = target * (cols - 1) * range(rng, 0.95, 1.1) * widen;
+  const tilt = clamp(needH * 0.6, 0.04, 0.2) * sign(rng);
+  const dC = clamp(Math.sqrt(Math.max(0, needH * needH - tilt * tilt)), 0.05, 0.15);
+  const halfL = Sl / 2 + Math.abs(tilt) / 2;
+  const Lmid = clamp(0.58, L_MIN + halfL, L_MAX - halfL);
+  const dirV = sign(rng);
+  const corner = (u, v) => {
+    const L = clamp(Lmid + dirV * Sl * (v - 0.5) + tilt * (u - 0.5), L_MIN, L_MAX);
+    return oklchToHex(clampToGamut({ L, C: 0.02 + dC * u, h }));
+  };
+  return { tl: corner(0, 0), tr: corner(1, 0), bl: corner(0, 1), br: corner(1, 1) };
+}
+
 /** Cells for corners over a mask, plus the validation numbers. */
 function evaluate(corners, cols, rows, mask) {
   const all = gradientOklab(corners, cols, rows);
@@ -307,15 +387,17 @@ function sound(cells, labs) {
 }
 
 /**
- * createBoard({tier, palette, shape, seedHexes, corners}, rng) -> board.
+ * createBoard({tier, palette, shape, style, seedHexes, corners}, rng) -> board.
  *  - palette: hexes (catalog or event page) the board's hue region comes from.
- *  - shape: 'rect' (default) | 'leaf' | 'fish' | 'window' | 'snowflake'.
+ *  - shape: 'rect' (default) | 'leaf' | 'fish' | 'window' | 'snowflake' | 'flower' | 'lantern' | 'sunset' | 'scroll'.
+ *  - style: 'hue' | 'sunset' | 'ink' (defaults to SHAPE_STYLE[shape], else 'hue').
  *  - seedHexes: optional; four or more hexes are tried first as fixed corners
  *    (tl, tr, bl, br); if they miss the floor they join the palette instead.
  *  - corners: optional {tl,tr,bl,br} tried first (used by switchTier).
  */
 export function createBoard(opts, rng) {
   const { tier: tierName = 'relaxed', shape = 'rect', seedHexes = null } = opts || {};
+  const style = STYLES.includes(opts && opts.style) ? opts.style : (SHAPE_STYLE[shape] || 'hue');
   if (typeof rng !== 'function') throw new TypeError('grading.createBoard: rng must be a function');
   const tier = tierOf(tierName);
   const { cols, rows } = tier;
@@ -349,7 +431,10 @@ export function createBoard(opts, rng) {
   }
   for (let phase = 0; phase < 2 && !chosen; phase++) {
     const widen = phase === 0 ? 1 : WIDEN;
-    for (let t = 0; t < TRIES && !chosen; t++) consider(makeCorners(tier, palette, floor, widen, rng));
+    const make = style === 'sunset' ? () => sunsetCorners(tier, floor, widen, rng)
+      : style === 'ink' ? () => inkCorners(tier, palette, floor, widen, rng)
+        : () => makeCorners(tier, palette, floor, widen, rng);
+    for (let t = 0; t < TRIES && !chosen; t++) consider(make());
   }
   const pickd = chosen || best;
   const { cells, labs, minNeighbor } = pickd.ev;
@@ -360,6 +445,7 @@ export function createBoard(opts, rng) {
     cols,
     rows,
     shape,
+    style,
     corners: { ...pickd.corners },
     cells,
     order: [],

@@ -222,10 +222,12 @@ export function almostThere(state, now = state.lastTick ?? 0) {
       const moreColors = Math.max(0, (s.distinct ?? 1) - distinctDone);
       let what;
       let blocked;
-      if (s.tier) {
-        const cn = containerName(s.tier);
-        what = `${/^[aeiou]/i.test(cn) ? 'An' : 'A'} ${cn} more`;
-        blocked = !((state.shelf && state.shelf.cells) || []).some((c) => c && (c.tier ?? 1) >= s.tier && stepAccepts(s, c.color));
+      if (s.tier || s.wild) {
+        const t = s.tier || 1;
+        const cn = containerName(t);
+        const left = Math.max(1, Math.ceil(need));
+        what = s.tier && left === 1 ? `${/^[aeiou]/i.test(cn) ? 'An' : 'A'} ${cn} more` : `${plural(left, 'shelf container')} more`;
+        blocked = !((state.shelf && state.shelf.cells) || []).some((c) => c && (c.tier ?? 1) >= t && stepAccepts(s, c.color) && stepRoom(s, p, c.color) > 0);
       } else if (moreColors > 0) {
         what = `${moreColors} more different ${moreColors === 1 ? 'color' : 'colors'}`;
         blocked = !eligibleStock(state, rec.id, i).some((id) => !(p.colors && p.colors[id] > 0) && stepRoom(s, p, id) > 0);

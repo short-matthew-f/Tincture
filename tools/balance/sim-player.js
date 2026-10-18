@@ -46,7 +46,7 @@ export const PROFILES = Object.freeze({
 export const WINDOW_TARGET_MS = 8 * HOUR;
 /** Orders filled by hand per check-in, at Great. */
 export const ORDERS_PER_CHECKIN = 2;
-/** Gallery: a piece uses about this much production in paint (set by the engine, sim/gallery.js PAINT_SECONDS). */
+/** Gallery: a finished piece is worth about this much production (sim/gallery.js PAINT_SECONDS; painting itself is free). */
 export const PAINT_PRODUCTION_MS = gallery.PAINT_SECONDS * 1000;
 /** Renovate once the suggestion shows and the gain reaches this. */
 export const RENOVATE_MIN_GAIN = 10;
@@ -80,7 +80,9 @@ function nextRoom(state) {
  * A purchase she is saving for, or null: the cheapest of the next room with its
  * color gate met, every coin-bought unlock whose colors (and phase) are met
  * (v0.2, src/sim/unlocks.js: shelf, hunters, gallery, shipping, commissions) and
- * the half-price re-buy after Renovate; then the Dispatcher.
+ * the half-price re-buy after Renovate; then the Dispatcher. The Tile Room is
+ * left out: it is optional active play these idle profiles never sit down to,
+ * so buying it would only model 5,000 Coins spent on nothing.
  */
 function savingGoal(state) {
   const goals = [];
@@ -91,7 +93,7 @@ function savingGoal(state) {
     goals.push({ kind: 'room', id: room.id, cost: room.cost });
   }
   for (const u of unlocks.statusAll(state)) {
-    if (u && !u.open && u.revealed) goals.push({ kind: 'unlock', id: u.id, cost: u.cost });
+    if (u && !u.open && u.revealed && u.id !== 'tiles') goals.push({ kind: 'unlock', id: u.id, cost: u.cost });
   }
   if (goals.length) return goals.sort((a, b) => a.cost - b.cost)[0];
   const disp = APPRENTICES_BY_ID.dispatcher;
@@ -422,32 +424,16 @@ function tendShelf(state, now, ctx) {
 function paintPiece(state, now, ctx) {
   const g = state.gallery;
   if (!g?.unlocked || !g.canvases.length) return;
-  // Every canvas costs the same (gallery.PAINT_SECONDS of production), so she
-  // works through her canvases in turn.
+  // Painting is free (no jars); a piece's value scales with production
+  // (gallery.PAINT_SECONDS) and canvas size, so she works through her canvases in turn.
   const canvasId = g.canvases[ctx.pieces % g.canvases.length];
   const canvas = getCanvas(canvasId);
   if (!canvas) return;
-  const left = {};
-  for (const [id, e] of Object.entries(state.stock ?? {})) left[id] = e.jars;
-  const colors = Object.keys(left)
-    .filter((id) => state.catalog.discovered[id])
-    .map((id) => ({ id, v: economy.colorPrice(state, id) * (gallery.RARITY[economy.colorTier(id)] ?? 1) }))
-    .sort((a, b) => b.v - a.v);
+  // She paints with whatever she has discovered: a rotating spread over the
+  // whole catalog (not only the priciest tints), so the average piece is typical.
+  const colors = Object.keys(state.catalog.discovered ?? {}).sort();
   if (!colors.length) return;
-  // Plan first (round-robin over her best colors, for variety), then paint.
-  const plan = [];
-  let k = 0;
-  for (const r of canvas.regions) {
-    const need = gallery.regionCost(state, canvasId, r.id);
-    let chosen = null;
-    for (let t = 0; t < colors.length; t++) {
-      const c = colors[(k + t) % colors.length];
-      if (left[c.id] >= need) { chosen = c.id; k = (k + t + 1) % Math.min(colors.length, 8); break; }
-    }
-    if (!chosen) return; // not enough paint today
-    left[chosen] -= need;
-    plan.push([r.id, chosen]);
-  }
+  const plan = canvas.regions.map((r, i) => [r.id, colors[(ctx.pieces * 7 + i) % colors.length]]);
   const start = gallery.startPiece(state, { canvasId }, now);
   if (!start.ok) return;
   for (const [regionId, colorId] of plan) {

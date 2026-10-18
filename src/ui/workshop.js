@@ -571,6 +571,20 @@ function mixerJarsSvg() {
   return out;
 }
 
+/** The Tile Room's kiln (only drawn in the unlock sheet): a brick dome, a warm mouth, glazed tiles cooling on a board. */
+const artKiln = (f) => `<g filter="url(#${f})">
+<rect x="6" y="92" width="108" height="8" rx="2" fill="#7B5236"/>
+<path d="M18 92 V56 C18 30 38 16 60 16 C82 16 102 30 102 56 V92 Z" fill="#B8754F"/>
+<path d="M18 62 H102 M18 76 H102 M30 48 H90" stroke="#9A5E3E" stroke-width="2" fill="none"/>
+<path d="M40 92 V70 C40 58 50 52 60 52 C70 52 80 58 80 70 V92 Z" fill="#5E3E28"/>
+<path d="M46 92 V74 C46 66 52 61 60 61 C68 61 74 66 74 74 V92 Z" fill="#E2B04A"/>
+<rect x="54" y="4" width="12" height="14" rx="2" fill="#9A5E3E"/>
+</g>
+<g filter="url(#${f})">
+<rect x="4" y="80" width="11" height="11" rx="3" fill="#B8433A"/><rect x="105" y="80" width="11" height="11" rx="3" fill="#3E6A9E"/>
+<rect x="105" y="68" width="11" height="11" rx="3" fill="#D9A63A"/>
+</g>`;
+
 /** What each unlock opens in the scene, what it does, and how the sheet draws it. */
 const UNLOCK_INFO = {
   shelf: {
@@ -582,12 +596,16 @@ const UNLOCK_INFO = {
     vb: '8 18 148 122', art: (f) => artWindow(f),
   },
   gallery: {
-    object: 'gallery-door', short: 'Gallery', says: 'Paint with the jars you make and hang your pieces, and visitors pay admission to see them.',
+    object: 'gallery-door', short: 'Gallery', says: 'Paint with any color you have found and hang your pieces, and visitors pay admission to see them.',
     vb: '256 226 120 140', art: (f) => artDoor(f),
   },
   shipping: {
     object: 'yard', short: 'Loading yard', says: 'Carts carry your jars to towns that pay more, and crates you pack by hand earn extra.',
     vb: '20 352 110 66', art: (f) => artYard(f),
+  },
+  tiles: {
+    object: 'kiln', short: 'Tile Room', says: 'Glaze tiles in your own colors and set them into a mosaic wall, a few calm turns at a time.',
+    vb: '0 0 120 104', art: (f) => artKiln(f),
   },
   commissions: {
     object: 'commissions', short: 'Commissions', says: 'Big projects for the town, delivered a few jars at a time, with trophies for the workshop.',
@@ -1493,6 +1511,7 @@ function renderAll(state) {
     patchApprentices(s);
     patchCloseUp(s);
     patchAfford(s);
+    refreshVatSheet();
   } catch (e) {
     console.error('workshop render failed', e);
   } finally {
@@ -1524,6 +1543,7 @@ function pickRow({ action, attrs = {}, lead, title, sub = '', on = false, right 
 
 const UNLOCK_LABEL = {
   shelf: 'the Merge Shelf', hunters: 'the map window', gallery: 'the Gallery Wing', shipping: 'the Loading Yard', commissions: 'Commissions',
+  tiles: 'the Tile Room',
 };
 
 /** sim.unlocks.status for one id (null when the sim has no such unlock). */
@@ -1681,6 +1701,7 @@ export function unlockCeremony(objectId) {
     else if (key === 'map-window') glow(82, 78, 80, 62, 500);
     else if (key === 'gallery-door') glow(316, 312, 60, 70, 500);
     else if (key === 'yard') glow(70, 384, 60, 36, 500);
+    else if (key === 'kiln') glow(195, 220, 90, 80, 500);
     else glow(218, 64, 24, 36, 500);
   } else if (key === 'shelf') {
     audio().knock();
@@ -1762,6 +1783,11 @@ export function unlockCeremony(objectId) {
     }
     setTimeout(() => audio().thunk(0.7), 900);
     glow(70, 384, 56, 34, 1000);
+  } else if (key === 'kiln') {
+    // The Tile Room has no object in the scene: a warm kiln glow over the bench, a bell and a clink.
+    glow(195, 220, 110, 96, 1200);
+    audio().bell();
+    setTimeout(() => audio().clink(3), 380);
   } else {
     const scroll = svgNode('g', { transform: 'translate(205 40)' });
     scroll.innerHTML = artJobs('ws-cut');
@@ -1910,7 +1936,7 @@ function assignFromCatalog(colorId) {
 
 const KEEP_STEP = 5;
 
-/** Jars kept back from the shop for painting (state.keep; the sim defaults 20 for pinned and painting colors). */
+/** Jars kept back from the shop (state.keep; the sim defaults 20 for pinned colors). */
 function keepOf(colorId) {
   return num(sim().storage.keepOf(S(), colorId));
 }
@@ -1926,16 +1952,33 @@ function vatSheetHtml(vi) {
     : jars >= capV ? 'The glass is full'
       : rate > 0 ? `Fills in about ${waitText(ctx.format, (capV - jars) / rate * 1000)}` : 'No mixer is making it right now';
   const keep = v.color ? keepOf(v.color) : 0;
-  const list = Object.entries(s.stock || {}).filter(([, e]) => num(e?.jars) > 0.05)
-    .map(([id, e]) => ({ id, jars: num(e.jars), name: nameOf(id), hex: hexOf(id) }))
-    .sort((a, b) => b.jars - a.jars);
+  // Every color she has discovered (stocked ones first), read live: a new find shows up at once.
+  const list = sim().vatChoices(s).map((c) => ({ ...c, name: nameOf(c.id), hex: hexOf(c.id) }));
+  const vatSub = (c) => (c.jars > 0.05 ? `${fmt(c.jars)} jars in stock` : c.making ? 'A mixer is making it' : c.canMix ? 'Not made yet: set a mixer to it' : 'Not made yet');
   return h`<div class="ws-vat-head">${v.color ? swatch(hexOf(v.color), 52) : h`<span class="swatch is-empty" style="--size:52px" aria-hidden="true"></span>`}
 <div class="ws-vat-facts"><div class="semi">${v.color ? nameOf(v.color) : 'Empty glass'}</div><div>${fmt(jars)} of ${fmt(capV)} jars</div><div class="muted">${fill}</div></div></div>
-${v.color ? h`<div class="ws-pick" style="cursor:default"><span class="grow"><span class="pt">Keep ${fmt(keep)} ${keep === 1 ? 'jar' : 'jars'} for painting</span><br><span class="ps">The shop sells only above this</span></span>
+${v.color && rate <= 0 && sim().factory.canMix(s, v.color) ? button(`Set a mixer to make ${nameOf(v.color)}`, { block: true, attrs: { 'data-action': 'vat-make', 'data-color': v.color } }) : ''}
+${v.color ? h`<div class="ws-pick" style="cursor:default"><span class="grow"><span class="pt">Keep ${fmt(keep)} ${keep === 1 ? 'jar' : 'jars'} back</span><br><span class="ps">The shop sells only above this</span></span>
 <span class="ws-stepper"><button type="button" class="ws-step" data-action="keep-step" data-color="${v.color}" data-delta="-${KEEP_STEP}" data-tap aria-label="Keep fewer jars" aria-disabled="${keep <= 0 ? 'true' : 'false'}">&minus;</button><span class="n num" data-keep-n>${fmt(keep)}</span><button type="button" class="ws-step" data-action="keep-step" data-color="${v.color}" data-delta="${KEEP_STEP}" data-tap aria-label="Keep more jars">+</button></span></div>` : ''}
 <div class="ws-sub-title">Show a different color</div>
 ${pickRow({ action: 'set-vat', attrs: { 'data-vat': String(vi), 'data-color': '' }, lead: h`<span class="swatch is-empty" style="--size:36px"></span>`, title: 'Empty glass', on: !v.color })}
-${list.length ? list.map((c) => pickRow({ action: 'set-vat', attrs: { 'data-vat': String(vi), 'data-color': c.id }, lead: swatch(c.hex, 36), title: c.name, sub: `${fmt(c.jars)} jars in stock`, on: v.color === c.id })) : h`<div class="muted">Make some color and it will be waiting here.</div>`}`;
+${list.length ? list.map((c) => pickRow({ action: 'set-vat', attrs: { 'data-vat': String(vi), 'data-color': c.id }, lead: swatch(c.hex, 36), title: c.name, sub: vatSub(c), on: v.color === c.id })) : h`<div class="muted">Make some color and it will be waiting here.</div>`}`;
+}
+
+/** What makes the vat sheet's list change shape (not the jar counts, so a tap never lands on a redraw). */
+function vatSheetSig(vi) {
+  const s = S();
+  const v = s.stations.vats[vi];
+  return `${v && v.color}|${sim().vatChoices(s).map((c) => `${c.id}:${c.jars > 0.05 ? 1 : 0}${c.making ? 'm' : ''}`).join(',')}`;
+}
+
+/** Keeps an open vat sheet in step with new discoveries and new stock. */
+function refreshVatSheet() {
+  if (!sheet || sheet.kind !== 'vat' || !Number.isInteger(sheet.vi)) return;
+  const sig = vatSheetSig(sheet.vi);
+  if (sig === sheet.sig) return;
+  sheet.sig = sig;
+  sheet.api.set(vatSheetHtml(sheet.vi));
 }
 
 function openVatSheet(vi) {
@@ -1954,6 +1997,12 @@ function openVatSheet(vi) {
         api.set(vatSheetHtml(vi));
         return;
       }
+      if (name === 'vat-make') {
+        const colorId = el.dataset.color;
+        closeSheet();
+        openRecipeSheet(ctx, { colorId });
+        return;
+      }
       if (name !== 'set-vat') return;
       const colorId = el.dataset.color || null;
       act(sim().factory.setVatColor, { vat: vi, colorId });
@@ -1967,7 +2016,7 @@ function openVatSheet(vi) {
     },
     onClose() { if (sheet && sheet.api === api) sheet = null; },
   });
-  sheet = { api, kind: 'vat' };
+  sheet = { api, kind: 'vat', vi, sig: vatSheetSig(vi) };
 }
 
 // --- shipping ---------------------------------------------------------------

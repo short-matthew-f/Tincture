@@ -21,6 +21,8 @@ const num = (x, d = 0) => (Number.isFinite(x) ? x : d);
 export const UNLOCKS = Object.freeze([
   { id: 'shelf', name: 'Merge Shelf', revealColors: 8, cost: 400, object: 'shelf' },
   { id: 'hunters', name: 'Hue Hunters', revealColors: 15, cost: 2500, object: 'map-window' },
+  // The Tile Room (docs/PLAN-v0.3.md): between the map window and the Gallery on the ladder.
+  { id: 'tiles', name: 'Tile Room', revealColors: 20, cost: 5000, object: 'kiln' },
   { id: 'gallery', name: 'Gallery Wing', revealColors: 25, cost: 8000, room: 'gallery-wing' }, // the room IS the purchase
   { id: 'shipping', name: 'Loading Yard', revealColors: 50, cost: 40000, room: 'loading-yard' }, // the room IS the purchase
   { id: 'commissions', name: 'Commissions', revealColors: 30, cost: 20000, requiresPhase: 3 },

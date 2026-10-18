@@ -8,12 +8,15 @@
  *
  * Cards: `match` orders open the Matching overlay; `any` orders expand a
  * color picker (she offers a discovered color; rarer pays more); `container`
- * orders deliver a merged container from the shelf.
+ * orders deliver a merged container from the shelf; `bouquet` orders (Bloom
+ * Week's twist) show a little bouquet of flower swatches, each with "Mix it"
+ * (Matching for that flower) and, when a close color is in stock, "Give 3 jars".
  *
  * data-action names: `open-match` (data-order), `toggle-any` (data-order),
  * `pick-color` (data-order, data-color), `offer-any` (data-order),
  * `deliver-container` (data-order, data-cell), `go-shelf`, `commissions`,
- * `bench`.
+ * `bench`, `open-flower` (data-order, data-flower), `give-flower` (data-order,
+ * data-flower, data-color).
  * Coach targets: data-coach="first-order" on the first order card (the
  * first-ten-minutes script), data-coach="first-match" on the first match
  * order when it is not the first card (the `orders` guide).
@@ -60,6 +63,14 @@ const CSS = `
 .or-card.is-held { box-shadow: 0 6px 0 var(--shadow); }
 .or-card, .or-opt, .or-main { touch-action: manipulation; }
 .or-done { color: var(--ink); font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; }
+.or-bq-art { flex: 0 0 auto; width: 64px; height: 64px; }
+.or-flowers { display: flex; flex-direction: column; gap: 8px; }
+.or-flower { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 12px; background: var(--plaster); }
+.or-flower .sw { width: 40px; height: 40px; border-radius: 50%; flex: 0 0 auto; box-shadow: 0 2px 0 rgba(42,38,34,.25); }
+.or-flower .acts { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.or-flower .acts .btn { min-height: 40px; padding: 0 12px; font-size: 14px; }
+.or-flower.is-filled { background: var(--paper); box-shadow: inset 0 0 0 1.5px var(--plaster-line); }
+.or-rail button.bouquet { border-radius: 50%; }
 `;
 const S = {
   ctx: null,
@@ -187,6 +198,61 @@ ${cell
 </div>`;
 }
 
+/** A little bouquet: one round flower per swatch on green stems, tied with a bow. */
+function bouquetArt(hexes) {
+  const pos = hexes.length <= 2 ? [[22, 22], [42, 22]] : [[32, 15], [18, 28], [46, 28], [32, 34]];
+  const heads = hexes.slice(0, 4).map((hx, i) => `<circle cx="${pos[i][0]}" cy="${pos[i][1]}" r="11" fill="${safeHex(hx)}" stroke="#2A2622" stroke-width="1.6"/><circle cx="${pos[i][0]}" cy="${pos[i][1]}" r="3" fill="rgba(255,255,255,.55)"/>`).join('');
+  return raw(`<svg class="or-bq-art" viewBox="0 0 64 64" aria-hidden="true"><path d="M32 40 L26 60 M32 40 L32 61 M32 40 L38 60" stroke="#5E7F4A" stroke-width="3" stroke-linecap="round"/>${heads}<path d="M26 50 Q32 46 38 50 Q32 54 26 50Z" fill="#E2B04A" stroke="#2A2622" stroke-width="1.2"/></svg>`);
+}
+
+const TIER_WORD = { perfect: 'Perfect', great: 'Great', good: 'Good', close: 'Close' };
+
+function bouquetCard(o, coach) {
+  const { ctx } = S;
+  const state = stateOf();
+  const O = ctx.sim.orders;
+  const who = customerName(ctx, o);
+  const flowers = o.flowers || [];
+  const left = flowers.filter((f) => !f.filled).length;
+  const base = payBase(ctx, o) * (O.BOUQUET_BONUS ?? 1.25);
+  const jars = O.BOUQUET_JARS ?? 3;
+  const pts = (ctx.content.POINTS_PER || {}).bouquet;
+  const evOn = !!(state.event && o.event && state.event.key === o.event);
+  return h`<div class="card or-card or-bouquet" data-order-card="${o.id}" data-bouquet="${o.id}"${coach ? h` data-coach="first-order"` : ''}>
+<div class="or-main">
+${bouquetArt(flowers.map((f) => f.target))}
+<div class="grow stack stack-sm"><div class="or-name ellipsis">A bouquet for ${who}</div>
+<div class="small muted">${left === flowers.length ? `${flowers.length} flowers, one color each.` : `${left} more ${left === 1 ? 'flower' : 'flowers'} to go.`} Mix each one at the jar, or give ${jars} jars of a close color from your stock.</div>
+<span class="or-pay">${iconSvg('coin', { size: 14 })}<span>Up to ${coinsWord(ctx, base * 1.5)} a flower${pts && evOn ? `, +${pts} event points for the bouquet` : ''}</span></span></div>
+</div>
+<div class="or-flowers">${flowers.map((f, i) => {
+    const stock = f.filled ? [] : O.bouquetStock(state, f);
+    const best = stock[0];
+    return h`<div class="or-flower${f.filled ? ' is-filled' : ''}" data-flower="${i}">
+<span class="sw" style="background:${safeHex(f.target)}" role="img" aria-label="Flower ${i + 1}"></span>
+<div class="grow small">${f.filled ? h`<span class="or-done">${iconSvg('check', { size: 16 })}${TIER_WORD[f.tier] || 'Lovely'}</span>` : h`<div class="semi">Flower ${i + 1}</div><div class="muted">${best ? `You have ${ctx.sim.displayName(state, best.colorId)} in stock` : 'Mix it at the jar'}</div>`}</div>
+${f.filled ? '' : h`<div class="acts">${best ? button(h`Give ${jars} jars`, { attrs: { 'data-action': 'give-flower', 'data-order': o.id, 'data-flower': i, 'data-color': best.colorId, 'aria-label': `Give ${jars} jars of ${ctx.sim.displayName(state, best.colorId)} for flower ${i + 1}` } }) : ''}${button('Mix it', { variant: 'primary', attrs: { 'data-action': 'open-flower', 'data-order': o.id, 'data-flower': i } })}</div>`}
+</div>`;
+  })}</div>
+</div>`;
+}
+
+/** Hand over stock jars for one flower of a bouquet. */
+function giveFlower(orderId, flower, colorId, fromEl) {
+  const { ctx } = S;
+  const order = (stateOf().orders?.open ?? []).find((o) => o.id === orderId);
+  if (!order) return;
+  const who = customerName(ctx, order);
+  const name = ctx.sim.displayName(stateOf(), colorId);
+  const res = ctx.game.act(ctx.sim.orders.submitOrder, { orderId, flower: Number(flower), colorId });
+  if (res && res.ok) {
+    const b = res.bouquet || {};
+    const text = b.complete ? `${who}'s bouquet is complete!${b.points ? ` +${b.points} event points` : ''}` : `${name} is in the bouquet. ${b.left} more to go.`;
+    celebrate(fromEl, res, { target: res.mixHex }, text, res.mixHex);
+  } else ctx.toast('Those jars are not in stock right now');
+  paint(true);
+}
+
 /**
  * What to do when the container is not on the shelf yet: add the color to the
  * shelf's chips if its vials are not arriving, else merge; and a quiet way to
@@ -216,10 +282,10 @@ function boardHtml(state) {
   const commCount = state.commissions?.open?.length ?? 0;
   const lock = commissionLock(ctx, state);
   const th = S.delivered;
-  const firstMatch = open.findIndex((o) => o.kind !== 'any' && !(o.kind === 'container' && o.container));
+  const firstMatch = open.findIndex((o) => o.kind === 'match');
   return h`<div class="or-chips">${rep >= 1 ? repChip(rep) : h`<span class="small muted">Earn a reputation star with a Perfect match</span>`}</div>
 <div class="small muted" data-countdown></div>
-${open.length > 3 ? h`<div class="or-rail" aria-label="Every order waiting"><span class="lbl">All ${open.length}:</span>${open.map((o) => h`<button type="button" class="${o.kind === 'any' ? 'any' : o.kind === 'container' ? 'jar' : ''}" style="${o.kind === 'any' ? '' : `background-color:${safeHex(o.target || '#C9A277')}`}" data-action="jump" data-order="${o.id}" data-tap aria-label="Show the order from ${customerName(ctx, o)}"></button>`)}</div>` : ''}
+${open.length > 3 ? h`<div class="or-rail" aria-label="Every order waiting"><span class="lbl">All ${open.length}:</span>${open.map((o) => h`<button type="button" class="${o.kind === 'any' ? 'any' : o.kind === 'container' ? 'jar' : o.kind === 'bouquet' ? 'bouquet' : ''}" style="${o.kind === 'any' ? '' : `background-color:${safeHex(o.target || '#C9A277')}`}" data-action="jump" data-order="${o.id}" data-tap aria-label="Show the order from ${customerName(ctx, o)}"></button>`)}</div>` : ''}
 ${th ? h`<div class="card or-thanks" data-thanks>${swatch(th.hex, 44)}<div class="grow"><div class="semi">${th.text}</div><div class="small muted">Paid <span data-paid>${th.coins}</span></div></div></div>` : ''}
 ${bonus > 1 ? h`<div class="card or-badge">${iconSvg('coin', { size: 22 })}<span>Fleet is busy: +${Math.round((bonus - 1) * 100)}% for hand delivery</span></div>` : ''}
 <div class="or-actions${lock ? ' one' : ''}">
@@ -228,9 +294,10 @@ ${button('Mixing bench', { attrs: { 'data-action': 'bench' } })}
 </div>
 ${lock ? h`<div class="oq-lockrow" data-lock>${lock.tag}${lock.more ? h`<span class="more">${lock.more}</span>` : ''}</div>` : ''}
 ${open.length
-    ? open.map((o, i) => (o.kind === 'any' ? anyCard(o, i === 0) : o.kind === 'container' && o.container ? containerCard(o, i === 0) : matchCard(o, i === 0, i === firstMatch)))
+    ? open.map((o, i) => (o.kind === 'any' ? anyCard(o, i === 0) : o.kind === 'container' && o.container ? containerCard(o, i === 0)
+      : o.kind === 'bouquet' && o.flowers ? bouquetCard(o, i === 0) : matchCard(o, i === 0, i === firstMatch)))
     : h`<div class="card or-empty"><div class="oq-h">Every order is filled</div><p class="muted">New orders arrive over time. Meanwhile, the bench is free.</p></div>`}
-${state.apprentices?.orderClerk ? h`<div class="card tight"><div class="small"><span class="semi">Order Clerk:</span> fills simple orders from your stock at ${Math.round(ctx.sim.orders.CLERK_PAYOUT * 100)}% pay.</div></div>` : ''}`;
+${state.apprentices?.orderClerk ? h`<div class="card tight"><div class="small"><span class="semi">Order Clerk:</span> fills simple orders from your stock at ${Math.round(ctx.sim.orders.CLERK_PAYOUT * 100)}% pay.${open.some((o) => o.kind === 'bouquet') ? ' Bouquets wait for you.' : ''}</div></div>` : ''}`;
 }
 
 function paint(force = false) {
@@ -400,6 +467,8 @@ export default {
         case 'pick-color': S.pick[order] = t.getAttribute('data-color'); S.fresh = 'pick'; paint(true); break;
         case 'offer-any': offerAny(order, t.closest('.card') || t); break;
         case 'deliver-container': deliverContainer(order, t.getAttribute('data-cell'), t.closest('.card') || t); break;
+        case 'open-flower': ctx.navigate('matching', { orderId: order, flower: Number(t.getAttribute('data-flower')) }); break;
+        case 'give-flower': giveFlower(order, t.getAttribute('data-flower'), t.getAttribute('data-color'), t.closest('.card') || t); break;
         case 'go-shelf': ctx.navigate('shelf'); break;
         case 'shelf-color': addShelfColor(t.getAttribute('data-color')); break;
         case 'pass-order': passOrder(order); break;

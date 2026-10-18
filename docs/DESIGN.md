@@ -494,17 +494,17 @@ The Gallery is where she uses her colors instead of selling them: she paints can
 - **Canvases** are line-art designs split into regions: stained-glass windows, tile mosaics, painted plates, quilts, tapestries, botanical prints. Each has 12 to 60 regions.
 - She taps a region, picks a color from her catalog, and it fills with a soft pour animation. Undo is unlimited; regions can be repainted until she signs the piece.
 - **Any color can go anywhere.** There is no target image and no score for "correctness." A suggested palette is offered for anyone who wants a starting point.
-- **Paint costs jars.** Each region uses a few jars of its color from her vats (larger regions use more). This makes the Gallery a color sink that gives the factory a reason to produce rare colors in volume.
+- **Painting is free.** Any discovered color goes on any pane; no jars are spent or needed, and the paint screen shows no jar counts ("painting for painting's sake"). A piece's value is rebased on her production instead (see Piece value).
 - **Signing** finishes the piece. She can title it, and it can be exported as an image to share.
 
 ### Piece value
 
-Value is computed from what she used, never from how "right" it looks.
+Value is computed from the colors she chose and her income, never from how "right" it looks.
 
 | Factor | Effect |
 | --- | --- |
 | Rarity of colors used | Wild hues and tints worth more than primaries |
-| Purity of the paint | Pure and flawless batches add up to +50% |
+| Her production | A canvas is worth 150 seconds of her current production (locked when the piece is started), nudged by canvas size (×0.75 to ×1.6) |
 | Variety | +2% per distinct color, capped at +40% |
 | Visitor taste (weekly) | A rotating "visitors love greens this week" bonus of +25%, optional |
 
@@ -717,7 +717,7 @@ Purity multiplies price (muddy 0.8×, standard 1×, pure 1.5×, flawless 2×). R
 - **Seals** are deliberately modest: about 60 per day from dailies, 150 per week from the weekly quest and up to 400 from an event track. A typical boost costs 40 and a cosmetic 200 to 600.
 - **Boosts** are temporary (10 to 60 minutes) and stack additively, capped at +200%, so nothing breaks the curve.
 
-**Gallery paint** is the main color sink: it uses jars that would otherwise sell, in exchange for lasting admission. **Essence** is not a currency: each Cask merged adds one permanent star (+5% production and purity) to that color, up to 10.
+**Gallery paint** is free and is not a sink; a finished piece is worth a slice of her production, in exchange for lasting admission. **Essence** is not a currency: each Cask merged adds one permanent star (+5% production and purity) to that color, up to 10.
 
 ### Number formatting
 

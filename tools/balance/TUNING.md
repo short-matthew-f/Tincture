@@ -35,9 +35,8 @@ she collects, claims happy accidents, purifies muddy batches, reassigns mixers
 orders at Great, buys, plays her puzzles (each pays `puzzleReward`, reveals
 `revealedTints` from a real `createBoard` of her palette, and is followed by an
 affordability check and a buying round), paints at every other check-in once the
-Gallery is open (her canvases in turn, every region in one of her most valuable
-colors round-robin, at `gallery.regionCost`; she skips the piece if any color
-runs short), renovates when `shouldSuggest` and the gain is at least 10,
+Gallery is open (her canvases in turn, every region in a rotating spread of her discovered
+colors; painting is free, change 14), renovates when `shouldSuggest` and the gain is at least 10,
 sends idle hunters on the longest trip that is back by her next check-in
 (overnight at the last one), and buys again.
 
@@ -89,6 +88,7 @@ Choices the doc does not spell out, made here:
 | 11 | Gallery admission share "by day 14" read 23.6% on the test's seeds after the v0.2 gates (bound loosened to 25%, `TODO(balance-step2)`): one calendar day can sit in a Renovate dip (the Gallery closes on Renovate until the batch re-buy), which swings that day's share by up to ±6 points per seed | Measured as each run's median over days 13–15 (`report.admissionByDay14`), then the median over seeds; bound back to 10–20%. No gallery constant changed | Casual 17.3% over days 13–15 (day 14 alone 17.5%; 30 seeds); the test's seeds 1–5 read 17.2%. Engaged 11.5%, Forgetful 10.4% |
 | 12 | v0.2.2 shelf (playtest: "filling too slowly"): one vial per 10 minutes left the board empty between visits | `SPILLOVER_MS` 10 → 3 min, `SPILLOVER_SECONDS` 15 → 5, so a vial is worth a third and shelf Coins per hour stay the same; the pre-purchase pile keeps 10 minutes (`WAITING_MS`) | Balance suite unchanged by the rate itself |
 | 13 | "No tier earns more than 1.6× Relaxed" read the median of 5 per-seed rates, which swung by about ±0.15 on unrelated changes (bonus vials re-colored to shelf chips: tricky 1.51 → 1.66) | The test pools Coins and active minutes over the seeds | 5 seeds pooled: tricky 1.58, master 1.55; 15 seeds: 1.39 and 1.35 pooled (1.29 and 1.33 median) |
+| 14 | Painting is free (owner request: jar counts on paint were a distraction) | `paintRegion` spends no stock; piece value = `paintRate` × `PAINT_SECONDS` × size nudge (`sizeFactor`, √(regions/18) clamped 0.75–1.6) × size-weighted color price × rarity × variety × taste. The scripted painter now spreads over every discovered color (it used to be limited to stocked ones and always took the priciest) | Casual share days 13–15 19.0% (was 17.3%), Engaged 11.6%, Forgetful 11.5%; `PAINT_SECONDS` unchanged at 150 |
 
 Unchanged on purpose: `STORE_TARGET_MS` (the player keeps 8 hours regardless;
 the flow meter's phase targets only steer the suggestion), puzzle reward
@@ -180,6 +180,34 @@ Tincture Era 1 balance simulation (real engine), 21 days, 30 seeds per profile. 
 | Casual, no puzzles | 0.0% | 3.9K | 7.1K | 12.9K | 6.1 h | 6.0 h | 3 |
 | Forgetful | 1.3% | 4.4K | 6.9K | 10.9K | 6.6 h | 6.0 h | 3 |
 | Forgetful, no puzzles | 0.0% | 1.0K | 6.0K | 9.9K | 6.1 h | 6.1 h | 2 |
+
+## Tile Room (0.3.x)
+
+`src/sim/tiles.js`. The Tile Room is optional, calm active play; it must pay
+less per active minute than hand orders (docs/PLAN-v0.3.md "Each release").
+
+- **Unlock:** revealed at 20 colors, 5,000 Coins (`src/sim/unlocks.js`
+  `tiles`), between the map window (15 / 2,500) and the Gallery Wing
+  (25 / 8,000), as PLAN-v0.3 proposed. At 20 colors she has the five hue
+  families the glazes need, and 5,000 is about two map windows: a purchase,
+  not a gate. Renovate closes it like the others (Heritage `keep-kiln` holds
+  it); her mosaics and a wall in progress stay.
+- **Pay:** every point (placed tiles, seconds at +1, end bonuses) pays
+  `POINT_MINUTES = 0.05` × `orders.orderBasePay(state, 1)`, and a finished
+  wall adds `WALL_MINUTES = 3` × the same base (one order's worth); both ×
+  `incomeMultiplier`. `orderBasePay` follows her income (with the order
+  floor of 25% of the cheapest upgrade), so the room stays relevant in every
+  era. A greedy scripted wall takes 40–50 turns (5–8 active minutes with
+  Ida's turns and the scoring) and scores 60–160: about 6–11 minutes of
+  income, i.e. 1–2 income-minutes per active minute, against 3–6 for hand
+  orders. `test/tiles.test.js` checks that ten of her turns earn less than one
+  hand order's base pay. A first draft at 0.2 min a point paid 5+ income
+  minutes per active minute (more than orders) and was cut.
+- **No cost:** walls are free. The glazes are her discovered colors (no jars
+  are spent), so the room never blocks on stock.
+- The balance players never sit down at the Tile Room, so
+  `sim-player.savingGoal` skips its unlock (it would model 5,000 Coins spent
+  on nothing).
 
 ## Open
 

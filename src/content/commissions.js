@@ -4,16 +4,19 @@
 // three open at once; they never expire) and "Era Advance" (capstone needs ~80% of
 // the era's catalog).
 //
-// A step asks for `jars` of ONE of:
-//   family:   a hue family (see routes.js FAMILIES); any color of that family counts
+// A step asks for `jars` of ONE of (sim/commission-rules.js decides what counts):
+//   family:   a hue family (see routes.js FAMILIES); every color that reads as that
+//             family counts, tints, shades and greyish ones included
 //   families: several families, any of them counts (e.g. "brights")
-//   pigment:  a pigment id; its same-named catalog color
+//   pigment:  a pigment id; its own color or any color made with it
 //   colorId:  an exact catalog id (wild:true when it is a found-only wild hue)
+// A wild-hue step and a `tier` step are filled from the Merge Shelf: `jars` then
+// counts containers (wild hues cannot be mixed into jars).
 // Optional per step:
 //   distinct: at least this many different colors must make up the jars (default 1)
 //   purity:   'pure' = at least pure-grade jars
 //   tier:     deliver a merged container of this shelf tier (4 = "an Urn of ...")
-//   wild:     true when the color is a wild hue (cannot be mixed)
+//   wild:     true when the color is a wild hue (cannot be mixed; delivered as shelf containers)
 //   bulk:     true when quantity matters more than variety
 // reward.incomeMinutes: Coins paid as minutes of current idle income (sim multiplies).
 // reward.signatureColor: catalog id found by 'commission' (the catalog module owns
@@ -35,7 +38,7 @@ export const COMMISSIONS = Object.freeze([
     steps: [
       { family: 'blue', jars: 50, distinct: 5 },
       { family: 'neutral', jars: 20, distinct: 2 },
-      { colorId: 'harbor-teal', jars: 10, wild: true },
+      { colorId: 'harbor-teal', jars: 3, wild: true },
     ],
     reward: { incomeMinutes: 90, signatureColor: 'lighthouse-white', trophy: 'lighthouse-model' } }),
   C({ id: 'cathedral-window', name: 'Cathedral Window', phase: 3, colorsRequired: 34,
@@ -51,7 +54,7 @@ export const COMMISSIONS = Object.freeze([
     steps: [
       { family: 'teal', jars: 40, distinct: 3 },
       { family: 'blue', jars: 40, distinct: 3 },
-      { colorId: 'sea-glass', jars: 8, wild: true },
+      { colorId: 'sea-glass', jars: 3, wild: true },
     ],
     reward: { incomeMinutes: 110, signatureColor: 'deep-fathom', trophy: 'ship-in-a-bottle' } }),
   C({ id: 'gilded-urns', name: 'Gilded Urns', phase: 3, colorsRequired: 38,
@@ -67,7 +70,7 @@ export const COMMISSIONS = Object.freeze([
     steps: [
       { family: 'violet', jars: 30, purity: 'pure', distinct: 2 },
       { family: 'red', jars: 30, purity: 'pure', distinct: 2 },
-      { colorId: 'murex-purple', jars: 6, wild: true },
+      { colorId: 'murex-purple', jars: 2, wild: true },
     ],
     reward: { incomeMinutes: 140, signatureColor: 'coronation-purple', trophy: 'robe-stand' } }),
   C({ id: 'weavers-tapestry', name: "Weavers' Great Tapestry", phase: 3, colorsRequired: 40,
@@ -87,7 +90,7 @@ export const COMMISSIONS = Object.freeze([
     steps: [
       { family: 'green', jars: 40, distinct: 4 },
       { family: 'yellow', jars: 30, distinct: 2 },
-      { colorId: 'clover-pink', jars: 8, wild: true },
+      { colorId: 'clover-pink', jars: 3, wild: true },
     ],
     reward: { incomeMinutes: 100, signatureColor: 'quilt-patchwork', trophy: 'patchwork-pillow' } }),
   C({ id: 'cartographers-atlas', name: "Cartographer's Atlas", phase: 3, colorsRequired: 50,
@@ -95,7 +98,7 @@ export const COMMISSIONS = Object.freeze([
     steps: [
       { family: 'neutral', jars: 40, distinct: 4, purity: 'pure' },
       { family: 'yellow', jars: 20, distinct: 2 },
-      { colorId: 'obsidian', jars: 6, wild: true },
+      { colorId: 'obsidian', jars: 2, wild: true },
     ],
     reward: { incomeMinutes: 130, signatureColor: 'atlas-ink', trophy: 'brass-compass' } }),
   C({ id: 'the-grand-catalogue', name: 'The Grand Catalogue', phase: 3, capstone: true, colorsRequired: 80,

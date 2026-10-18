@@ -6,3 +6,4 @@ export * as matching from './matching.js';
 export * as purify from './purify.js';
 export * as packing from './packing.js';
 export { TIERS as GRADING_TIERS } from './grading.js';
+export * as tiles from './tiles.js';

@@ -86,7 +86,7 @@ export function createInitialState(now = 0, seed) {
     catalog: { discovered, pinned: [] },
     // Coin-bought systems (src/sim/unlocks.js); colors only reveal the price.
     // Reset on Renovate unless a Heritage keep-* node holds them open.
-    unlocks: { shelf: false, hunters: false, gallery: false, shipping: false, commissions: false },
+    unlocks: { shelf: false, hunters: false, gallery: false, shipping: false, commissions: false, tiles: false },
     renovateReopen: [],        // unlock ids open before the last Renovate (batch re-buy)
     // Shop reserve: colorId -> jars the shop and the Dispatcher never sell.
     // Missing entries use the default rule (storage.keepOf): 20 jars of a pinned
@@ -126,6 +126,11 @@ export function createInitialState(now = 0, seed) {
       collectorOffer: null,
     },
     hunters: { roster: [], regionsUnlocked: [] },
+    // The Tile Room (src/sim/tiles.js owns the shape; ensureTiles repairs it).
+    tiles: {
+      game: null, pending: false, undo: null, paid: 0, lastGain: null,
+      walls: 0, best: 0, settings: { rival: true }, glazes: [], mosaics: [],
+    },
     album: { cards: {}, setsDone: [] },
     quests: {
       daily: [],
@@ -292,7 +297,7 @@ function isPlainObject(x) {
 
 /** Top-level sections whose own keys mergeDefaults fills in (one level deep). */
 const DEEP_SECTIONS = ['onboarding', 'lifetime', 'stations', 'catalog', 'apprentices', 'orders', 'shelf',
-  'gallery', 'hunters', 'album', 'quests', 'commissions', 'ledger', 'unlocks'];
+  'gallery', 'hunters', 'album', 'quests', 'commissions', 'ledger', 'unlocks', 'tiles'];
 
 function fillMissing(target, defaults) {
   for (const [k, d] of Object.entries(defaults)) {
@@ -336,6 +341,8 @@ export function mergeDefaults(state, now = 0) {
   if (!isPlainObject(state.onboarding.flags)) state.onboarding.flags = {};
   if (!isPlainObject(state.onboarding.seen)) state.onboarding.seen = {};
   if (!isPlainObject(state.keep)) state.keep = {};
+  if (!isPlainObject(state.tiles.settings)) state.tiles.settings = { rival: true };
+  if (typeof state.tiles.settings.rival !== 'boolean') state.tiles.settings.rival = true;
   if (!Array.isArray(state.renovateReopen)) state.renovateReopen = [];
   for (const key of ['coins', 'seals', 'heritage', 'runEarned']) {
     if (!Number.isFinite(state[key])) state[key] = key === 'coins' ? 0 : defaults[key];

@@ -43,6 +43,8 @@ export const HERITAGE_TREE = Object.freeze([
     blurb: 'The map window stays open: your hunters set out on day one.' }),
   node({ id: 'keep-gallery', name: 'Keep the Gallery', maxLevel: 1, cost: [2], effect: { keepUnlock: 'gallery' },
     blurb: 'The Gallery stays open through every Renovate, visitors and all.' }),
+  node({ id: 'keep-kiln', name: 'Keep the Kiln', maxLevel: 1, cost: [2], effect: { keepUnlock: 'tiles' },
+    blurb: 'The Tile Room stays open through every Renovate, kiln still warm.' }),
 ]);
 
 export const HERITAGE_BY_ID = Object.freeze(Object.fromEntries(HERITAGE_TREE.map((n) => [n.id, n])));

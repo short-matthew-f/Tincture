@@ -33,3 +33,22 @@ export function capstoneColorsRequired(eraId) {
   const e = ERAS_BY_ID[eraId];
   return e ? Math.ceil(e.colorCount * CAPSTONE_CATALOG_SHARE) : 0;
 }
+
+/**
+ * A sneak peek at Era 2 (Neon Night's twist, rules.previewEra = 2): a few
+ * Synthetics shown on the event page and borrowed by that week's grading
+ * boards. They are previews only: Era 2 is not playable yet, so they are never
+ * discovered and never enter the catalog (the page shows "coming in a later
+ * update").
+ */
+export const ERA_PREVIEW_COLORS = Object.freeze([
+  { id: 'era2-mauveine', name: 'Mauveine', hex: '#8E3FA8', era: 2, page: 'brights', note: 'The very first synthetic dye.' },
+  { id: 'era2-prussian-blue', name: 'Prussian Blue', hex: '#24467E', era: 2, page: 'primaries', note: 'A deep, inky blue from the chemist\'s bench.' },
+  { id: 'era2-chrome-yellow', name: 'Chrome Yellow', hex: '#F4B71A', era: 2, page: 'brights', note: 'A sunny yellow that never fades in the shop window.' },
+  { id: 'era2-viridian', name: 'Viridian', hex: '#2B8C70', era: 2, page: 'pastels', note: 'A cool, clear green.' },
+].map((c) => Object.freeze(c)));
+
+/** Preview colors for an era (empty when there are none). */
+export function eraPreviewColors(eraId) {
+  return ERA_PREVIEW_COLORS.filter((c) => c.era === eraId);
+}

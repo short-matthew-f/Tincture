@@ -334,6 +334,10 @@ export const PZ_CSS = `
 .pz-hub .batch { display: flex; flex-direction: column; gap: 8px; padding: 10px 0; }
 .pz-hub .batch + .batch { border-top: 1px solid rgba(42,38,34,.1); }
 .pz-hub .batch .btn { justify-content: center; }
+.pz-tilesrow { display: flex; align-items: center; gap: 12px; }
+.pz-mini { flex: 0 0 auto; display: grid; grid-template-columns: repeat(5, 12px); gap: 2px; padding: 5px; border-radius: 8px; background: linear-gradient(160deg, #E8DCC0, #D9CAA6); box-shadow: inset 0 0 0 1px rgba(107,74,50,.3), var(--cut-sm); }
+.pz-mini i { width: 12px; height: 12px; border-radius: 3px; }
+.pz-mini i.is-ghost { opacity: .15; }
 `;
 
 // ---------------------------------------------------------------------------
@@ -408,6 +412,48 @@ ${waiting}
 </div>`;
 }
 
+/** A 5 x 5 glimpse of a wall in its five glazes (ghost squares where no tile is set). */
+function miniWall(colors, wall) {
+  let out = '<div class="pz-mini" aria-hidden="true">';
+  for (let r = 0; r < 5; r++) for (let c = 0; c < 5; c++) {
+    const k = (((c - r) % 5) + 5) % 5;
+    const on = typeof wall === 'string' ? wall[r * 5 + c] === '1' : !!(wall && wall[r] && wall[r][c]);
+    out += `<i class="${on ? '' : 'is-ghost'}" style="background:${safeHex(C.sim.economy.colorHex(colors[k]))}"></i>`;
+  }
+  return raw(`${out}</div>`);
+}
+
+/** The Tile Room card: her current wall at a glance, or the price tag while the kiln is closed. */
+function tilesCardHtml(state) {
+  const T = C.sim.tiles;
+  if (!T) return '';
+  const sum = T.summary(state);
+  if (!sum.open) {
+    return h`<div class="card" id="pz-tiles" data-coach="tiles-card">
+<div class="h3">Tile Room</div>
+<div class="hint">Glaze tiles in your own colors and set them into a mosaic wall. Ida from the pottery next door plays along.</div>
+<div class="pz-tiertag">${unlockTag(C, 'tiles', { cls: 'pz-tag' })}</div>
+</div>`;
+  }
+  const t = state.tiles || {};
+  const g = t.game;
+  const last = Array.isArray(t.mosaics) && t.mosaics.length ? t.mosaics[t.mosaics.length - 1] : null;
+  const colors = g && Array.isArray(g.colors) ? g.colors : (last ? last.colors : T.nextGlazes(state));
+  const wall = g ? g.wall : (last ? last.wall : null);
+  let line;
+  if (sum.playing) {
+    const step = { pending: 'Ida\u2019s turn is next', deal: `round ${sum.round + 1} is ready to deal` }[sum.phase];
+    line = `Round ${sum.round} \u00b7 ${sum.score} ${sum.score === 1 ? 'point' : 'points'} \u00b7 ${sum.placed} of 25 tiles set${step ? `. ${step[0].toUpperCase()}${step.slice(1)}.` : ''}`;
+  } else if (g && g.over) line = `Your last wall scored ${last ? last.score : sum.score}. A fresh one is ready when you are.`;
+  else line = 'A calm wall of glazed tiles, a few turns at a time.';
+  const stats = sum.walls ? `${sum.walls} ${sum.walls === 1 ? 'mosaic' : 'mosaics'} \u00b7 best ${sum.best}` : '';
+  return h`<div class="card" id="pz-tiles" data-coach="tiles-card">
+<div class="row between"><div class="h3">Tile Room</div>${stats ? h`<span class="chip">${stats}</span>` : ''}</div>
+<div class="pz-tilesrow">${miniWall(colors, wall)}<div class="hint grow">${line}</div></div>
+${button(sum.playing ? 'Continue the wall' : 'Start a wall', { variant: 'primary', block: true, attrs: { 'data-action': 'open-tiles' } })}
+</div>`;
+}
+
 function build(state) {
   const tier = rememberedTier(state);
   const tiers = C.sim.PUZZLE_TIERS || {};
@@ -471,7 +517,7 @@ ${packAction}
 </div>`;
 
   return h`<div class="screen-head is-left"><div class="titles"><div class="title">Puzzle table</div><div class="subtitle">Short, calm, and always worth it</div></div></div>
-<div class="screen-body pz-body pz-hub">${gradingCard}${purifyCard}${packingCard}</div>`;
+<div class="screen-body pz-body pz-hub">${gradingCard}${purifyCard}${tilesCardHtml(state)}${packingCard}</div>`;
 }
 
 function sigOf(state) {
@@ -486,6 +532,12 @@ function sigOf(state) {
     (() => { const y = yardStatus(C, state); const u = C.sim.unlocks.status(state, 'shipping'); return [y.open, y.need, u.revealed, u.affordable]; })(),
     num(state.stats && state.stats.fastSolves) >= 3,
     C.sim.discoveredCount(state),
+    (() => {
+      if (!C.sim.tiles) return 0;
+      const u = C.sim.unlocks.status(state, 'tiles');
+      const t = state.tiles || {};
+      return [u && u.revealed, u && u.affordable, u && u.open, JSON.stringify(C.sim.tiles.summary(state)), t.game && t.game.colors, (t.mosaics || []).length];
+    })(),
   ]);
 }
 
@@ -614,6 +666,8 @@ function onClick(e) {
     draw(C.game.state, true);
   } else if (act === 'continue-purify') {
     C.navigate('purify', {});
+  } else if (act === 'open-tiles') {
+    C.navigate('tiles', {});
   } else if (act === 'continue-packing') {
     C.navigate('packing', { from: 'puzzles' });
   } else if (act === 'to-workshop') {

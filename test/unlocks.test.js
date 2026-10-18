@@ -30,7 +30,7 @@ const events = (s, type) => s._events.filter((e) => e.type === type);
 
 test('UNLOCKS: the contract table', () => {
   assert.deepEqual(UNLOCKS.map((u) => [u.id, u.revealColors, u.cost]), [
-    ['shelf', 8, 400], ['hunters', 15, 2500], ['gallery', 25, 8000], ['shipping', 50, 40000], ['commissions', 30, 20000],
+    ['shelf', 8, 400], ['hunters', 15, 2500], ['tiles', 20, 5000], ['gallery', 25, 8000], ['shipping', 50, 40000], ['commissions', 30, 20000],
   ]);
   assert.equal(UNLOCKS.find((u) => u.id === 'gallery').room, 'gallery-wing');
   assert.equal(UNLOCKS.find((u) => u.id === 'shipping').room, 'loading-yard');
@@ -169,7 +169,7 @@ test('spillover before the shelf: vials wait behind the glass from 6 colors, cap
   assert.equal(s.shelf.waiting, 0);
 });
 
-test('shop keep reserve: pinned colors and started paintings keep 20 jars; explicit keep overrides', () => {
+test('shop keep reserve: pinned colors keep 20 jars; explicit keep overrides', () => {
   const make = (seed) => {
     const s = withColors(6, seed);
     sim.discover(s, { colorId: 'orange', method: 'bench' }, NOW);
@@ -215,12 +215,10 @@ test('shop keep reserve: pinned colors and started paintings keep 20 jars; expli
   assert.equal(sim.setKeep(big, { colorId: 'orange', jars: null }).jars, 0, 'back to the default rule');
   assert.equal(sim.setKeep(big, { colorId: 'orange', jars: 'x' }).ok, false);
 
-  // A started (unsigned) painting keeps its colors.
+  // Painting is free, so a started (unsigned) painting holds no paint back.
   const p = make(4);
-  p.gallery.pieces.push({ id: 'p1', canvas: 'harbor-window', title: '', regions: { r0: 'orange' }, purity: {}, jars: {}, startedAt: NOW, signedAt: 0, value: 0, hung: false });
-  assert.equal(sim.keepOf(p, 'orange'), 20);
-  p.gallery.pieces[0].signedAt = NOW;
-  assert.equal(sim.keepOf(p, 'orange'), 0, 'signed pieces no longer hold paint');
+  p.gallery.pieces.push({ id: 'p1', canvas: 'harbor-window', title: '', regions: { r0: 'orange' }, startedAt: NOW, signedAt: 0, value: 0, hung: false });
+  assert.equal(sim.keepOf(p, 'orange'), 0);
 });
 
 test('the Dispatcher never ships kept jars', () => {
@@ -241,17 +239,17 @@ test('Renovate closes the unlocks, lists them, and one half-price purchase reope
   const s = withColors(50);
   s.phase = 2;
   s.coins = 1e6;
-  for (const id of ['shelf', 'hunters', 'gallery', 'shipping']) assert.equal(buy(s, { id }, NOW).ok, true, id);
+  for (const id of ['shelf', 'hunters', 'tiles', 'gallery', 'shipping']) assert.equal(buy(s, { id }, NOW).ok, true, id);
   s.phase = 3;
   assert.equal(buy(s, { id: 'commissions' }, NOW).ok, true);
   s.runEarned = 4e8;
-  assert.deepEqual(sim.renovateCloses(s), ['shelf', 'hunters', 'gallery', 'shipping', 'commissions']);
+  assert.deepEqual(sim.renovateCloses(s), ['shelf', 'hunters', 'tiles', 'gallery', 'shipping', 'commissions']);
   assert.equal(sim.renovate(s, NOW + MIN).ok, true);
-  assert.deepEqual(Object.values(s.unlocks), [false, false, false, false, false]);
-  assert.deepEqual(s.renovateReopen, ['shelf', 'hunters', 'gallery', 'shipping', 'commissions']);
+  assert.deepEqual(Object.values(s.unlocks), [false, false, false, false, false, false]);
+  assert.deepEqual(s.renovateReopen, ['shelf', 'hunters', 'tiles', 'gallery', 'shipping', 'commissions']);
   assert.equal(s.gallery.unlocked, false);
   const q = rebuyQuote(s);
-  assert.equal(q.cost, Math.round((400 + 2500 + 8000 + 40000 + 20000) * REBUY_SHARE));
+  assert.equal(q.cost, Math.round((400 + 2500 + 5000 + 8000 + 40000 + 20000) * REBUY_SHARE));
   assert.deepEqual(q.ids, s.renovateReopen);
   s.coins = q.cost - 1;
   assert.equal(batchRebuy(s, NOW + 2 * MIN).reason, 'coins');
@@ -260,7 +258,7 @@ test('Renovate closes the unlocks, lists them, and one half-price purchase reope
   const r = batchRebuy(s, {}, NOW + 2 * MIN);
   assert.deepEqual(r, { ok: true, cost: q.cost, ids: q.ids });
   assert.equal(s.coins, 0);
-  assert.deepEqual(Object.values(s.unlocks), [true, true, true, true, true]);
+  assert.deepEqual(Object.values(s.unlocks), [true, true, true, true, true, true]);
   assert.ok(s.rooms.includes('gallery-wing') && s.rooms.includes('loading-yard'), 'rooms come back with their unlocks');
   assert.equal(s.gallery.unlocked, true);
   assert.deepEqual(events(s, 'unlock').map((e) => e.id).sort(), [...q.ids].sort());
@@ -297,7 +295,7 @@ test('Heritage keep-shelf / keep-map / keep-gallery skip the reset for that unlo
   s.phase = 3;
   s.runEarned = 4e8;
   assert.equal(sim.renovate(s, NOW).ok, true);
-  assert.deepEqual(s.unlocks, { shelf: true, hunters: true, gallery: true, shipping: false, commissions: false });
+  assert.deepEqual(s.unlocks, { shelf: true, hunters: true, gallery: true, shipping: false, commissions: false, tiles: false });
   assert.deepEqual(s.renovateReopen, []);
   assert.equal(s.gallery.unlocked, true);
   assert.ok(sim.huntersUnlocked(s));

@@ -9,6 +9,8 @@
 // meta.colorId falls in the event's palette families.
 
 import { eventForWeek, getEvent, trackStepsReached, POINTS_PER } from '../content/events.js';
+import { eraPreviewColors } from '../content/eras.js';
+import { hueFamily } from '../color.js';
 import { EVENT_REGION_IDS } from '../content/regions.js';
 import { getSource } from '../content/sources.js';
 import { isoWeekKey } from '../format.js';
@@ -79,18 +81,30 @@ function activeEventDef(state) {
   return state.event && state.event.key ? getEvent(state.event.key) : null;
 }
 
-/** Is an activity with this meta themed for the running event? */
-export function isThemed(state, meta = {}) {
+function hexFamily(hex) {
+  try { return hueFamily(hex); } catch { return null; }
+}
+
+/**
+ * Is an activity with this meta themed for the running event? meta.event (true or
+ * the event id), meta.family, meta.colorId (an event-page color, or one in the
+ * event's families), meta.colors (any of them), meta.hex / meta.hexes (an order's
+ * target: its hue family). Under Festival of Lanterns (rules.packingLanterns) a
+ * packed shipment (kind 'crate', meta.packed) counts whatever its colors.
+ */
+export function isThemed(state, meta = {}, kind = null) {
   const ev = activeEventDef(state);
   if (!ev || !meta) return false;
   if (meta.event === true || meta.event === ev.id) return true;
+  if (kind === 'crate' && meta.packed && ev.twist.rules.packingLanterns) return true;
   if (meta.family && ev.palette.includes(meta.family)) return true;
   if (meta.colorId) {
     if (typeof meta.colorId === 'string' && meta.colorId.startsWith(ev.id + '-')) return true;
-    return ev.palette.includes(familyOfColor(meta.colorId));
+    if (ev.palette.includes(familyOfColor(meta.colorId))) return true;
   }
-  if (Array.isArray(meta.colors)) return meta.colors.some((c) => ev.palette.includes(familyOfColor(c)));
-  return false;
+  if (Array.isArray(meta.colors) && meta.colors.some((c) => (typeof c === 'string' && c.startsWith(ev.id + '-')) || ev.palette.includes(familyOfColor(c)))) return true;
+  const hexes = [meta.hex, ...(Array.isArray(meta.hexes) ? meta.hexes : [])].filter((x) => typeof x === 'string');
+  return hexes.some((hx) => ev.palette.includes(hexFamily(hx)));
 }
 
 /**
@@ -103,7 +117,7 @@ export function eventPoints(state, kind, amount = 1, meta = {}) {
   if (!ev) return 0;
   const per = POINTS_PER[kind];
   const pts = fin(per) * fin(Number(amount));
-  if (!(pts > 0) || !isThemed(state, meta || {})) return 0;
+  if (!(pts > 0) || !isThemed(state, meta || {}, kind)) return 0;
   const before = trackStepsReached(ev, fin(state.event.points));
   state.event.points = fin(state.event.points) + pts;
   const after = trackStepsReached(ev, state.event.points);
@@ -182,7 +196,25 @@ export function eventPalette(state) {
   let hexes = eventColors(ev.id).map((c) => c.hex).filter(Boolean);
   if (!hexes.length) hexes = ev.catalogPage.map((id) => colorInfo(id)).filter(Boolean).map((c) => c.hex);
   if (!hexes.length) hexes = allColors().filter((c) => c.hex && ev.palette.includes(familyOfColor(c.id))).map((c) => c.hex);
+  // Neon Night's sneak peek: the Era 2 preview colors join this week's boards.
+  if (ev.twist.rules.previewEra) hexes = hexes.concat(eraPreviewColors(ev.twist.rules.previewEra).map((c) => c.hex));
   return hexes;
+}
+
+/**
+ * eraPreview(state) -> the running event's Era preview colors ([{id, name, hex, era, note}]),
+ * empty unless its twist has rules.previewEra. Previews are shown, never discovered.
+ */
+export function eraPreview(state) {
+  const ev = activeEventDef(state);
+  const era = ev && ev.twist.rules.previewEra;
+  return era ? eraPreviewColors(era) : [];
+}
+
+/** Is a twist rule on for the running event? (e.g. twistOn(state, 'bouquetOrders')) */
+export function twistOn(state, rule) {
+  const ev = activeEventDef(state);
+  return !!(ev && ev.twist.rules[rule]);
 }
 
 /** eventTwist(state) -> {id, text, rules} for the running event, or null. */

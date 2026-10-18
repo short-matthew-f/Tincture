@@ -187,7 +187,7 @@ export function dispatch(state, args = {}, now = 0) {
   v.departedAt = now;
   v.arrivesAt = now + vehicleTripMs(v);
   questEvent(state, 'crateShipped', 1, { routeId, packed: v.packed });
-  eventPoints(state, 'crate', 1, { routeId });
+  eventPoints(state, 'crate', 1, { routeId, packed: v.packed, colors: (v.cargo ?? []).map((c) => c.colorId) });
   return { ok: true, arrivesAt: v.arrivesAt, value: cargoValue(state, routeId, v.cargo, v.packed, now) };
 }
 

@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 import { createInitialState } from '../src/state.js';
 import {
   unlock, startPiece, paintRegion, signPiece, hang, unhang, tickAdmission, weeklyTaste,
-  visitorComment, acceptCollector, pieceValue, regionCost, clearRegion, paintRate, discardPiece,
+  visitorComment, acceptCollector, pieceValue, sizeFactor, clearRegion, paintRate, discardPiece,
   sellPiece, sellOffer, canvasAvailable, SELL_MULT,
   ADMISSION_RATE, COLLECTOR_MS, PAINT_SECONDS, MIN_PAINT_RATE, VALUE_MULT,
+
 } from '../src/sim/gallery.js';
 import { addStock, stockOf } from '../src/sim/storage.js';
 import { incomeMultiplier, rates, colorPrice } from '../src/sim/economy.js';
@@ -40,135 +41,110 @@ function producing(s, level = 40) {
 
 const sizeOf = (r) => Math.max(1, r.size ?? 1);
 
-test('gallery: a canvas costs PAINT_SECONDS of current production, split by region size', () => {
+test('gallery: painting is free: stock is untouched and none is needed', () => {
   const s = producing(galleryState());
-  const jps = rates(s, NOW).jars;
-  assert.ok(jps > MIN_PAINT_RATE, 'the factory is running');
-  assert.equal(paintRate(s, NOW), jps);
-  for (const canvasId of s.gallery.canvases) {
-    const regions = regionsOf(getCanvas(canvasId));
-    const total = regions.reduce((a, r) => a + sizeOf(r), 0);
-    let sum = 0;
-    for (const r of regions) {
-      const c = regionCost(s, canvasId, r.id);
-      assert.equal(c, Math.max(1, Math.round(sizeOf(r) / total * jps * PAINT_SECONDS)), `${canvasId}/${r.id}`);
-      sum += c;
-    }
-    // Rounding per region keeps the whole canvas within half a jar per region of the target.
-    assert.ok(Math.abs(sum - jps * PAINT_SECONDS) <= regions.length / 2 + 1e-9, `${canvasId}: ${sum}`);
-  }
-  // Bigger regions cost more; the price follows production as the factory grows.
-  const canvasId = s.gallery.canvases.find((id) => new Set(regionsOf(getCanvas(id)).map(sizeOf)).size > 1);
-  const rs = [...regionsOf(getCanvas(canvasId))].sort((a, b) => sizeOf(a) - sizeOf(b));
-  assert.ok(regionCost(s, canvasId, rs.at(-1).id) > regionCost(s, canvasId, rs[0].id));
-  const before = regionCost(s, canvasId, rs.at(-1).id);
-  s.stations.mixers[0].level *= 2;
-  const grown = rates(s, NOW).jars / jps;
-  assert.ok(grown > 1.5, `production x${grown}`);
-  const after = regionCost(s, canvasId, rs.at(-1).id);
-  assert.ok(Math.abs(after - grown * before) <= grown, `${before} -> ${after} (x${grown})`);
-  assert.equal(regionCost(s, canvasId, 'no-such-region'), 0);
+  const canvasId = s.gallery.canvases[0];
+  const { pieceId } = startPiece(s, { canvasId }, NOW);
+  const regions = regionsOf(getCanvas(canvasId));
+  const piece = s.gallery.pieces.find((p) => p.id === pieceId);
+  assert.equal(stockOf(s, 'madder'), 0);
+  addStock(s, 'woad', 7);
+  const before = JSON.stringify(s.stock);
+  // No stock on hand is fine; a stocked color is not drawn down either.
+  assert.deepEqual(paintRegion(s, { pieceId, regionId: regions[0].id, colorId: 'madder' }, NOW), { ok: true });
+  assert.equal(paintRegion(s, { pieceId, regionId: regions[1].id, colorId: 'woad' }, NOW).ok, true);
+  assert.equal(JSON.stringify(s.stock), before, 'stock unchanged');
+  assert.equal(stockOf(s, 'woad'), 7);
+  assert.equal(piece.regions[regions[0].id], 'madder');
+  // Repainting is free too; unknown regions and undiscovered colors are refused.
+  assert.equal(paintRegion(s, { pieceId, regionId: regions[0].id, colorId: 'woad' }, NOW).ok, true);
+  assert.equal(piece.regions[regions[0].id], 'woad');
+  assert.equal(paintRegion(s, { pieceId, regionId: 'nope', colorId: 'woad' }, NOW).reason, 'region');
+  assert.equal(paintRegion(s, { pieceId, regionId: regions[0].id, colorId: 'not-a-color' }, NOW).reason, 'color');
 });
 
-test('gallery: a new player with no production still pays at least one jar a region', () => {
+test('gallery: a finished piece is worth a modest, positive PAINT_SECONDS of production, nudged by canvas size', () => {
+  const s = producing(galleryState());
+  const jps = rates(s, NOW).jars;
+  assert.ok(jps > MIN_PAINT_RATE);
+  assert.equal(paintRate(s, NOW), jps);
+  const canvasId = s.gallery.canvases[0];
+  const regions = regionsOf(getCanvas(canvasId));
+  const { pieceId } = startPiece(s, { canvasId }, NOW);
+  const piece = s.gallery.pieces.find((p) => p.id === pieceId);
+  assert.equal(piece.paintRate, jps, 'rate locked at start');
+  assert.equal(pieceValue(s, piece, NOW).value, 0, 'bare canvas');
+  for (const rg of regions) paintRegion(s, { pieceId, regionId: rg.id, colorId: 'woad' }, NOW);
+  const stock0 = JSON.stringify(s.stock);
+  const v = pieceValue(s, piece, NOW);
+  // She upgrades mid-piece: this piece keeps its own rate.
+  s.stations.mixers[0].level *= 2;
+  assert.equal(pieceValue(s, piece, NOW).value, v.value);
+  // Value = rate × PAINT_SECONDS × size nudge × price × rarity × variety × taste.
+  const expect = jps * PAINT_SECONDS * sizeFactor(canvasId) * colorPrice(s, 'woad') * VALUE_MULT * v.rarity * v.variety * v.taste;
+  assert.ok(v.value > 0 && Math.abs(v.value - expect) < 1e-9 * expect);
+  // Modest: at most a few minutes of income at one coin per jar-price, never absurd.
+  const incomePerSec = jps * colorPrice(s, 'woad');
+  assert.ok(v.value < 20 * 60 * incomePerSec, `${v.value} vs ${incomePerSec}/s`);
+  assert.ok(v.value > 60 * incomePerSec, 'worth more than a minute of production');
+  const sig = signPiece(s, { pieceId, title: '' }, NOW + 1000);
+  assert.ok(Math.abs(sig.value - v.value) < 1e-9 * v.value);
+  assert.equal(JSON.stringify(s.stock), stock0, 'signing spends nothing');
+  // Admission repays the piece's colors within a day or so.
+  const repayH = jps * PAINT_SECONDS * colorPrice(s, 'woad') / (sig.value * ADMISSION_RATE) / 3600;
+  assert.ok(repayH > 1 && repayH < 24, `repays in ${repayH.toFixed(1)} h`);
+});
+
+test('gallery: a new player with no production still gets a small positive piece value; bigger canvases are worth a little more', () => {
   const s = galleryState();
   assert.equal(rates(s, NOW).jars, 0);
   assert.equal(paintRate(s, NOW), MIN_PAINT_RATE);
+  assert.ok(sizeFactor('no-such-canvas') === 1);
+  let small = Infinity; let big = 0;
   for (const canvasId of s.gallery.canvases) {
-    const regions = regionsOf(getCanvas(canvasId));
-    const total = regions.reduce((a, r) => a + sizeOf(r), 0);
-    for (const r of regions) {
-      const c = regionCost(s, canvasId, r.id);
-      assert.ok(Number.isInteger(c) && c >= 1);
-      assert.equal(c, Math.max(1, Math.round(sizeOf(r) / total * MIN_PAINT_RATE * PAINT_SECONDS)));
-    }
+    const { pieceId } = startPiece(s, { canvasId }, NOW);
+    for (const rg of regionsOf(getCanvas(canvasId))) paintRegion(s, { pieceId, regionId: rg.id, colorId: 'madder' }, NOW);
+    const v = pieceValue(s, s.gallery.pieces.find((p) => p.id === pieceId), NOW).value;
+    assert.ok(v > 0 && v < 2000, `${canvasId}: ${v}`);
+    small = Math.min(small, v); big = Math.max(big, v);
   }
-  // The old call shape (no state) prices at the floor.
-  const canvasId = s.gallery.canvases[0];
-  const r0 = regionsOf(getCanvas(canvasId))[0];
-  assert.equal(regionCost(canvasId, r0.id), regionCost(s, canvasId, r0.id));
+  assert.ok(sizeFactor('patchwork-quilt') > sizeFactor('painted-plate'));
+  assert.ok(sizeFactor('heritage-tapestry') <= 1.6 && sizeFactor('painted-plate') >= 0.75);
+  assert.ok(big >= small);
 });
 
-test('gallery: the paint price is locked when the piece starts and stored per region', () => {
-  const s = producing(galleryState());
+test('gallery: old pieces with jars/purity fields still load, price and sign', () => {
+  const s = galleryState();
   const canvasId = s.gallery.canvases[0];
   const regions = regionsOf(getCanvas(canvasId));
-  const { pieceId } = startPiece(s, { canvasId }, NOW);
-  const piece = s.gallery.pieces.find((p) => p.id === pieceId);
-  assert.equal(piece.paintRate, rates(s, NOW).jars);
-  const locked = regions.map((r) => regionCost(s, canvasId, r.id, pieceId));
-  // She upgrades mid-piece: new pieces get the new price, this one keeps its own.
-  s.stations.mixers[0].level *= 2;
-  assert.ok(regionCost(s, canvasId, regions[0].id) > locked[0]);
-  regions.forEach((rg, i) => {
-    assert.equal(regionCost(s, canvasId, rg.id, pieceId), locked[i]);
-    addStock(s, 'woad', locked[i]);
-    const r = paintRegion(s, { pieceId, regionId: rg.id, colorId: 'woad' }, NOW + 60e3);
-    assert.equal(r.ok, true);
-    assert.equal(r.jars, locked[i]);
-    assert.equal(piece.jars[rg.id], locked[i]);
-  });
-  assert.equal(stockOf(s, 'woad'), 0);
-  // Value = Σ stored jars × price × factors; signing agrees with the preview.
-  const v = pieceValue(s, piece, NOW);
-  const paint = locked.reduce((a, n) => a + n, 0) * colorPrice(s, 'woad');
-  assert.ok(Math.abs(v.paint - paint) < 1e-9 * paint);
-  assert.ok(Math.abs(v.value - paint * VALUE_MULT * v.rarity * v.variety * v.taste) < 1e-9 * v.value);
-  const sig = signPiece(s, { pieceId, title: '' }, NOW + 120e3);
-  assert.ok(Math.abs(sig.value - v.value) < 1e-9 * v.value);
-  // Admission repays the paint's sale value within a day (spec: about 11 hours
-  // for a typical piece; a primary-only piece is the slowest case).
-  const repayH = paint / (sig.value * ADMISSION_RATE) / 3600;
-  assert.ok(repayH > 4 && repayH < 24, `repays in ${repayH.toFixed(1)} h`);
+  s.gallery.pieces.push({ id: 'old', canvas: canvasId, title: '', regions: Object.fromEntries(regions.map((r) => [r.id, 'madder'])),
+    purity: Object.fromEntries(regions.map((r) => [r.id, 'pure'])), jars: Object.fromEntries(regions.map((r) => [r.id, 9999])), startedAt: NOW, signedAt: 0, value: 0, hung: false });
+  const v = pieceValue(s, s.gallery.pieces[0], NOW).value;
+  assert.ok(v > 0 && v < 2000, `jars field ignored: ${v}`);
+  assert.equal(signPiece(s, { pieceId: 'old', title: 'Old' }, NOW).ok, true);
 });
 
-test('gallery: clearRegion undoes a pane on an unsigned piece without a refund', () => {
+test('gallery: clearRegion undoes a pane on an unsigned piece', () => {
   const s = galleryState();
   const canvasId = s.gallery.canvases[0];
   const regions = regionsOf(getCanvas(canvasId));
   const { pieceId } = startPiece(s, { canvasId }, NOW);
   const piece = s.gallery.pieces.find((p) => p.id === pieceId);
-  const need = regionCost(s, canvasId, regions[0].id, pieceId);
-  addStock(s, 'madder', need);
   assert.equal(paintRegion(s, { pieceId, regionId: regions[0].id, colorId: 'madder' }, NOW).ok, true);
   assert.equal(clearRegion(s, { pieceId, regionId: regions[0].id }).ok, true);
   assert.equal(piece.regions[regions[0].id], undefined);
-  assert.equal(piece.purity[regions[0].id], undefined);
-  assert.equal(piece.jars[regions[0].id], undefined);
-  assert.equal(stockOf(s, 'madder'), 0, 'paint is not refunded');
+  assert.equal(stockOf(s, 'madder'), 0);
   assert.equal(pieceValue(s, piece, NOW).value, 0);
   assert.equal(clearRegion(s, { pieceId, regionId: regions[0].id }).ok, false, 'already bare');
   assert.equal(clearRegion(s, { pieceId: 'nope', regionId: regions[0].id }).ok, false);
   // Signed pieces are final.
   for (const rg of regions) {
-    addStock(s, 'ochre', regionCost(s, canvasId, rg.id, pieceId));
     assert.equal(paintRegion(s, { pieceId, regionId: rg.id, colorId: 'ochre' }, NOW).ok, true);
   }
   assert.equal(signPiece(s, { pieceId, title: 'Done' }, NOW).ok, true);
   assert.equal(clearRegion(s, { pieceId, regionId: regions[0].id }).ok, false);
   assert.equal(piece.regions[regions[0].id], 'ochre');
   assert.equal(discardPiece(s, { pieceId }).ok, false, 'signed pieces stay');
-});
-
-test('gallery: painting consumes regionCost jars, highest purity first; repaint allowed', () => {
-  const s = producing(galleryState());
-  const canvasId = s.gallery.canvases[0];
-  const { pieceId } = startPiece(s, { canvasId }, NOW);
-  const region = regionsOf(getCanvas(canvasId))[0];
-  const need = regionCost(s, canvasId, region.id, pieceId);
-  assert.ok(need > 1, `${need} jars`);
-  // Not enough paint: refused, nothing taken.
-  assert.equal(paintRegion(s, { pieceId, regionId: region.id, colorId: 'madder' }, NOW).reason, 'stock');
-  addStock(s, 'madder', need, 'standard');
-  addStock(s, 'madder', need, 'pure');
-  const r = paintRegion(s, { pieceId, regionId: region.id, colorId: 'madder' }, NOW);
-  assert.equal(r.ok, true);
-  assert.equal(r.purity, 'pure');
-  assert.equal(stockOf(s, 'madder'), need);
-  addStock(s, 'woad', need);
-  assert.equal(paintRegion(s, { pieceId, regionId: region.id, colorId: 'woad' }, NOW).ok, true);
-  const piece = s.gallery.pieces.find((p) => p.id === pieceId);
-  assert.equal(piece.regions[region.id], 'woad');
 });
 
 test('gallery: sign value, hang, admission accrues, comments, collector', () => {
@@ -180,7 +156,6 @@ test('gallery: sign value, hang, admission accrues, comments, collector', () => 
   const colors = ['madder', 'ochre', 'woad'];
   regions.forEach((rg, i) => {
     const c = colors[i % 3];
-    addStock(s, c, regionCost(s, canvasId, rg.id, pieceId));
     assert.equal(paintRegion(s, { pieceId, regionId: rg.id, colorId: c }, NOW).ok, true);
   });
   const piece = s.gallery.pieces.find((p) => p.id === pieceId);
@@ -189,7 +164,7 @@ test('gallery: sign value, hang, admission accrues, comments, collector', () => 
   assert.equal(sig.ok, true);
   assert.ok(sig.value > 0);
   assert.ok(Math.abs(sig.value - preview.value) < 1e-9);
-  // Value = paint × rarity × variety × taste; three primaries → rarity 1, variety +6%.
+  // Value = paint value × rarity × variety × taste; three primaries → rarity 1, variety +6%.
   assert.equal(sig.breakdown.rarity, 1);
   assert.ok(Math.abs(sig.breakdown.variety - 1.06) < 1e-9);
   assert.equal(piece.title, 'Harbor at Dawn');
@@ -237,7 +212,6 @@ function signedPiece(s = galleryState(), title = 'Harbor at Dawn') {
   const { pieceId } = startPiece(s, { canvasId }, NOW);
   const regions = regionsOf(getCanvas(canvasId));
   for (const rg of regions) {
-    addStock(s, 'madder', regionCost(s, canvasId, rg.id, pieceId));
     assert.equal(paintRegion(s, { pieceId, regionId: rg.id, colorId: 'madder' }, NOW).ok, true);
   }
   const sig = signPiece(s, { pieceId, title }, NOW);
@@ -303,15 +277,12 @@ test('gallery: a sold piece leaves a record, newest last, with its thumbnail', (
   assert.deepEqual(s.gallery.sold.map((x) => x.title), ['Harbor at Dawn', 'Second']);
 });
 
-test('gallery: only signed pieces can be sold; unsigned ones are scrapped, with no refund', () => {
+test('gallery: only signed pieces can be sold; unsigned ones are scrapped', () => {
   const s = producing(galleryState());
   const canvasId = s.gallery.canvases[0];
   const { pieceId } = startPiece(s, { canvasId }, NOW);
   const rg = regionsOf(getCanvas(canvasId))[0];
-  const need = regionCost(s, canvasId, rg.id, pieceId);
-  addStock(s, 'madder', need);
   assert.equal(paintRegion(s, { pieceId, regionId: rg.id, colorId: 'madder' }, NOW).ok, true);
-  assert.equal(stockOf(s, 'madder'), 0);
   const coins = s.coins;
   assert.equal(sellPiece(s, { pieceId }, NOW).ok, false, 'unsigned pieces cannot be sold');
   assert.equal(sellPiece(s, { pieceId: 'nope' }, NOW).ok, false);
@@ -320,7 +291,6 @@ test('gallery: only signed pieces can be sold; unsigned ones are scrapped, with 
   assert.equal(d.ok, true);
   assert.equal(d.panes, 1);
   assert.equal(s.gallery.pieces.length, 0);
-  assert.equal(stockOf(s, 'madder'), 0, 'the jars stay spent');
   assert.equal(s.coins, coins, 'no coins either');
   assert.equal(s.gallery.sold.length, 0, 'scrapping is not a sale');
   assert.equal(discardPiece(s, { pieceId }).ok, false);

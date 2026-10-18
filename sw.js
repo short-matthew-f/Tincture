@@ -24,7 +24,7 @@
 //                                                     first online load
 //   any other cross-origin request, non-GET           ignored
 
-var CACHE_VERSION = '0.2.2';
+var CACHE_VERSION = '0.3.0';
 var CACHE_NAME = 'tincture-v' + CACHE_VERSION;
 var FONT_CACHE = 'tincture-fonts';
 
@@ -65,16 +65,19 @@ var SHELL = [
   'src/puzzles/matching.js',
   'src/puzzles/packing.js',
   'src/puzzles/purify.js',
+  'src/puzzles/tiles.js',
   'src/pwa.js',
   'src/rng.js',
   'src/sim/bus.js',
   'src/sim/closeUp.js',
+  'src/sim/commission-rules.js',
   'src/sim/commissions.js',
   'src/sim/discovery.js',
   'src/sim/economy.js',
   'src/sim/events.js',
   'src/sim/factory.js',
   'src/sim/gallery.js',
+  'src/sim/howto.js',
   'src/sim/hunters.js',
   'src/sim/index.js',
   'src/sim/ledger.js',
@@ -88,6 +91,7 @@ var SHELL = [
   'src/sim/shelf.js',
   'src/sim/shipping.js',
   'src/sim/storage.js',
+  'src/sim/tiles.js',
   'src/sim/unlocks.js',
   'src/state.js',
   'src/ui/album.js',
@@ -120,6 +124,7 @@ var SHELL = [
   'src/ui/router.js',
   'src/ui/settings.js',
   'src/ui/shelf.js',
+  'src/ui/tiles.js',
   'src/ui/workshop.js',
   'src/version.js'
 ];

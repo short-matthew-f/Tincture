@@ -43,7 +43,7 @@ const num = (x, d = 0) => (Number.isFinite(x) ? x : d);
  */
 export const CHEAPEST_FALLBACK = Object.freeze({ maxPhase: 1, savingRatio: 2 });
 
-const ARTICLE = { shelf: 'the ', hunters: 'the ', gallery: 'the ', shipping: 'the ', commissions: '' };
+const ARTICLE = { shelf: 'the ', hunters: 'the ', gallery: 'the ', shipping: 'the ', commissions: '', tiles: 'the ' };
 
 /** "Open the Merge Shelf for 400" style label for an unlock. */
 export function unlockLabel(id, cost, notation) {

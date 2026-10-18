@@ -8,6 +8,7 @@
 import { CELLAR } from '../content/stations.js';
 import { slotsForRooms } from '../content/rooms.js';
 import { stationOutput, rates } from './economy.js';
+import { commissionReserve, commissionReserves } from './commission-rules.js';
 
 export const PURITY_ORDER = Object.freeze(['muddy', 'standard', 'pure', 'flawless']);
 const EPS = 1e-9;
@@ -147,16 +148,36 @@ export const fillTime = fillTimeMs;
 // Shop keep reserve (docs/PLAN-v0.2.md Theme A.3, docs/V02-CONTRACTS.md)
 // ---------------------------------------------------------------------------
 
-/** Jars kept by default of a pinned color or one used by an unsigned painting. */
+/** Jars kept by default of a pinned color (painting is free, so paintings hold nothing back). */
 export const DEFAULT_KEEP = 20;
 
-/** Colors the default rule keeps: pinned, or painted on a started (unsigned) piece. */
+/** Colors the default rule keeps: pinned ones. */
 function defaultKept(state) {
   const out = new Set();
   for (const id of state?.catalog?.pinned ?? []) if (typeof id === 'string') out.add(id);
-  for (const p of state?.gallery?.pieces ?? []) {
-    if (!p || p.signedAt) continue;
-    for (const c of Object.values(p.regions ?? {})) if (typeof c === 'string') out.add(c);
+  return out;
+}
+
+/** Jars a bouquet flower takes from stock (sim/orders.js BOUQUET_JARS). */
+export const BOUQUET_KEEP = 3;
+
+/**
+ * Bouquet orders (Bloom Week): a flower that is a catalog color keeps BOUQUET_KEEP
+ * jars of it back from the shop, so "Give 3 jars" stays possible once a mixer makes it.
+ */
+function bouquetReserve(state, colorId) {
+  for (const o of state?.orders?.open ?? []) {
+    if (!o || o.kind !== 'bouquet' || !Array.isArray(o.flowers)) continue;
+    if (o.flowers.some((f) => f && !f.filled && f.colorId === colorId)) return BOUQUET_KEEP;
+  }
+  return 0;
+}
+
+function bouquetReserves(state) {
+  const out = {};
+  for (const o of state?.orders?.open ?? []) {
+    if (!o || o.kind !== 'bouquet' || !Array.isArray(o.flowers)) continue;
+    for (const f of o.flowers) if (f && !f.filled && f.colorId) out[f.colorId] = BOUQUET_KEEP;
   }
   return out;
 }
@@ -169,6 +190,11 @@ function defaultKept(state) {
 export function keepMap(state) {
   const out = {};
   for (const id of defaultKept(state)) out[id] = DEFAULT_KEEP;
+  // Commissions: jars an open step can use are kept by default (sim/commission-rules.js).
+  if (state?.commissions?.open?.length) {
+    for (const [id, r] of Object.entries(commissionReserves(state))) if (r > (out[id] ?? 0)) out[id] = r;
+  }
+  for (const [id, r] of Object.entries(bouquetReserves(state))) if (r > (out[id] ?? 0)) out[id] = r;
   const explicit = state?.keep;
   if (explicit && typeof explicit === 'object') {
     for (const [id, jars] of Object.entries(explicit)) {
@@ -184,7 +210,8 @@ export function keepMap(state) {
 export function keepOf(state, colorId) {
   const e = state?.keep?.[colorId];
   if (Number.isFinite(e)) return Math.max(0, e);
-  return defaultKept(state).has(colorId) ? DEFAULT_KEEP : 0;
+  const base = Math.max(defaultKept(state).has(colorId) ? DEFAULT_KEEP : 0, bouquetReserve(state, colorId));
+  return state?.commissions?.open?.length ? Math.max(base, commissionReserve(state, colorId)) : base;
 }
 
 /** Jars of a color above its keep reserve (what the shop / auto-ship may take). */
@@ -195,7 +222,7 @@ export function sellableOf(state, colorId) {
 /**
  * setKeep(state, {colorId, jars}) -> {ok, colorId, jars}. A number ≥ 0 sets an
  * explicit reserve (0 = sell it all); null/undefined goes back to the default
- * rule (20 jars if pinned or on a started painting).
+ * rule (20 jars if pinned).
  */
 export function setKeep(state, args = {}) {
   const id = args.colorId;

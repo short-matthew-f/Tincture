@@ -6,18 +6,18 @@
 // her color names, a visiting collector about every 2 days (3× value for a
 // print; she keeps the original). Pieces survive every reset.
 //
-// Paint scales with her factory (docs/DESIGN.md "Balance model › Gallery and
-// Merge Shelf in the simulation": each piece uses 20 minutes of production in
-// paint). A whole canvas costs PAINT_SECONDS of her current mixer output,
-// split across regions by size; the rate is locked when the piece is started
-// (`paintRate`) so panes don't change price mid-piece, and every region's jars
-// are stored at paint time so the value preview and the signed value agree.
+// Painting is free: any color she has discovered goes on any pane, no jars are
+// spent and none are needed on hand ("painting for painting's sake"). A piece's
+// value still keeps pace with her income without counting jars: a whole canvas
+// is worth PAINT_SECONDS of her current production (`paintRate`, locked when
+// the piece is started), nudged by the canvas size (region count), then scaled
+// by the colors' rarity, variety and the weekly taste.
 //
 // gallery.sold: [{id, canvas, title, soldAt, coins, thumb:{regionId: colorId}}], oldest first (memory
 // cards for pieces sold to a collector; the piece itself is gone).
 //
-// Piece {id, canvas, title, regions:{regionId: colorId}, purity:{regionId: p},
-//        jars:{regionId: n}, paintRate, startedAt, signedAt, value, hung}
+// Piece {id, canvas, title, regions:{regionId: colorId}, paintRate, startedAt,
+//        signedAt, value, hung}. Old saves may carry `purity` and `jars` maps; both are ignored.
 
 import { CANVASES, getCanvas, starterCanvases } from '../content/canvases.js';
 import { VISITOR_COMMENTS, COMMENT_PLACES, fillComment } from '../content/names.js';
@@ -28,15 +28,16 @@ import { emit } from './bus.js';
 import { questEvent } from './quests.js';
 import { eventPoints } from './events.js';
 import { colorPrice, colorTier, colorFamily, incomeMultiplier, rates } from './economy.js';
-import { takeStock, PURITY_ORDER } from './storage.js';
 import { displayName } from './discovery.js';
 
-/** Legacy fixed price (jars per unit of region size); only a fallback for old saves. */
-export const JARS_PER_SIZE = 3;
-/** A whole canvas costs this many seconds of her current production in paint. */
+/** A finished canvas is worth this many seconds of her current production (before rarity, variety, taste). */
 export const PAINT_SECONDS = 150;
-/** Production floor (jars/s) for pricing paint, so the first canvases are cheap but not free. */
+/** Production floor (jars/s) for valuing a piece, so the first canvases are modest but not nothing. */
 export const MIN_PAINT_RATE = 0.05;
+/** Canvas size nudge: sqrt(regions / REF_REGIONS), clamped. Bigger canvases are worth a little more. */
+export const REF_REGIONS = 18;
+export const SIZE_FACTOR_MIN = 0.75;
+export const SIZE_FACTOR_MAX = 1.6;
 /** Piece value multiplier on the paint's sale value (with rarity, variety, taste). */
 export const VALUE_MULT = 1;
 export const ADMISSION_RATE = 2e-5;
@@ -128,7 +129,7 @@ export function startPiece(state, args = {}, now = 0) {
   if (!galleryOpen(state)) return { ok: false, reason: 'locked' };
   if (!g.canvases.includes(args.canvasId) || !canvasDef(args.canvasId)) return { ok: false, reason: 'canvas' };
   const id = 'p-' + uuid(stateRng(state));
-  g.pieces.push({ id, canvas: args.canvasId, title: '', regions: {}, purity: {}, jars: {}, paintRate: paintRate(state, now), startedAt: now, signedAt: 0, value: 0, hung: false });
+  g.pieces.push({ id, canvas: args.canvasId, title: '', regions: {}, paintRate: paintRate(state, now), startedAt: now, signedAt: 0, value: 0, hung: false });
   return { ok: true, pieceId: id };
 }
 
@@ -141,48 +142,27 @@ export function paintRate(state, now) {
 
 const sizeOf = (r) => Math.max(1, num(r?.size, 1));
 
-/**
- * regionCost(state, canvasId, regionId, pieceId?) -> jars that region needs:
- * max(1, round(size / canvas size × production jars/s × PAINT_SECONDS)).
- * With `pieceId` it uses the rate locked when that piece was started. The old
- * call shape regionCost(canvasId, regionId) prices at the production floor.
- */
-export function regionCost(state, canvasId, regionId, pieceId) {
-  if (typeof state === 'string') { pieceId = undefined; regionId = canvasId; canvasId = state; state = null; }
-  const regions = regionList(canvasDef(canvasId));
-  const r = regions.find((x) => x.id === regionId);
-  if (!r) return 0;
-  const total = regions.reduce((s, x) => s + sizeOf(x), 0);
-  const piece = pieceId && state ? findPiece(state, pieceId) : null;
-  const rate = piece && num(piece.paintRate) > 0 ? piece.paintRate : (state ? paintRate(state) : MIN_PAINT_RATE);
-  return Math.max(1, Math.round(sizeOf(r) / total * rate * PAINT_SECONDS));
+/** sizeFactor(canvasId) -> value nudge from the canvas size (region count). */
+export function sizeFactor(canvasId) {
+  const n = regionList(canvasDef(canvasId)).length;
+  if (!n) return 1;
+  return Math.min(SIZE_FACTOR_MAX, Math.max(SIZE_FACTOR_MIN, Math.sqrt(n / REF_REGIONS)));
 }
 
 /**
- * paintRegion(state, {pieceId, regionId, colorId}, now) -> {ok, jars, purity}.
- * Uses regionCost jars of the color (at the piece's locked rate), highest
- * purity first, and records them in piece.jars. Repainting is unlimited until
- * signed (the earlier paint is not refunded).
+ * paintRegion(state, {pieceId, regionId, colorId}, now) -> {ok}. Free: any
+ * discovered color, no stock spent or required. Repainting is unlimited until signed.
  */
 export function paintRegion(state, args = {}, now = 0) {
   const p = findPiece(state, args.pieceId);
   if (!p || p.signedAt) return { ok: false, reason: 'piece' };
   if (!(num(p.paintRate) > 0)) p.paintRate = paintRate(state, now); // pieces started before paint scaled
-  const need = regionCost(state, p.canvas, args.regionId, p.id);
-  if (!need) return { ok: false, reason: 'region' };
+  if (!regionList(canvasDef(p.canvas)).some((r) => r.id === args.regionId)) return { ok: false, reason: 'region' };
   if (!state.catalog?.discovered?.[args.colorId]) return { ok: false, reason: 'color' };
-  const have = num(state.stock?.[args.colorId]?.jars);
-  if (have < need - 1e-9) return { ok: false, reason: 'stock', need, have };
-  const got = takeStock(state, args.colorId, need, { prefer: 'high' });
-  let purity = 'standard';
-  let best = -1;
-  for (const q of PURITY_ORDER) if (got.byPurity[q] > best + 1e-9) { best = got.byPurity[q]; purity = q; }
   p.regions[args.regionId] = args.colorId;
-  p.purity[args.regionId] = purity;
-  p.jars[args.regionId] = got.taken;
   questEvent(state, 'regionsPainted', 1, { colorId: args.colorId });
   eventPoints(state, 'paint', 1, { colorId: args.colorId });
-  return { ok: true, jars: got.taken, purity };
+  return { ok: true };
 }
 
 /**
@@ -211,19 +191,22 @@ export function pieceValue(state, piece, now = 0) {
   const regions = regionList(canvas);
   const painted = regions.filter((r) => piece.regions[r.id]);
   if (!painted.length) return { value: 0, paint: 0, rarity: 1, variety: 1, taste: 1, mult: VALUE_MULT };
-  let paint = 0;
+  const total = regions.reduce((a, r) => a + sizeOf(r), 0);
+  const rate = num(piece.paintRate) > 0 ? piece.paintRate : paintRate(state, now);
+  // price of the colors, weighted by how much of the canvas each covers
+  let price = 0;
   let rar = 0;
   const distinct = new Set();
   let tasteCount = 0;
   const taste = weeklyTaste(now, state);
   for (const r of painted) {
     const c = piece.regions[r.id];
-    const jars = num(piece.jars?.[r.id], sizeOf(r) * JARS_PER_SIZE);
-    paint += jars * colorPrice(state, c, piece.purity?.[r.id] ?? 'standard');
+    price += sizeOf(r) / total * colorPrice(state, c);
     rar += RARITY[colorTier(c)] ?? 1;
     distinct.add(c);
     if (colorFamily(c) === taste) tasteCount++;
   }
+  const paint = price * rate * PAINT_SECONDS * sizeFactor(piece.canvas);
   const rarity = rar / painted.length;
   const variety = 1 + Math.min(VARIETY_CAP, VARIETY_STEP * distinct.size);
   const tasteMult = tasteCount / painted.length >= 0.5 ? 1 + TASTE_BONUS : 1;
@@ -248,21 +231,18 @@ export function signPiece(state, args = {}, now = 0) {
 
 /**
  * clearRegion(state, {pieceId, regionId}) -> {ok}. Undo for an unsigned piece:
- * the region goes back to bare paper. The paint is not refunded.
+ * the region goes back to bare paper. Paint is free, so there is nothing to refund.
  */
 export function clearRegion(state, args = {}) {
   const p = findPiece(state, args.pieceId);
   if (!p || p.signedAt) return { ok: false, reason: 'piece' };
   if (!p.regions?.[args.regionId]) return { ok: false, reason: 'region' };
   delete p.regions[args.regionId];
-  if (p.purity) delete p.purity[args.regionId];
-  if (p.jars) delete p.jars[args.regionId];
   return { ok: true };
 }
 
 /**
- * Scrap an unsigned piece: it leaves the easel, the jars already spent stay
- * spent (no refund), and its canvas is free to paint again. Signed pieces
+ * Scrap an unsigned piece: it leaves the easel, and its canvas is free to paint again. Signed pieces
  * stay (see sellPiece).
  */
 export function discardPiece(state, args = {}) {

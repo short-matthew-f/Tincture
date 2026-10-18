@@ -105,6 +105,8 @@ state = {
   boosts: [ { kind:'production'|'income', mult:0.5, until } ],
   shelf: { cols:6, rows:6, cells: [ null | {color, tier:1..5, golden, boost, unit} ] /*36*/, colors: [≤5 ids], waiting, nextSpilloverAt, pausedRemainingMs },
   gallery: { unlocked:false, canvases:['harbor-window',...], pieces:[ Piece ], walls:4, hung:[pieceId], taste:'green', nextCollectorAt, collectorOffer:null },
+  tiles: { game: TilesGame|null, pending:false, undo: TilesGame|null, paid:0, lastGain:null, walls:0, best:0,
+           settings:{ rival:true }, glazes:[5 ids], mosaics:[ Mosaic ] },   // the Tile Room (src/sim/tiles.js)
   hunters: { roster:[ Hunter ], regionsUnlocked:['meadow'], },
   album: { cards: { 'meadow-1': {count:2, at} }, setsDone:['meadow'] },
   quests: { daily:[ Quest ], dailyDate:'2026-10-02', rerollUsed:false, weekly:Quest|null, weeklyKey:'2026-W40', bank:0 },
@@ -118,7 +120,7 @@ state = {
 
 Sub-shapes:
 
-- `Order {id, kind:'match'|'any', target:'#hex', recipe:[{pigment,weight}], pay, container:null|{color,tier}, postedAt, customer:'Harbor Town'}`
+- `Order {id, kind:'match'|'any'|'container'|'bouquet', target:'#hex', recipe:[{pigment,weight}], pay, container:null|{color,tier}, postedAt, customer:'Harbor Town', flowers?:[{target, recipe, colorId?, filled, tier, coins}], event?}` (bouquet: Bloom Week's twist, one flower per event family; each flower is mixed in Matching (`navigate('matching', {orderId, flower})`) or filled with 3 stocked jars; the Order Clerk never fills one)
 - `Hunter {id, name, trait, level, xp, state:'home'|'out', trip:{region, duration:'short'|'long'|'overnight', departedAt, returnsAt, choice:null|'a'|'b', choiceOfferedAt}, pityStreak, perks:[]}`
 - `Piece {id, canvas, title, regions:{r0:'madder',...}, signedAt, value, hung:boolean}`
 - `Quest {id, type, target, progress, done, claimed, reward:{seals, boostMin, item?}}`
@@ -150,14 +152,16 @@ Each file exports frozen data and a lookup helper. Ids are kebab-case strings.
 - `orders.js` — order board refresh (3–6 open), `generateOrder(state, rng)` from a real recipe of her discovered pigments, `scoreMatch(targetHex, mixHex)` -> {tier:'perfect'|'great'|'good'|'close', pct}, `submitOrder`, Order Clerk auto-fill at 70%.
 - `discovery.js` — `tryDiscover(state, hex, method, now)` (ΔE ≤ 4 to an undiscovered cell), `discover(state, colorId, method, now)` → returns ceremony payload, `nameColor`, `catalogMilestones`, `nearbyUndiscovered(state, hex)` for the shimmer hint.
 - `shelf.js` — fixed 6×6 grid; spillover from the ≤5 color chips (`setShelfColors`, `defaultShelfColors`, `shelfColors`), resting while fewer than 6 cells are empty (`spilloverPaused`); `merge(state, {from, to}, now)` → chain steps then `lines`; `move(state, {from, to}, now)` → `lines`; `findLines` / `resolveLines` (rows, columns, both diagonals of one hue family sell together at ×1.5, ×2 more for a double line; see docs/V02-CONTRACTS.md "Line rule"); `skipLine`; golden vials after the first Bottle; `sell(state, {cell})`; Cask → Essence.
-- `gallery.js` — `startPiece`, `paintRegion` (consumes jars), `signPiece` (value = rarity·purity·variety·taste), `hang/unhang`, admission per second = 2e-5 · value, visitor comments, collector offers.
+- `gallery.js` — `startPiece`, `paintRegion` (free, spends no stock), `signPiece` (value = paintRate·PAINT_SECONDS·size nudge·price·rarity·variety·taste), `hang/unhang`, admission per second = 2e-5 · value, visitor comments, collector offers.
 - `hunters.js` — `mapAttention(state, now)` -> {choices, hauls} (pure read for the map tab dot; `markHaulsSeen` sets `lastHaul.seen` when the map is shown), `sendHunter`, `resolveReturns(state, now)` (haul, wild hue with pity timer +2%/trip, postcards, companion postcard 1/15 long trips, special markets for Trader), scouting choice, hiring, leveling perks.
 - `quests.js` — daily roll (3/day, weighted by unlocks, disabled types), reroll, progress hooks (`questEvent(state, type, amount)`), weekly quest, catch-up bank (2 days).
-- `events.js` — 8-week rotation keyed by ISO week; event points; track claims; progress persists per event key across reruns.
+- `events.js` — 8-week rotation keyed by ISO week; event points; track claims; progress persists per event key across reruns. Every twist in `content/events.js` takes effect: `boardShape` (every event has a themed board frame; `sunset` and `scroll` also change the gradient style in `puzzles/grading.js`), `glowTiles`, `previewEra` (`eraPreview`: Era 2 preview colors on the event page and boards, never discovered), `sourceUnlock` (a loaned source), `longTripBonus` (hunters.js), `packingLanterns` (a packed shipment earns event points), `bouquetOrders` (orders.js). The event region's hunts bring the limited colors home (`EVENT_HUE_CHANCE`).
+- `howto.js` — the Quests screen's "how do I do this?": `questGuide(state, quest|weeklyStep)`, `eventGuide(state)` (every way to earn points with destinations, the next step in actions, the track in words, how to get the limited colors, the twist), `requirement(state, need)` (what to buy first, with price and a destination; never a dead end). Texts and destinations live in `content/quests.js` (`QUEST_HOW`) and `content/events.js` (`EVENT_POINT_HOW`, `twist.how/go`).
 - `commissions.js` — open 2–3, step progress via stock delivery, rewards (signature color id).
 - `prestige.js` — `heritagePreview(state)` = floor(sqrt(runEarned/1e7)), `renovate(state, now)` (resets stations/coins/rooms/shelf contents; keeps catalog, hunters, album, apprentices, heritage, gallery, essence), heritage tree purchase.
 - `ledger.js` — `buildReturnSummary(state, before, after, now)` and `almostThere(state)` (3–5 nearly-finished things across zones).
 - `offline.js` — `catchUp(state, now)`: snapshot, `factory.tick`, hunters, spillover, accidents, gallery admission, then builds the ledger. Called on boot and on `visibilitychange` → visible. `shiftClock(state, ms)` moves every saved clock and absolute schedule (orders, Clerk, spillover, collector, admission, trips, fleet, Rush, boosts) `ms` into the past: `Game` uses it when the device clock went backwards (trips and cooldowns keep their time left), `debug.advance` to fake time passing.
+- `tiles.js` — the Tile Room on state (namespace `sim.tiles` only): `startWall`, `take`, `undo`, `idaTurn`, `sweep`, `scoreRound`, `deal`, `setRival`, `setGlazes`/`defaultGlazes`/`checkGlazes` (five discovered colors, five hue families, shelf chips first), `phase(state)` ('none'|'play'|'pending'|'deal'|'over': what the bottom bar offers), `quote` (coins per point = 0.05 × `orderBasePay(state,1)` × income multiplier; a finished wall adds `orderBasePay(state,3)`), `summary`. Emits `tilesWall`, `tilesRound` {round, points, coins}, `mosaicFinished` {mosaicId, score, coins, walls}; calls `questEvent(state,'tilesRound'|'mosaicFinished')` and `eventPoints(state,'mosaic')`. Unlock `tiles` (20 colors, 5,000 Coins).
 - `closeUp.js` — `closeUpShop(state, now)`: sends idle hunters overnight, queues every mixer, returns `{fillTime}`.
 
 ## Puzzles (src/puzzles/)
@@ -168,6 +172,7 @@ All pure, all take `rng`. Each exposes `create(opts, rng) -> puzzle`, `apply(puz
 - `matching.js` — `createOrder` (sim/orders uses this), `blend(drops)` via `mixPaint`, `score`.
 - `purify.js` — tube sort: `TIERS` (relaxed 4/6 + extra tube, steady 6/8, tricky 8/10, master 9/11), `sizeForTier`, `expectedMinutes`, `createForTier(tier, rng, {palette})` / `create({tier?|colors, tubes}, rng)` generated by **reverse pours from a solved state** so every puzzle is solvable; `pour(p, from, to)` moves the whole contiguous top run as capacity allows; `undo`; `addTube` (only where the tier allows); `isSolved` (every non-empty tube is one color AND full); `isCorked(p, i)`.
 - `packing.js` — `create({routes:[{id, palette}], jars:[colorId…]}, rng)`; `drop(p, jarIndex, crateId)` → `{clean}`; result `{cleanCrates, bonus:0.25}`.
+- `tiles.js` — the Tile Room's rules (ported from `proto/tiles/rules.js`): `newGame(seed, {rival, colors})` (100 tiles, its own mulberry32 seed `rs` inside the game, so a saved game keeps its bag), `take`, `legalLines`, `rivalChoice`/`rivalTurn` (Ida: most of one glaze on a dish, ties left then lower glaze), `sweepMiddle`, `roundOver`, `endRound` (row-order placement scoring, seconds +1), `dealRound`, `finalScore` (rows ×2, columns ×7, glazes ×10), `countTiles`, `isValidGame`. Every function returns a new game.
 
 ## UI (src/ui/)
 

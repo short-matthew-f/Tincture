@@ -12,7 +12,7 @@ import { REGIONS, getRegion, isRegionUnlocked, EVENT_REGION_IDS } from '../conte
 import { MAX_SOURCES_ERA1, getSource } from '../content/sources.js';
 import { marketsDiscoverableIn } from '../content/routes.js';
 import { getPigment } from '../content/pigments.js';
-import { getEvent } from '../content/events.js';
+import { getEvent, EVENT_HUE_CHANCE } from '../content/events.js';
 import * as CAT from '../content/catalog.js';
 import * as PC from '../content/postcards.js';
 import * as CV from '../content/canvases.js';
@@ -493,6 +493,17 @@ function resolveOne(state, hunter, now) {
       hunter.pityStreak = 0;
     } else {
       hunter.pityStreak = fin(hunter.pityStreak) + 1;
+    }
+  }
+
+  // 3b. The running event's region: its limited colors are found here (DESIGN.md
+  // "Weekly events": each event has an event region; its limited page is collected there).
+  if (region && region.kind === 'event' && state.event && region.event === state.event.key) {
+    const limited = eventColors(region.event).map((c) => c.id).filter((id) => colorInfo(id) && !knowsColor(state, id));
+    if (limited.length && rng() < (EVENT_HUE_CHANCE[duration] ?? EVENT_HUE_CHANCE.short)) {
+      const colorId = pick(rng, limited);
+      discover(state, { colorId, method: 'event' }, now);
+      summary.limited = colorId;
     }
   }
 

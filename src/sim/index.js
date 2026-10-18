@@ -59,6 +59,8 @@ export * as closeUp from './closeUp.js';
 export * as settings from './settings.js';
 export * as unlocks from './unlocks.js';
 export * as seals from './seals.js';
+// The Tile Room (docs/PLAN-v0.3.md): namespace only, its action names (take, undo, deal, ...) are generic.
+export * as tiles from './tiles.js';
 
 // Explicit resolutions of names exported by more than one module.
 export { unlocked as huntersUnlocked } from './hunters.js';

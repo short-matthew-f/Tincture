@@ -207,7 +207,7 @@ function nextStep(c) {
       return { text: r ? `Send a hunter to the ${r.name} and see what they bring home.` : 'Send a hunter out and see what they bring home.', screen: 'map', cta: 'Open the map' };
     }
     case 'commission': return { text: 'Finish a commission to earn it as a signature color.', screen: 'commissions', cta: 'See commissions' };
-    case 'event': return { text: 'Play this event to collect its colors.', screen: 'quests', cta: 'See the event' };
+    case 'event': return { text: 'Send a hunter to this week\'s event region on the map, or earn it on the event track. The event sheet lists every way.', screen: 'quests', params: { section: 'event', how: 'event' }, cta: 'How to collect it' };
     case 'accident': return { text: 'A happy accident at a mixer can bring it.', screen: 'workshop', cta: 'Go to the workshop' };
     default: return { text: 'Keep experimenting.', screen: 'bench', cta: 'Open the bench' };
   }
@@ -216,6 +216,18 @@ function nextStep(c) {
 // ---------------------------------------------------------------------------
 // Markup
 // ---------------------------------------------------------------------------
+
+/** Neon Night's sneak peek (rules.previewEra): a few Era 2 colors, shown but not collectable yet. */
+function eraPreviewHtml(st) {
+  let list = [];
+  try { list = sim().events.eraPreview(st); } catch { list = []; }
+  if (!list.length) return '';
+  return h`<div class="card flat tight" data-era-preview style="padding:10px 14px">
+    <div class="semi">A peek at Era ${list[0].era}</div>
+    <div class="row wrap" style="gap:12px">${list.map((c) => h`<span class="row" style="gap:6px"><span class="swatch" style="--size:30px;background:${safeHex(c.hex)}" role="img" aria-label="${c.name}"></span><span class="small"><span class="semi">${c.name}</span><br><span class="muted">${c.note}</span></span></span>`)}</div>
+    <div class="hint">They glow on this week's grading boards. You can collect them once Era ${list[0].era} arrives (coming in a later update).</div>
+  </div>`;
+}
 
 function starsRow(n) {
   const k = Math.max(0, Math.min(10, n | 0));
@@ -309,6 +321,7 @@ function build() {
   <div class="cat-book${complete ? ' is-complete' : ''}" style="--bd:${PAGE_BORDER[page.id] || PAGE_BORDER.event}">
     <div class="cat-grid">${page.colors.map((c, i) => cellHtml(c, i + 1, st, i === firstMissing))}</div>
   </div>
+  ${page.id === 'event' ? eraPreviewHtml(st) : ''}
   <div class="cat-eras">
     ${ERAS.filter((e) => e.id > 1).map((e) => tag(`Era ${e.id} ${e.name}: coming in a later update`))}
   </div>
@@ -573,7 +586,7 @@ function onClick(e) {
     case 'go': {
       const c = getColor(id);
       closeSheet();
-      if (c) ctx.navigate(nextStep(c).screen, { colorId: id });
+      if (c) { const st2 = nextStep(c); ctx.navigate(st2.screen, { colorId: id, ...(st2.params || {}) }); }
       break;
     }
     default:

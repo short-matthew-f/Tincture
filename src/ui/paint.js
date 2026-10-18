@@ -3,8 +3,7 @@
  *
  * Owns: the canvas SVG (regions as tappable panes filled from `piece.regions`,
  * unpainted panes in card paper, ink leading on top), the palette of EVERY discovered
- * color (colors with no stock are paper chips tagged "Set a mixer to make this" that open
- * workshop's mixer picker as a sheet over the easel), the "uses N jars a pane" line, the pour-fill + glug on every
+ * color (painting is free: no jars are spent or needed, so every chip is a plain swatch), the pour-fill + glug on every
  * pane, a local undo stack, the suggested-palette hint row, the Sign sheet
  * (title, value reveal with a rolling number, Hang it / Keep in archive) and
  * image export (PNG download and Web Share with a file). Implements DESIGN.md
@@ -17,7 +16,7 @@
  *
  * Params: show({pieceId}); with no piece on the easel it closes, opens the
  * Gallery and toasts "Pick a canvas to start painting". data-actions: sign, sign-confirm, sign-cancel,
- * hang, archive, undo, scrap (unsigned only; two taps), export, share, pick, make, family, close-sheet.
+ * hang, archive, undo, scrap (unsigned only; two taps), export, share, pick, family, close-sheet.
  *
  * First-open guide 'paint': `data-coach="paint-palette"` (ends on her first pane, announced by the
  * 'paintRegion' game event this screen emits), then `data-coach="paint-sign"` (a got-it step that waits
@@ -32,8 +31,6 @@
  */
 
 import { h, raw, backButton, button, tag, safeHex, escapeHtml } from './kit.js';
-import { textColorOn } from '../color.js';
-import { openRecipeSheet, ensureStyles as ensureWorkshopStyles } from './workshop.js';
 import fxDefault from './fx.js';
 import audioDefault from './audio.js';
 import hapticsDefault from './haptics.js';
@@ -175,16 +172,6 @@ const CSS = `
 #screen-paint .pt-chips::-webkit-scrollbar{display:none}
 #screen-paint .pt-chip{scroll-snap-align:start;position:relative;width:56px;height:48px;border-radius:12px;box-shadow:0 3px 0 rgba(42,38,34,.25);transition:transform 120ms}
 #screen-paint .pt-chip.is-sel{box-shadow:0 0 0 3px #F7F4EC,0 0 0 6px #2A2622;transform:translateY(-1px)}
-#screen-paint .pt-chip.is-low{opacity:.55}
-#screen-paint .pt-chip.pt-paper{grid-column:span 3;width:auto;display:flex;align-items:center;gap:6px;padding:0 10px;background:var(--paper);color:var(--ink);text-align:left;box-shadow:inset 0 0 0 1.5px rgba(42,38,34,.14),0 3px 0 rgba(42,38,34,.25)}
-#screen-paint .pt-chip.pt-paper:active{transform:translateY(2px);box-shadow:inset 0 0 0 1.5px rgba(42,38,34,.14),0 1px 0 rgba(42,38,34,.25)}
-#screen-paint .pt-chip.pt-paper.is-making{box-shadow:inset 0 0 0 1.5px rgba(185,131,28,.55),0 3px 0 rgba(42,38,34,.25)}
-#screen-paint .pt-paper i{flex:0 0 auto;width:20px;height:20px;border-radius:50%;box-shadow:inset 0 0 0 1px rgba(42,38,34,.25)}
-#screen-paint .pt-paper .tx{display:flex;flex-direction:column;align-items:flex-start;min-width:0;gap:2px}
-#screen-paint .pt-paper b{max-width:132px;font-size:12px;line-height:1.1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#screen-paint .pt-paper .tag{font-size:10px;min-height:18px;padding:1px 6px 1px 13px;max-width:none}
-#screen-paint .pt-paper .tag::before{left:4px}
-#screen-paint .pt-chip .n{position:absolute;right:5px;bottom:3px;font-size:11px;font-weight:700;font-variant-numeric:tabular-nums}
 #screen-paint .pt-suggest{display:flex;gap:6px;align-items:center;overflow-x:auto;scrollbar-width:none;padding:0 2px}
 #screen-paint .pt-suggest::-webkit-scrollbar{display:none}
 #screen-paint .pt-fam{display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:0 12px;border-radius:999px;background:#E3E6E0;font-size:13px;font-weight:600;white-space:nowrap;flex:0 0 auto}
@@ -230,7 +217,6 @@ const ui = {
   family: null,         // active suggested-family filter
   sheet: null,          // null | 'sign' | 'reveal'
   title: '',
-  lastCost: 0,
   chipSig: '',
   busy: false,
   scrapArmed: false,    // Scrap button: first tap arms it, second confirms
@@ -259,29 +245,9 @@ function paintedCount(p, cv) {
   return (cv?.regions || []).filter((r) => p?.regions?.[r.id]).length;
 }
 
-function costs(cv) {
-  const p = piece();
-  const set = new Set((cv?.regions || []).map((r) => sim().gallery.regionCost(state(), cv.id, r.id, p?.id)).filter(Boolean));
-  return [...set].sort((a, b) => a - b);
-}
-
-function costLine(cv) {
-  const jars = (n) => `${n} ${n === 1 ? 'jar' : 'jars'}`;
-  if (ui.lastCost) return `That pane uses ${jars(ui.lastCost)}`;
-  const c = costs(cv);
-  if (!c.length) return '';
-  if (c.length === 1) return `Uses ${jars(c[0])} a pane`;
-  return `Uses ${jars(c[0])} a pane, more for big ones`;
-}
-
-/** Every discovered color, stocked ones first; the rest carry what is needed to make them. */
+/** Every discovered color, in discovery order. Painting is free, so stock never matters. */
 function paletteColors() {
-  const st = state();
-  const mixers = (st.stations && st.stations.mixers) || [];
-  return sim().discoveredColors(st).map((c) => {
-    const jars = sim().storage.stockOf(st, c.id);
-    return { ...c, jars, stocked: jars >= 1, mixer: mixers.findIndex((m) => m && m.recipe === c.id), canMix: sim().factory.canMix(st, c.id) };
-  }).sort((a, b) => (b.stocked - a.stocked) || ((b.mixer >= 0) - (a.mixer >= 0)));
+  return sim().discoveredColors(state());
 }
 
 function famOf(id) {
@@ -315,7 +281,7 @@ function buildAll() {
   <span data-ref="shareslot"></span>
 </div>
 <div class="card pt-palette" data-ref="palette" data-coach="paint-palette" ${signed ? 'hidden' : ''}>
-  <div class="row between"><div class="serif" style="font-size:17px" data-ref="selname"></div><div class="small muted" data-ref="jars"></div></div>
+  <div class="row between"><div class="serif" style="font-size:17px" data-ref="selname"></div><span></span></div>
   ${fam.length ? h`<div class="pt-fade" data-fade><div class="pt-suggest" data-ref="suggest"><span class="small muted nowrap">Suggested</span>${fam.map((f) => h`<button type="button" class="pt-fam" data-tap data-action="family" data-family="${f}" aria-pressed="false"><i style="background:${FAMILY_HEX[f] || '#9A9288'}"></i>${FAMILY_NAME[f] || f}</button>`)}</div></div>` : ''}
   <div class="pt-fade" data-fade><div class="pt-chips" data-ref="chips"></div></div>
   <div class="hint" data-ref="hint">Pick a color, then tap a pane. Any color can go anywhere.</div>
@@ -346,50 +312,31 @@ function setFill(rid, hex) {
 }
 const CSS_ESC = (s) => String(s).replace(/["\\]/g, '\\$&');
 
-function paperChip(c) {
-  const name = sim().displayName(state(), c.id);
-  const making = c.mixer >= 0;
-  const text = making ? 'Making it' : c.canMix ? 'Set a mixer to make this' : 'Needs a new pigment';
-  return h`<button type="button" class="pt-chip pt-paper ${making ? 'is-making' : ''}" data-tap data-action="make" data-color="${c.id}" aria-label="${name}: ${making ? `Mixer ${c.mixer + 1} is making it` : c.canMix ? 'set a mixer to make this' : 'needs a new pigment first'}"><i style="background:${safeHex(c.hex)}"></i><span class="tx"><b>${name}</b>${tag(text, { icon: making ? 'check' : null })}</span></button>`;
-}
-
 function updateChips() {
   const wrap = q('[data-ref=chips]');
   if (!wrap) return;
   const st = state();
   const all = paletteColors();
-  const stockedAll = all.filter((c) => c.stocked);
   let list = all;
   if (ui.family) list = list.filter((c) => famOf(c.id) === ui.family);
-  if (!ui.sel || !stockedAll.some((c) => c.id === ui.sel)) {
-    ui.sel = ((list.find((c) => c.stocked) || stockedAll[0]) || {}).id || null;
+  if (!ui.sel || !all.some((c) => c.id === ui.sel)) {
+    ui.sel = (list[0] || all[0] || {}).id || null;
   }
-  const sig = list.map((c) => c.id + (c.stocked ? (c.jars < 3 ? 'L' : 's') : c.mixer >= 0 ? `m${c.mixer}` : c.canMix ? 'e' : 'x')).join('|') + '#' + (ui.family || '');
+  const sig = list.map((c) => c.id).join('|') + '#' + (ui.family || '');
   if (sig !== ui.chipSig) {
     ui.chipSig = sig;
-    const units = list.reduce((a, c) => a + (c.stocked ? 1 : 3), 0);
-    wrap.classList.toggle('one-row', units <= 6);
+    wrap.classList.toggle('one-row', list.length <= 6);
     wrap.classList.toggle('is-empty', list.length === 0);
     wrap.innerHTML = list.length
-      ? String(h`${list.map((c) => (c.stocked
-        ? h`<button type="button" class="pt-chip ${c.id === ui.sel ? 'is-sel' : ''} ${c.jars < 3 ? 'is-low' : ''}" data-tap data-action="pick" data-color="${c.id}" aria-label="${sim().displayName(st, c.id)}, ${Math.floor(c.jars)} jars" aria-pressed="${c.id === ui.sel}" style="background:${safeHex(c.hex)};color:${textColorOn(safeHex(c.hex))}"><span class="n" data-jars="${c.id}">${Math.floor(c.jars)}</span></button>`
-        : paperChip(c)))}`)
+      ? String(h`${list.map((c) => h`<button type="button" class="pt-chip ${c.id === ui.sel ? 'is-sel' : ''}" data-tap data-action="pick" data-color="${c.id}" aria-label="${sim().displayName(st, c.id)}" aria-pressed="${c.id === ui.sel}" style="background:${safeHex(c.hex)}"></button>`)}`)
       : String(h`<div class="small muted">${ui.family ? 'None of those colors are discovered yet. Clear the filter to see all.' : 'Discover a color and it will be waiting here.'}</div>`);
-  } else {
-    for (const c of list) {
-      if (!c.stocked) continue;
-      const n = wrap.querySelector(`[data-jars="${CSS_ESC(c.id)}"]`);
-      if (n) n.textContent = String(Math.floor(c.jars));
-    }
   }
   wrap.querySelectorAll('.pt-chip[data-action="pick"]').forEach((b) => {
     const on = b.dataset.color === ui.sel;
     b.classList.toggle('is-sel', on);
     b.setAttribute('aria-pressed', String(on));
   });
-  const selEntry = stockedAll.find((c) => c.id === ui.sel);
-  q('[data-ref=selname]').textContent = ui.sel ? sim().displayName(st, ui.sel) : 'Paint comes from your vats';
-  q('[data-ref=jars]').textContent = selEntry ? `${Math.floor(selEntry.jars)} jars left` : '';
+  q('[data-ref=selname]').textContent = ui.sel ? sim().displayName(st, ui.sel) : 'Discover a color to paint with';
   root.querySelectorAll('.pt-fam').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.family === ui.family)));
 }
 
@@ -437,8 +384,6 @@ function update() {
       if (el && el.getAttribute('fill') !== want) setFill(r.id, p.regions[r.id] ? want : null);
     }
     updateChips();
-    const cl = costLine(cv);
-    q('[data-ref=hint]').textContent = (cl ? cl + '. ' : '') + 'Pick a color, then tap a pane. Any color can go anywhere.';
   }
 }
 
@@ -454,7 +399,7 @@ function disarmScrap() {
 function scrapLabel(n, armed) {
   if (!armed) return 'Scrap this canvas';
   if (n <= 0) return 'Scrap it: nothing is painted yet, so nothing is lost';
-  return `Scrap it: ${n} painted ${n === 1 ? 'pane' : 'panes'} will be cleared; the jars stay spent`;
+  return `Scrap it: ${n} painted ${n === 1 ? 'pane' : 'panes'} will be cleared`;
 }
 
 function renderScrap(p, cv) {
@@ -569,15 +514,6 @@ function applyPaint(rid, colorId, ev, { fromUndo = false } = {}) {
   if (!p || p.signedAt) return false;
   const region = cv.regions.find((r) => r.id === rid);
   if (!region) return false;
-  const cost = sim().gallery.regionCost(state(), cv.id, rid, p.id);
-  ui.lastCost = cost;
-  const have = sim().storage.stockOf(state(), colorId);
-  if (have + 1e-9 < cost) {
-    const more = Math.max(1, cost - Math.floor(have));
-    gently(`${sim().displayName(state(), colorId)} needs ${more} more ${more === 1 ? 'jar' : 'jars'}. A little more time in the vats and it's yours to pour.`);
-    update();
-    return false;
-  }
   const prev = p.regions[rid] || null;
   if (prev === colorId) {
     gently('That pane already has that color.');
@@ -585,7 +521,7 @@ function applyPaint(rid, colorId, ev, { fromUndo = false } = {}) {
   }
   const res = ctx.game.act(sim().gallery.paintRegion, { pieceId: p.id, regionId: rid, colorId });
   if (!res || !res.ok) {
-    gently(res && res.reason === 'stock' ? 'Not quite enough jars of that color yet.' : 'That pane is not ready for paint.');
+    gently('That pane is not ready for paint.');
     update();
     return false;
   }
@@ -615,7 +551,6 @@ function pickChip(chip) {
   const id = chip.dataset.color;
   if (id !== ui.sel) {
     ui.sel = id;
-    ui.lastCost = 0;
     update();
   }
 }
@@ -771,14 +706,6 @@ function onClick(e) {
   const a = t.dataset.action;
   if (a === 'close-sheet') { if (e.target === t && ui.sheet === 'sign') closeSheet(); return; }
   if (a === 'pick') { pickChip(t); return; }
-  if (a === 'make') {
-    const colorId = t.dataset.color;
-    const mi = (state().stations.mixers || []).findIndex((m) => m && m.recipe === colorId);
-    if (mi >= 0) { ctx.toast(`Mixer ${mi + 1} is making ${sim().displayName(state(), colorId)}. It will be here soon.`); return; }
-    ensureWorkshopStyles();
-    openRecipeSheet(ctx, { colorId, host: root, onDone: () => { ui.chipSig = ''; update(); } });
-    return;
-  }
   if (a === 'family') { ui.family = ui.family === t.dataset.family ? null : t.dataset.family; ui.chipSig = ''; updateChips(); updateFades(); return; }
   if (a === 'undo') onUndo();
   else if (a === 'sign') openSheet('sign');
@@ -854,7 +781,6 @@ const screen = {
       ui.title = '';
     }
     ui.pending.clear();
-    ui.lastCost = 0;
     disarmScrap();
     closeSheet();
     if (!piece()) {
