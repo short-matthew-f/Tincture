@@ -46,7 +46,15 @@ export function applySettings(settings = {}, ctx = {}) {
 // Quest type list: tolerate arrays of ids, arrays of objects, or id -> object maps.
 // ---------------------------------------------------------------------------
 
-const pretty = (id) => String(id).replace(/[-_]+/g, ' ').replace(/^./, (c) => c.toUpperCase());
+const pretty = (id) => QUEST_LABELS[id] || String(id).replace(/[-_]+/g, ' ').replace(/^./, (c) => c.toUpperCase());
+
+/** Plain names for the quest kinds (the ids read oddly: "Merge bottle", "Tile rounds"). */
+const QUEST_LABELS = {
+  'fill-orders': 'Fill orders', 'solve-board': 'Solve grading boards', 'name-color': 'Name colors',
+  'discover-color': 'Discover colors', 'buy-upgrades': 'Buy upgrades', 'merge-bottle': 'Merge on the shelf',
+  'paint-regions': 'Paint in the Gallery', 'send-hunter': 'Send hunters out', 'ship-crates': 'Ship crates',
+  'tile-rounds': 'Tile Room rounds', 'purify-batch': 'Purify batches',
+};
 
 function questTypeList(content) {
   const qt = content && content.QUEST_TYPES;
@@ -55,7 +63,7 @@ function questTypeList(content) {
   return entries.map(([k, v]) => {
     if (typeof v === 'string') return { id: v, label: pretty(v) };
     const id = (v && (v.id || v.type || v.key)) || k;
-    const label = (v && (v.name || v.label || v.title)) || pretty(id);
+    const label = QUEST_LABELS[id] || (v && (v.name || v.label || v.title)) || pretty(id);
     return { id, label };
   }).filter((q) => q.id);
 }
@@ -189,7 +197,7 @@ function body(settings) {
     <div class="card-title section-label">Notifications</div>
     <div class="hint">Off unless you turn them on, and only ever about these two things.</div>
     ${toggleRow('notifyHunters', 'Your hunters are back', null, !!s.notifyHunters)}
-    ${toggleRow('notifyVats', 'Your vats are full', null, !!s.notifyVats)}
+    ${toggleRow('notifyVats', 'Your jars are full', null, !!s.notifyVats)}
     ${!notifSupported ? h`<div class="hint">Notifications are not available in this browser.</div>` : ''}
     ${ui.notifNote ? h`<div class="hint" role="status">${ui.notifNote}</div>` : ''}
   </div>

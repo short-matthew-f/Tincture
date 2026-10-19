@@ -23,8 +23,8 @@ const node = (o) => Object.freeze({ ...o, cost: Object.freeze(o.cost), effect: O
 export const HERITAGE_TREE = Object.freeze([
   node({ id: 'deep-pockets', name: 'Deep Pockets', maxLevel: 5, cost: [1, 2, 4, 7, 11], effect: { startCoins: 2500 },
     blurb: 'Each run starts with a little more in the till.' }),
-  node({ id: 'extra-vats', name: 'Spare Vats', maxLevel: 3, cost: [2, 4, 8], effect: { startVats: 1 },
-    blurb: 'Start each run with another tall glass vat on the shelf.' }),
+  node({ id: 'extra-vats', name: 'Spare Jars', maxLevel: 3, cost: [2, 4, 8], effect: { startVats: 1 },
+    blurb: 'Start each run with another tall glass jar on the shelf.' }),
   node({ id: 'second-table', name: 'Second Table', maxLevel: 2, cost: [3, 8], effect: { startMixers: 1 },
     blurb: 'A spare mixer, ready on day one of every run.' }),
   node({ id: 'quick-hands', name: 'Quick Hands', maxLevel: 4, cost: [2, 4, 7, 11], effect: { phaseSpeed: 0.25 },

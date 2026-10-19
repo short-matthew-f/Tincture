@@ -41,7 +41,7 @@ let currentBeat = null;
 const ROOM_ADDS = {
   grinderSlots: ['grinder', 'grinders'],
   mixerSlots: ['mixer', 'mixers'],
-  vatSlots: ['vat', 'vats'],
+  vatSlots: ['glass jar', 'glass jars'],
   fleetSlots: ['cart', 'carts'],
   walls: ['gallery wall', 'gallery walls'],
 };
@@ -63,10 +63,10 @@ export function roomLines(room) {
 }
 
 const ROOM_SECOND = {
-  'mill-room': 'A second grinder keeps your mixers fed, so the vats fill faster.',
-  'mixing-hall': 'More mixers means more colors filling your vats at once.',
+  'mill-room': 'A second grinder keeps your mixers fed, so the jars fill faster.',
+  'mixing-hall': 'More mixers means more colors filling their jars at once.',
   'gallery-wing': 'Paint with every color you make, and hang it for Harbor Town to see.',
-  cellar: 'Your vats can fill all night while you are away.',
+  cellar: 'Your jars can fill all night while you are away.',
   'loading-yard': 'Your carts carry color down the routes, and commissions come calling.',
   'long-hall': 'More walls, more visitors, more of your work on show.',
   atelier: 'A bright room for your finest mixing.',
@@ -79,11 +79,11 @@ export function beatFor(params = {}, content = {}) {
   if (p.kind === 'phase') {
     if (Number(p.phase) === 2) {
       return { kicker: 'A new chapter', title: 'Your business outgrows the bench', art: 'factory',
-        lines: ['Carts, routes and apprentices are ready to help you.', 'Your hunters can set out, and the Gallery door opens soon.'] };
+        lines: ['New rooms and your first apprentices are ready when you are.', 'The map window, the Tile Room and the Gallery each show their price in the workshop.'] };
     }
     if (Number(p.phase) === 3) {
       return { kicker: 'A new chapter', title: 'Commissions come calling', art: 'atelier',
-        lines: ['Harbor Town brings you big projects that ask for many colors at once.', 'Renovate is open too, whenever you want a fresh start with Heritage.'] };
+        lines: ['Commissions can open now: big town projects, bought in the workshop like the other rooms.', 'Renovate is open too, whenever you want a fresh start with Heritage.'] };
     }
     return { kicker: 'A new chapter', title: 'Your workshop grows', art: 'bench', lines: ['New work is waiting for you.'] };
   }

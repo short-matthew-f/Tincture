@@ -24,7 +24,7 @@
 //                                                     first online load
 //   any other cross-origin request, non-GET           ignored
 
-var CACHE_VERSION = '0.3.0';
+var CACHE_VERSION = '0.3.1';
 var CACHE_NAME = 'tincture-v' + CACHE_VERSION;
 var FONT_CACHE = 'tincture-fonts';
 
@@ -47,6 +47,7 @@ var SHELL = [
   'src/content/commissions.js',
   'src/content/eras.js',
   'src/content/events.js',
+  'src/content/explain.js',
   'src/content/heritage.js',
   'src/content/hunters.js',
   'src/content/names.js',

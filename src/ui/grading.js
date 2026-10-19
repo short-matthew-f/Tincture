@@ -17,7 +17,7 @@
  * survives closing the app (state.activePuzzles.grading, see puzzles.js).
  */
 
-import { h, raw, backButton, button, iconSvg, swatch } from './kit.js';
+import { h, raw, backButton, button, iconSvg, swatch, explainLink } from './kit.js';
 import { stateRng } from '../rng.js';
 import {
   injectStyle, PZ_CSS, ensureActive, activeOf, TIER_IDS, TIER_LABEL, STAMP_TONE, stampSvg,
@@ -563,13 +563,13 @@ function skip() {
 
 function bonusLine(bonus) {
   if (!bonus) return '';
-  if (bonus.kind === 'fragment') return h`<li>${iconSvg('star', { size: 18 })}<span><b>Bonus roll:</b> a wild-hue fragment, worth ${bonus.seals} Seals</span></li>`;
+  if (bonus.kind === 'fragment') return h`<li>${iconSvg('star', { size: 18 })}<span><b>Bonus roll:</b> a wild-hue fragment, worth ${bonus.seals} Seals ${explainLink('seals', 'What are Seals for?')}</span></li>`;
   if (bonus.kind === 'postcard') {
     return bonus.duplicate
-      ? h`<li>${iconSvg('star', { size: 18 })}<span><b>Bonus roll:</b> a postcard you have, “${bonus.title}”, turned into ${bonus.seals} Seals</span></li>`
+      ? h`<li>${iconSvg('star', { size: 18 })}<span><b>Bonus roll:</b> a postcard you have, “${bonus.title}”, turned into ${bonus.seals} Seals ${explainLink('seals', 'What are Seals for?')}</span></li>`
       : h`<li>${iconSvg('star', { size: 18 })}<span><b>Bonus roll:</b> a new postcard, “${bonus.title}”</span></li>`;
   }
-  return h`<li>${iconSvg('star', { size: 18 })}<span><b>Bonus roll:</b> ${bonus.seals} Seals</span></li>`;
+  return h`<li>${iconSvg('star', { size: 18 })}<span><b>Bonus roll:</b> ${bonus.seals} Seals ${explainLink('seals', 'What are Seals for?')}</span></li>`;
 }
 
 const nameOf = (colorId) => (C.sim.displayName ? C.sim.displayName(C.game.state, colorId) : colorId);

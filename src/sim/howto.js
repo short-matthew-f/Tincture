@@ -18,7 +18,7 @@ import { eraPreviewColors } from '../content/eras.js';
 import { getCommission } from '../content/commissions.js';
 import { formatNumber } from '../format.js';
 import { status as unlockStatus } from './unlocks.js';
-import { PHASE_GATES } from './factory.js';
+import { PHASE_GATES, phaseGoal } from './factory.js';
 import { discoveredCount } from './discovery.js';
 import { eventColors, knowsColor, colorInfo } from './hunters.js';
 
@@ -70,14 +70,14 @@ export function requirement(state, need) {
   if (!st || st.open) return null;
   const name = st.name;
   if (!st.phaseOk) {
-    const gate = PHASE_GATES[st.phase] || PHASE_GATES[3];
-    const room = ROOMS_BY_ID[gate.room];
-    const rn = room ? room.name : 'next room';
-    const hasRoom = room && (state.rooms || []).includes(room.id);
+    const g = phaseGoal(state, st.phase);
+    const rn = g.room.name;
+    const text = !g.hasRoom
+      ? `The ${name} comes after the ${rn}. ${g.roomColorsLeft > 0 ? `The ${rn} opens at ${g.room.colorsRequired} colors (${plural(g.roomColorsLeft, 'more color')} to find), then costs ${coins(g.room.cost)}.` : `Build the ${rn} in the workshop for ${coins(g.room.cost)}.`} After that the ${name} costs ${coins(st.cost)}.`
+      : `The ${name} opens at ${g.colors} colors: ${plural(g.colorsLeft, 'more color')} to find. Then it costs ${coins(st.cost)}.`;
     return {
-      need, title: `First, the ${rn}`,
-      text: `The ${name} comes after the ${rn}${hasRoom ? ` and ${gate.colors} colors` : ''}. Its price, ${coins(st.cost)}, shows at ${st.revealColors} colors.`,
-      go: go('workshop', { panel: 'rooms' }), cta: 'Open the rooms',
+      need, title: `First, the ${g.hasRoom ? name : rn}`, text,
+      go: g.hasRoom ? go('bench') : go('workshop', { panel: 'rooms' }), cta: g.hasRoom ? 'Find new colors' : 'Open the rooms',
     };
   }
   if (st.colorsLeft > 0) {

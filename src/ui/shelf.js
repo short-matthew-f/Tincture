@@ -514,6 +514,14 @@ function refresh(force = false) {
   updateCoins(st);
   updateChips(st);
   updateInfo(st, now);
+  // The open vial-color chooser picks up a color found while it is open (a hunter home, an accident).
+  if (ui.sheet !== null && ui.sheet !== undefined && ui.chooserN !== Object.keys(st.catalog?.discovered || {}).length) {
+    const pick = q('.sh-pick');
+    const top = pick ? pick.scrollTop : 0;
+    openChooser(ui.sheet);
+    const again = q('.sh-pick');
+    if (again) again.scrollTop = top;
+  }
   if (ui.hold > 0 || (dragH && dragH.active)) return;
   ui.vis = snap(st);
   if (!ui.lay || force) layout();
@@ -1104,6 +1112,7 @@ function openChooser(slot) {
     const fb = FAMILIES.indexOf(famOf(b));
     return fa - fb || String(sim().displayName(st, a)).localeCompare(String(sim().displayName(st, b)));
   });
+  ui.chooserN = ids.length;
   const layer = q('[data-ref=layer]');
   layer.hidden = false;
   layer.innerHTML = String(h`<div class="sheet" role="dialog" aria-label="Choose a vial color">

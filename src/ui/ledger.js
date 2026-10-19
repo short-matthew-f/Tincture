@@ -20,7 +20,7 @@
  * ledger-close-up-reopen, ledger-back.
  */
 
-import { h, raw, button, iconSvg, swatch, backButton, safeHex } from './kit.js';
+import { h, raw, button, iconSvg, swatch, backButton, safeHex, explainLink } from './kit.js';
 import defaultFx from './fx.js';
 import defaultAudio from './audio.js';
 import defaultHaptics from './haptics.js';
@@ -72,7 +72,7 @@ function ensureLedgerStyles() {
 // action: the small pill on the right. next: the next step, so every line lands with
 // its result (the title) AND where it leads (this line). rank: results first, chores after.
 const ICON_STYLE = {
-  jar: { hex: '#D39B2A', action: 'Got it', rank: 0, next: 'Safe in your vats, ready to sell or ship.' },
+  jar: { hex: '#D39B2A', action: 'Got it', rank: 0, next: 'Safe in your jars, ready to sell or ship.' },
   coin: { hex: '#C99A2E', action: 'Got it', rank: 0, next: 'Already in your purse. A good time for an upgrade.' },
   cart: { hex: '#9A6A47', action: 'Open', rank: 0, next: 'The cart is back. Send the next load from the Fleet.' },
   hunter: { hex: '#6E4A7E', action: 'Open', rank: 1, next: 'See what they found, then send them out again.' },
@@ -217,7 +217,7 @@ function build() {
   const awayText = away >= 60e3 ? `You were away ${awayWords(away)}` : '';
   const fill = sim().storage.fillTimeMs(S());
   const closeLabel = closedInfo
-    ? (Number.isFinite(fill) && fill > 0 ? `Shop closed. Vats fill in ${waitText(ctx.format, fill)}` : 'Shop closed. Everything is set for tomorrow')
+    ? (Number.isFinite(fill) && fill > 0 ? `All set for tonight. Jars full in about ${waitText(ctx.format, fill)}` : 'All set for tonight')
     : 'Close up shop';
   // One title at a time: the nav says "Welcome back" after an absence, and the card carries
   // the ledger's name; otherwise the nav is the name and the card says something warm.
@@ -232,13 +232,14 @@ function build() {
     <div class="ld-titlerow"><div class="ld-title${named ? ' is-name' : ''}">${cardTitle}</div></div>
     ${awayText ? h`<div class="ld-away">${awayText}</div>` : ''}
     ${calm ? '' : h`<div class="ld-lede">${named ? 'Here is what the workshop got up to. Tap a line to look closer.' : 'A few little things are waiting. Tap a line to look closer.'}</div>`}
-    <div class="ld-lines">${calm ? h`<div class="ld-warm">Nothing needs you right now. The workshop is humming along on its own, and your vats keep filling while you rest.</div>` : lines.map(lineHtml)}</div>
-    ${stamped && !calm ? h`<div class="ld-warm" data-warm>Everything is tended. Your vats keep filling while you rest.</div>` : ''}
+    <div class="ld-lines">${calm ? h`<div class="ld-warm">Nothing needs you right now. The workshop is humming along on its own, and your jars keep filling while you rest.</div>` : lines.map(lineHtml)}</div>
+    ${stamped && !calm ? h`<div class="ld-warm" data-warm>Everything is tended. Your jars keep filling while you rest.</div>` : ''}
     ${stamped ? stampZone() : ''}
   </div>
   ${almostHtml()}
   <div class="ld-bottom">
     ${button(closeLabel, { variant: caughtUp || closedInfo ? 'primary' : 'wood', block: true, cls: `tall${closedInfo ? ' ws-closed' : ''}`, attrs: { 'data-action': closedInfo ? 'ledger-close-up-reopen' : 'ledger-close-up', 'data-coach': 'close-up-ledger' } })}
+    ${closedInfo ? '' : h`<div class="ws-closeup-note">Hunters head out, resting mixers get a color, and nothing pauses. ${explainLink('closeup', 'What does it do?')}</div>`}
     ${button('Back to the workshop', { block: true, attrs: { 'data-action': 'ledger-back' } })}
   </div>
 </div>`;
@@ -387,7 +388,7 @@ const screen = {
     const b = root.querySelector('[data-coach="close-up-ledger"]');
     if (b && closedInfo) {
       const fill = sim().storage.fillTimeMs(S());
-      const label = Number.isFinite(fill) && fill > 0 ? `Shop closed. Vats fill in ${waitText(ctx.format, fill)}` : 'Shop closed. Everything is set for tomorrow';
+      const label = Number.isFinite(fill) && fill > 0 ? `All set for tonight. Jars full in about ${waitText(ctx.format, fill)}` : 'All set for tonight';
       if (b.textContent !== label) b.textContent = label;
     }
     checkCaughtUp();

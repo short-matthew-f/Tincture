@@ -47,6 +47,29 @@ export const RAW_BUFFER_SECONDS = 300;
 export const PURE_SHARE_MAX = 0.9;
 export const PHASE_GATES = Object.freeze({ 2: { colors: 10, room: 'mill-room' }, 3: { colors: 30, room: 'loading-yard' } });
 
+/**
+ * phaseGoal(state, phase) -> what really stands between her and `phase`, in one place (0.3.1 audit F1/F3):
+ * {phase, reached, colors, colorsLeft, room:{id, name, cost, colorsRequired}, hasRoom, roomColorsLeft}.
+ * `colors` is the larger of the gate's own count and the room's (the Loading Yard asks 50 colors, so
+ * "Phase 3 at 30 colors" was never the real goal). UI copy for Commissions and Renovate reads this.
+ */
+export function phaseGoal(state, phase = 3) {
+  const g = PHASE_GATES[phase] || PHASE_GATES[3];
+  const room = ROOMS_BY_ID[g.room] || { id: g.room, name: g.room, cost: 0, colorsRequired: 0 };
+  const have = discoveredCount(state);
+  const colors = Math.max(num(g.colors), num(room.colorsRequired));
+  const hasRoom = (state?.rooms ?? []).includes(room.id);
+  return {
+    phase,
+    reached: num(state?.phase, 1) >= phase,
+    colors,
+    colorsLeft: Math.max(0, (hasRoom ? num(g.colors) : colors) - have),
+    room: { id: room.id, name: room.name, cost: num(room.cost), colorsRequired: num(room.colorsRequired) },
+    hasRoom,
+    roomColorsLeft: Math.max(0, num(room.colorsRequired) - have),
+  };
+}
+
 const num = (x, d = 0) => (Number.isFinite(x) ? x : d);
 
 function flags(state) {
@@ -674,14 +697,18 @@ export function checkPhase(state, args = {}, now = 0) { // eslint-disable-line n
 export function stewardTick(state, now = 0) {
   if (!state.apprentices?.steward || !state.stewardOn) return { bought: 0 };
   let bought = 0;
+  const labels = [];
   for (let k = 0; k < 5; k++) {
     const s = flowMeter(state, now).suggestion;
     if (!s || !(s.cost > 0) || s.kind === 'assign' || num(state.coins) < s.cost) break;
     const res = buyUpgrade(state, { kind: s.kind, index: s.index, id: s.id }, now);
     if (!res.ok) break;
     bought++;
+    if (s.label) labels.push(s.label);
   }
-  return { bought };
+  // Transient (not saved): the app says what the Steward bought, so coins never vanish silently.
+  if (bought) emit(state, 'stewardBought', { bought, labels });
+  return { bought, labels };
 }
 
 /** sellStock(state, {colorId, jars}) -> {coins, jars}: direct sale (Mixing-bench surplus). */

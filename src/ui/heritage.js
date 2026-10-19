@@ -45,7 +45,7 @@ const RESETS = [
   'Stations and mixers',
   'Coins',
   'Rooms',
-  'Jars in vats and containers on the shelf',
+  'Jars of color and containers on the shelf',
 ];
 
 const CSS = `
@@ -97,8 +97,8 @@ function effectLines(node, level) {
     per = `Each level: +${num(e.startCoins)} Coins at the start of every run.`;
     now = level ? `Now: +${num(e.startCoins * level)} Coins each run.` : '';
   } else if (e.startVats) {
-    per = `Each level: +${e.startVats} display ${e.startVats === 1 ? 'vat' : 'vats'} at the start of every run.`;
-    now = level ? `Now: +${e.startVats * level} ${e.startVats * level === 1 ? 'vat' : 'vats'} each run.` : '';
+    per = `Each level: +${e.startVats} glass ${e.startVats === 1 ? 'jar' : 'jars'} at the start of every run.`;
+    now = level ? `Now: +${e.startVats * level} glass ${e.startVats * level === 1 ? 'jar' : 'jars'} each run.` : '';
   } else if (e.startMixers) {
     per = `Each level: +${e.startMixers} mixer at the start of every run.`;
     now = level ? `Now: +${e.startMixers * level} ${e.startMixers * level === 1 ? 'mixer' : 'mixers'} each run.` : '';
@@ -112,15 +112,16 @@ function effectLines(node, level) {
   return { per, now };
 }
 
-/** The real goal for Renovate, from state: 30 colors and the Loading Yard (checkPhase). */
+/** The real goal for Renovate, from state (sim.factory.phaseGoal: Phase 3 = the Loading Yard, which asks 50 colors). */
 function renovateGoal(st) {
-  const gate = (sim().PHASE_GATES && sim().PHASE_GATES[3]) || { colors: 30, room: 'loading-yard' };
-  const more = Math.max(0, gate.colors - sim().discoveredCount(st));
-  const hasYard = (st.rooms || []).includes(gate.room);
-  const colors = `${more} more ${more === 1 ? 'color' : 'colors'}`;
-  if (more > 0 && !hasYard) return `Renovate opens at ${gate.colors} colors and the Loading Yard: ${colors}`;
-  if (more > 0) return `Renovate opens at ${gate.colors} colors: ${colors}`;
-  if (!hasYard) return 'Renovate opens with the Loading Yard: build it in the workshop';
+  const g = sim().factory.phaseGoal(st, 3);
+  const colors = (n) => `${n} more ${n === 1 ? 'color' : 'colors'}`;
+  if (!g.hasRoom) {
+    return g.roomColorsLeft > 0
+      ? `Renovate opens with the ${g.room.name}, which opens at ${g.room.colorsRequired} colors: ${colors(g.roomColorsLeft)}`
+      : `Renovate opens with the ${g.room.name}: build it in the workshop`;
+  }
+  if (g.colorsLeft > 0) return `Renovate opens at ${g.colors} colors: ${colors(g.colorsLeft)}`;
   return 'Renovate opens in just a moment';
 }
 

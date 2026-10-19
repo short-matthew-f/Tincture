@@ -812,6 +812,8 @@ button.chip::before, [data-tap].chip::before { content: ''; position: absolute; 
 
 /* "How this works": the small replay link in a subgame's header. */
 .how-link { display: inline-flex; align-items: center; min-height: 44px; padding: 0 8px; border: 0; background: none; color: var(--ink-soft); font: inherit; font-size: 13px; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.explain-link { min-height: 44px; margin: -12px 0; padding: 0 4px; vertical-align: middle; font-size: 13px; }
+.explain-line { margin: 0 0 8px; line-height: 1.45; }
 
 /* Merge hint: a soft 2% breathing pulse. */
 .pulse { animation: breathe 2.4s ease-in-out infinite; transform-origin: 50% 100%; }

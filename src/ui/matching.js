@@ -143,24 +143,28 @@ export function aboutMinutes(ms) {
 /** The reputation star as a labeled chip, never a bare glyph. */
 export function repChip(n) {
   const v = Math.max(0, Math.floor(Number(n) || 0));
-  return h`<span class="oq-chip">${iconSvg('star', { size: 16 })}<span>${v} reputation ${v === 1 ? 'star' : 'stars'}</span></span>`;
+  return h`<button type="button" class="oq-chip" data-explain="reputation" data-tap aria-label="${v} reputation ${v === 1 ? 'star' : 'stars'}: what they are">${iconSvg('star', { size: 16 })}<span>${v} reputation ${v === 1 ? 'star' : 'stars'}</span></button>`;
 }
 
 /** Commission lock: null when open, else {tag, more} naming the real goal from state. */
 export function commissionLock(ctx, state) {
-  const gate = ctx.sim.factory?.PHASE_GATES?.[3] ?? { colors: 30, room: 'loading-yard' };
-  const have = ctx.sim.discoveredCount(state);
-  const left = Math.max(0, gate.colors - have);
-  const yard = (state.rooms ?? []).includes(gate.room);
   if ((state.phase ?? 1) >= 3) return null;
-  let text = 'Commissions open soon';
-  let more = '';
-  if (left > 0 && !yard) text = `Commissions open at ${gate.colors} colors and the Loading Yard`;
-  else if (left > 0) text = `Commissions open at ${gate.colors} colors`;
-  else if (!yard) text = 'Commissions open with the Loading Yard';
-  if (left > 0) more = `${left} more ${left === 1 ? 'color' : 'colors'}`;
-  if (!yard && left > 0) more += ', then build the Loading Yard';
-  else if (!yard) more = 'Build the Loading Yard in your workshop';
+  const g = ctx.sim.factory?.phaseGoal ? ctx.sim.factory.phaseGoal(state, 3) : null;
+  if (!g) return { tag: tag('Commissions open soon', { icon: 'lock', cls: 'oq-lock' }), more: '' };
+  const colorsWord = (n) => `${n} more ${n === 1 ? 'color' : 'colors'}`;
+  const coins = ctx.format ? ctx.format.num(g.room.cost) : String(g.room.cost);
+  let text;
+  let more;
+  if (!g.hasRoom) {
+    // The Loading Yard is the real gate: it asks more colors than Commissions do (audit F1).
+    text = `Commissions open after the ${g.room.name}`;
+    more = g.roomColorsLeft > 0
+      ? `The ${g.room.name} opens at ${g.room.colorsRequired} colors: ${colorsWord(g.roomColorsLeft)}, then ${coins} coins`
+      : `Build the ${g.room.name} in your workshop for ${coins} coins`;
+  } else {
+    text = `Commissions open at ${g.colors} colors`;
+    more = g.colorsLeft > 0 ? colorsWord(g.colorsLeft) : 'Opening in just a moment';
+  }
   return { tag: tag(text, { icon: 'lock', cls: 'oq-lock' }), more };
 }
 
@@ -170,7 +174,7 @@ export const SHARED_CSS = `
 [data-screen="bench"] .screen-head .title, [data-screen="commissions"] .screen-head .title { font-family: var(--font-ui); font-weight: 700; font-size: 19px; }
 .oq-h { font-family: var(--font-ui); font-weight: 700; font-size: 19px; line-height: 1.2; }
 .oq-h.sm { font-size: 16px; }
-.oq-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px 6px 9px; min-height: 32px; border-radius: 999px; background: var(--glow); color: var(--glow-ink); box-shadow: 0 0 0 2px var(--glow-ring); font-size: 13px; font-weight: 700; }
+.oq-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px 6px 9px; min-height: 32px; border-radius: 999px; background: var(--glow); color: var(--glow-ink); box-shadow: 0 0 0 2px var(--glow-ring); font-size: 13px; font-weight: 700; border: 0; font-family: inherit; cursor: pointer; }
 .oq-lock { white-space: normal; font-size: 12px; max-width: 100%; line-height: 1.25; padding-top: 5px; padding-bottom: 5px; }
 .oq-lockrow { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
 .oq-lockrow .more { font-size: 13px; font-weight: 600; color: var(--ink-soft); padding-left: 2px; }
@@ -742,7 +746,7 @@ function submit() {
   const vialName = cell ? ctx.sim.displayName(state, cell.color) : null;
   const notes = [];
   if (vialName) notes.push(h`<li>${iconSvg('plus', { size: 18 })}<span>A bonus vial of <span class="serif">${vialName}</span> is on the shelf</span></li>`);
-  if (bonus > 1) notes.push(h`<li>${iconSvg('coin', { size: 18 })}<span>Fleet is busy: +${Math.round((bonus - 1) * 100)}% for hand delivery</span></li>`);
+  if (bonus > 1) notes.push(h`<li>${iconSvg('coin', { size: 18 })}<span>Selling is your slowest step, so orders pay +${Math.round((bonus - 1) * 100)}% right now</span></li>`);
   if (res.tutorialBonus > 0) notes.push(h`<li>${iconSvg('coin', { size: 18 })}<span>Includes a welcome gift of ${coinsWord(ctx, res.tutorialBonus)}</span></li>`);
   const praise = {
     perfect: `${customer} is thrilled. Exactly the color they pictured.`,

@@ -67,6 +67,7 @@ import * as rooms from './content/rooms.js';
 import * as routes from './content/routes.js';
 import * as sources from './content/sources.js';
 import * as stations from './content/stations.js';
+import { EXPLAIN } from './content/explain.js';
 
 /** Every screen module under src/ui/, matching <section data-screen> in index.html. */
 export const SCREEN_IDS = Object.freeze([
@@ -449,10 +450,22 @@ async function boot() {
 
   game.on('allCaughtUp', () => celebrate('allCaughtUp'));
 
+  // At most one Steward note a minute, counting everything it bought since the last one.
+  const steward = { at: -Infinity, n: 0 };
+  game.on('stewardBought', (p, meta) => {
+    if (!p || !p.bought) return;
+    steward.n += p.bought;
+    if (quiet(meta) || Date.now() - steward.at < 60e3) return;
+    const what = (p.labels && p.labels[p.labels.length - 1]) || 'an upgrade';
+    news(steward.n > 1 ? `The Steward bought ${steward.n} upgrades, the latest ${what}.` : `The Steward bought ${what}.`);
+    steward.at = Date.now();
+    steward.n = 0;
+  });
+
   game.on('storageFull', () => {
     if (once.has('storageFull')) return;
     once.add('storageFull');
-    news('The vats are full: a good moment to collect, ship or sell.', { ms: 3200 });
+    news('The jars are full: a good moment to collect, ship or sell.', { ms: 3200 });
   });
 
   game.on('saveFailed', () => {
@@ -529,7 +542,20 @@ async function boot() {
     if (tab) { router.navigate(tab.dataset.tab); return; }
     if (e.target.closest('[data-back]')) { router.back(); return; }
     if (e.target.closest('[data-action="settings"]')) router.navigate('settings');
+    const ex = e.target.closest('[data-explain]');
+    if (ex) explainSheet(ex.dataset.explain);
   });
+
+  /** "What is this for?" from anywhere (data-explain="seals" | "closeup" | "banners"): content/explain.js. */
+  function explainSheet(id) {
+    const x = EXPLAIN[id];
+    if (!x) return;
+    const body = x.lines.map((l) => `<p class="explain-line">${overlay.escapeHtml(l)}</p>`).join('');
+    const actions = x.go ? [{ label: x.cta, variant: 'primary', value: 'go' }, { label: 'Got it', value: null }] : [{ label: 'Got it', variant: 'primary', value: null }];
+    overlay.sheet({ title: x.title, body, actions }).then((v) => {
+      if (v === 'go' && x.go) router.navigate(x.go.screen, { ...(x.go.params || {}) });
+    });
+  }
 
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) game.suspend();

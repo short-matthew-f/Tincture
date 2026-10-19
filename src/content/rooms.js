@@ -18,7 +18,7 @@ export const ROOMS = Object.freeze([
   { id: 'mill-room', name: 'Mill Room', cost: 1500, colorsRequired: 15, phase: 1, adds: adds({ grinderSlots: 1, mixerSlots: 1 }),
     blurb: 'Stone floors and room for a second grinder and mixer.' },
   { id: 'mixing-hall', name: 'Mixing Hall', cost: 3000, colorsRequired: 18, phase: 2, adds: adds({ mixerSlots: 2, vatSlots: 3 }),
-    blurb: 'High windows, long tables and three more tall glass vats.' },
+    blurb: 'High windows, long tables and three more tall glass jars.' },
   { id: 'gallery-wing', name: 'Gallery Wing', cost: 8000, colorsRequired: 25, phase: 2, unlock: 'gallery', adds: adds({ walls: 4 }),
     blurb: 'Quiet white walls, waiting for your first paintings.' },
   { id: 'cellar', name: 'Cellar', cost: 12000, colorsRequired: 24, phase: 2, adds: adds({ vatSlots: 3, cellarMult: 4 }),

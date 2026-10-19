@@ -235,6 +235,21 @@ const WOOD_DEEP = '#5E3E28';
 
 let uid = 0;
 
+/** explainLink('seals', 'What are Seals for?'): a small underlined link; app.js opens the note (content/explain.js). */
+/**
+ * stableKey(html) -> the markup with the per-draw SVG ids (ct12, vt3, mpc7, mpp20) and their
+ * url(#...) references normalized. Screens that skip a rebuild when nothing changed compare this,
+ * not the raw string: the counters differ on every draw, which made Quests and Orders rebuild
+ * their whole body several times a second (and a tap landing mid-rebuild was lost).
+ */
+export function explainLink(id, label) {
+  return raw(`<button type="button" class="how-link explain-link" data-explain="${escapeHtml(id)}" data-tap>${escapeHtml(label)}</button>`);
+}
+
+export function stableKey(html) {
+  return String(html).replace(/\b(ct|vt|mpc|mpp)\d+\b/g, '$1');
+}
+
 export const CONTAINER_NAMES = ['', 'Vial', 'Jar', 'Bottle', 'Urn', 'Cask'];
 
 const BOTTLE_D = 'M33 14 H47 V34 C47 40 64 44 64 62 V96 A8 8 0 0 1 56 104 H24 A8 8 0 0 1 16 96 V62 C16 44 33 40 33 34 Z';
@@ -341,7 +356,7 @@ ${r < 0.97 ? `<rect x="6" y="${top.toFixed(2)}" width="54" height="7" fill="${li
   const tagSvg = label
     ? `<rect x="14" y="116" width="38" height="18" rx="3" fill="#F7F4EC" style="filter:drop-shadow(0 2px 0 rgba(42,38,34,.25))"/><text x="33" y="129" text-anchor="middle" fill="${INK}" style="font-family:'Young Serif',Georgia,serif;font-size:10px">${escapeHtml(label)}</text>`
     : '';
-  return raw(`<svg class="vat" width="${w}" height="${hgt}" viewBox="0 0 66 ${vbH}" role="img" aria-label="${escapeHtml(label || 'Vat')}, ${Math.round(r * 100)}% full" data-fill="${r.toFixed(3)}">
+  return raw(`<svg class="vat" width="${w}" height="${hgt}" viewBox="0 0 66 ${vbH}" role="img" aria-label="${escapeHtml(label || 'Jar')}, ${Math.round(r * 100)}% full" data-fill="${r.toFixed(3)}">
 <defs><clipPath id="${id}"><rect x="6" y="12" width="54" height="98" rx="14"/></clipPath></defs>
 <rect x="6" y="12" width="54" height="98" rx="14" fill="#F2F4F0" fill-opacity="0.85"/>
 ${paint}

@@ -12,6 +12,7 @@ import {
   WEEKLY_QUESTS, weeklyQuestForWeek, getWeeklyQuest, WEEKLY_SEALS,
 } from '../content/quests.js';
 import { getRegion, REGIONS } from '../content/regions.js';
+import { SOURCES_BY_ID } from '../content/sources.js';
 import { dayKey, isoWeekKey } from '../format.js';
 import { stateRng, randInt, weightedPick, pick, uuid } from '../rng.js';
 import { emit } from './bus.js';
@@ -245,10 +246,28 @@ const STEP_NEEDS = {
   batchPurified: (u) => u.phase >= 2,
 };
 
-/** Colors of a hue family she can still discover this era (catalog pages + the running event's page). */
+/**
+ * Could she find this color with what she has open now (0.3.1 audit: "Discover 5 new blues" for a
+ * player with no hunters yet)? Commission colors wait for Phase 3; wild, hunted and event colors
+ * for the map window; a mixed color needs every pigment's source, or hunters to bring them.
+ */
+function reachableNow(state, c, u) {
+  if (c.foundBy === 'commission') return u.phase >= 3;
+  if (c.tier === 'wild' || c.foundBy === 'hunt' || c.event || c.foundBy === 'event') return u.hunters;
+  if (c.foundBy === 'mix' && Array.isArray(c.recipe)) {
+    if (u.hunters) return true;
+    const owned = new Set(Object.entries(state.stations?.sources ?? {}).filter(([, v]) => (v?.level ?? 0) > 0)
+      .map(([id]) => SOURCES_BY_ID[id]?.pigment ?? id));
+    return c.recipe.every((r) => owned.has(r.pigment));
+  }
+  return true;
+}
+
+/** Colors of a hue family she can still discover this era and reach with what is open now. */
 function undiscoveredInFamily(state, family) {
   try {
-    return discoverableColors(state).filter((c) => familyOfColor(c.id) === family).length;
+    const u = unlocksOf(state);
+    return discoverableColors(state).filter((c) => familyOfColor(c.id) === family && reachableNow(state, c, u)).length;
   } catch { return 0; }
 }
 
@@ -285,6 +304,15 @@ function stepDoable(state, s, u, open) {
   return true;
 }
 
+/** Weekly steps anyone can do from day one, used in place of a step that has to wait (in this order). */
+export const WEEKLY_STAND_INS = Object.freeze([
+  Object.freeze({ event: 'boardSolved', n: 2, text: 'Solve 2 grading boards' }),
+  Object.freeze({ event: 'orderFilled', n: 4, text: 'Fill 4 orders' }),
+  Object.freeze({ event: 'upgradeBought', n: 6, text: 'Buy 6 upgrades' }),
+  Object.freeze({ event: 'colorNamed', n: 1, text: 'Name a new color' }),
+  Object.freeze({ event: 'colorDiscovered', n: 2, text: 'Discover 2 new colors' }),
+]);
+
 /** rollWeekly(state, now) — a new weekly quest each ISO week (rotation, skipping ones she can't do yet). */
 export function rollWeekly(state, now = 0) {
   const q = ensureQuests(state);
@@ -308,14 +336,27 @@ export function rollWeekly(state, now = 0) {
     }
   }
   if (!chosen) chosen = first;
+  // A step she cannot do yet (crates before the Loading Yard, a commission before Phase 3) becomes a
+  // stand-in she can do this week, so the weekly never waits on something weeks away (0.3.1 audit).
+  const u = unlocksOf(state);
+  const open = (state.hunters && state.hunters.regionsUnlocked) || [];
+  const used = new Set(chosen.steps.map((x) => x.event));
+  const steps = chosen.steps.map((s) => {
+    if (stepDoable(state, s, u, open)) return s;
+    const sub = WEEKLY_STAND_INS.find((x) => !used.has(x.event) && stepDoable(state, x, u, open));
+    if (!sub) return s;
+    used.add(sub.event);
+    return { ...sub, standIn: true };
+  });
   q.weekly = {
     id: chosen.id,
     weekKey: wk,
-    steps: chosen.steps.map((s) => ({
+    steps: steps.map((s) => ({
       event: s.event, n: s.n, text: s.text, progress: 0, done: false,
       ...(s.family ? { family: s.family } : {}),
       ...(s.region ? { region: s.region } : {}),
       ...(s.commission ? { commission: s.commission } : {}),
+      ...(s.standIn ? { standIn: true } : {}),
     })),
     done: false,
     claimed: false,

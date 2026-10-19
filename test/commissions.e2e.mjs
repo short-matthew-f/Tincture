@@ -174,7 +174,7 @@ try {
   await page.locator('[data-screen="commissions"] [data-howto] [data-action="sheet-close"]').last().click();
 
   // The vat list shows every discovered color and follows new finds live.
-  await page.evaluate(() => window.tincture.ctx.navigate('workshop', { sheet: 'vat', vat: 0 }));
+  await page.evaluate(() => window.tincture.ctx.navigate('workshop', { sheet: 'vat', vat: 2 }));
   await page.waitForSelector('[data-screen="workshop"] .ws-sheet', { timeout: 3000 });
   const vat1 = await page.textContent('[data-screen="workshop"] .ws-sheet');
   must(/Navy/.test(vat1) && /Not made yet/.test(vat1), 'the vat list shows discovered colors that are not made yet');

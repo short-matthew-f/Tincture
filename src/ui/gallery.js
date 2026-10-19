@@ -584,7 +584,7 @@ function onClick(e) {
     if (hasArchive()) {
       const hdr = [...root.querySelectorAll('.gl-sec .h2')].find((n) => n.textContent === 'Archive');
       if (hdr && hdr.scrollIntoView) hdr.scrollIntoView({ block: 'start', behavior: fx.isReducedMotion() ? 'auto' : 'smooth' });
-    } else ctx.toast('Paint a canvas and sign it to fill this wall.');
+    } else { scrollToCanvases(); ctx.toast('Pick a canvas below, paint it and sign it to fill this wall.'); }
     return;
   }
   if (a === 'start') {

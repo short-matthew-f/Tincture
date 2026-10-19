@@ -34,7 +34,7 @@
  * longer rebuilds the page (and cuts an animation off).
  */
 
-import { h, raw, button, tag, lockTag, swatch, iconSvg, safeHex, lighten, darken } from './kit.js';
+import { h, raw, button, tag, lockTag, swatch, iconSvg, safeHex, lighten, darken, explainLink } from './kit.js';
 import { unlockTag, openUnlockSheet, ensureStyles as ensureWorkshopStyles } from './workshop.js';
 import { howThisWorksHtml, markGuideSeen, isSeen } from './guide.js';
 import { dust } from './feel.js';
@@ -588,7 +588,7 @@ export function haulChips(ctx, state, haul) {
   }
   for (const p of haul.postcards || []) {
     const t = postcardTitle(ctx, p.id);
-    const extra = p.duplicate ? h` <span class="muted">+${p.seals} ${iconSvg('seal', { size: 13 })} Seals</span>` : p.setComplete ? h` <span class="muted">set complete!</span>` : '';
+    const extra = p.duplicate ? h` <span class="muted">+${p.seals} ${iconSvg('seal', { size: 13 })} Seals</span> ${explainLink('seals', 'What are Seals for?')}` : p.setComplete ? h` <span class="muted">set complete!</span>` : '';
     chips.push(h`<button type="button" class="mp-find ${p.rare ? 'is-gold' : ''}" data-action="open-card" data-card-id="${p.id}" data-tap>${iconSvg('pin', { size: 14 })}Postcard: ${t}${extra}</button>`);
   }
   if (haul.vial) chips.push(h`<span class="mp-find">${swatch(hexOfColor(ctx, haul.vial), 16)}A vial of ${nameOfColor(ctx, state, haul.vial)}</span>`);
@@ -696,7 +696,7 @@ function sheetHtml(ctx, state) {
       ? h`<span class="mp-p">${swatch(hexOfColor(ctx, w.id), 34)}<span>${nameOfColor(ctx, state, w.id)}</span></span>`
       : h`<span class="mp-sil" role="img" aria-label="A hue still to find"></span>`))}</div>
       <div class="hint">${noWilds ? 'Every hidden hue here is yours.' : `${plural(left.wilds.filter((w) => !w.known).length, 'hidden hue')} still to find.`}</div>` : h`<div class="hint">No hidden hues here, just postcards.</div>`}
-    <div class="hint">${left.left > 0 ? `${plural(left.left, 'postcard')} to find here${left.owned > 0 ? `, ${left.owned} already in your album` : ''}.` : `You have the whole set of ${left.total}. Extras turn into Seals.`}</div></div>`;
+    <div class="hint">${left.left > 0 ? `${plural(left.left, 'postcard')} to find here${left.owned > 0 ? `, ${left.owned} already in your album` : ''}.` : h`You have the whole set of ${left.total}. Extras turn into Seals. ${explainLink('seals', 'What are Seals for?')}`}</div></div>`;
 
   let cta;
   if (!open) cta = h`<div class="row center" style="justify-content:center">${lockTag(lock ? lock.text : 'Opens soon')}</div>`;

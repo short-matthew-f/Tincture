@@ -35,7 +35,7 @@ python3 -m http.server 8000      # from the repo root (or: npm run serve)
 ```sh
 npm test       # node --test "test/**/*.test.js": unit tests + the balance suite (about 17 s)
 npm run test:proto  # the craft prototypes under proto/ (proto/test/*.test.js, about 3 s)
-npm run e2e    # Playwright: shell smoke, the first-ten-minutes walk, the update flow, the drag harness
+npm run e2e    # Playwright: shell smoke, the first-ten-minutes walk, the update flow, the drag harness, commissions, the Tile Room, workshop stations
 ```
 
 The e2e scripts are not dependencies of the game. They import `playwright`
@@ -111,6 +111,15 @@ and its offline cache: https://short-matthew-f.github.io/Tincture/proto/
 
 ## Status
 
+- **0.3.1** (whole-game "does it work?" audit, docs/AUDIT-0.3.1.md): each
+  mixer and its jar are one station ("Mixer 1 makes Rose · 312 of 400 jars"),
+  with "Bigger jars" for a longer time away; tap any station, the Make / Store
+  / Ship meter, Seals, reputation stars or Close up shop for a short "what this
+  is for" note with the right button. Commissions and Renovate name their real
+  goal (the Loading Yard at 50 colors). Weekly quests swap a step she cannot do
+  yet for one she can. Quests and Orders no longer redraw under her finger.
+  Event banners hang over the workshop, the Steward says what it bought, and
+  "vats" are called jars everywhere.
 - **0.3.0** (fourth playtest): tap any quest, weekly step or the event for a
   how-to with "Take me there"; Bloom Week's bouquet orders and Neon Night's
   Era 2 preview work, and every event twist does what it says. Commissions

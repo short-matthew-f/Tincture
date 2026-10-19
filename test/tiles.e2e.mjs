@@ -80,11 +80,20 @@ let browser = null;
 
 async function tap(page, target) {
   const loc = typeof target === 'string' ? page.locator(target).first() : target;
-  await loc.waitFor({ state: 'visible', timeout: 8000 });
-  await loc.scrollIntoViewIfNeeded();
-  const b = await loc.boundingBox();
-  if (!b) throw new Error('no box for ' + target);
-  await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height / 2);
+  // A screen may redraw (same markup) between finding and scrolling; a finger would land on
+  // the redrawn button, so look it up again instead of failing.
+  for (let tries = 0; ; tries++) {
+    try {
+      await loc.waitFor({ state: 'visible', timeout: 8000 });
+      await loc.scrollIntoViewIfNeeded();
+      const b = await loc.boundingBox();
+      if (!b) throw new Error('no box for ' + target);
+      await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height / 2);
+      return;
+    } catch (e) {
+      if (tries >= 2 || !/not attached|no box/.test(String(e && e.message))) throw e;
+    }
+  }
 }
 
 const idle = (page, ms = 15000) => page.waitForFunction(() => window.__tl && !window.__tl.debugTiles().busy, null, { timeout: ms });

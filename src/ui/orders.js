@@ -22,7 +22,7 @@
  * order when it is not the first card (the `orders` guide).
  */
 
-import { h, raw, iconSvg, button, swatch, safeHex, containerSvg, CONTAINER_NAMES } from './kit.js';
+import { h, raw, iconSvg, button, swatch, safeHex, containerSvg, CONTAINER_NAMES, stableKey, explainLink } from './kit.js';
 import {
   injectStyles, payBase, coinsWord, wishWords, customerName, aboutMinutes, repChip, commissionLock, orderVeteran, SHARED_CSS,
 } from './matching.js';
@@ -280,14 +280,15 @@ function boardHtml(state) {
   const bonus = handBonus();
   const rep = Math.max(0, Math.floor(state.orders?.reputation ?? 0));
   const commCount = state.commissions?.open?.length ?? 0;
-  const lock = commissionLock(ctx, state);
+  // Not during the tour: a goal dozens of colors away is noise on her first board (audit F2).
+  const lock = state.onboarding && !state.onboarding.done ? null : commissionLock(ctx, state);
   const th = S.delivered;
   const firstMatch = open.findIndex((o) => o.kind === 'match');
-  return h`<div class="or-chips">${rep >= 1 ? repChip(rep) : h`<span class="small muted">Earn a reputation star with a Perfect match</span>`}</div>
+  return h`<div class="or-chips">${rep >= 1 ? repChip(rep) : h`<span class="small muted">Earn a reputation star with a Perfect match</span> ${explainLink('reputation', 'What are stars?')}`}</div>
 <div class="small muted" data-countdown></div>
 ${open.length > 3 ? h`<div class="or-rail" aria-label="Every order waiting"><span class="lbl">All ${open.length}:</span>${open.map((o) => h`<button type="button" class="${o.kind === 'any' ? 'any' : o.kind === 'container' ? 'jar' : o.kind === 'bouquet' ? 'bouquet' : ''}" style="${o.kind === 'any' ? '' : `background-color:${safeHex(o.target || '#C9A277')}`}" data-action="jump" data-order="${o.id}" data-tap aria-label="Show the order from ${customerName(ctx, o)}"></button>`)}</div>` : ''}
 ${th ? h`<div class="card or-thanks" data-thanks>${swatch(th.hex, 44)}<div class="grow"><div class="semi">${th.text}</div><div class="small muted">Paid <span data-paid>${th.coins}</span></div></div></div>` : ''}
-${bonus > 1 ? h`<div class="card or-badge">${iconSvg('coin', { size: 22 })}<span>Fleet is busy: +${Math.round((bonus - 1) * 100)}% for hand delivery</span></div>` : ''}
+${bonus > 1 ? h`<div class="card or-badge">${iconSvg('coin', { size: 22 })}<span>Selling is your slowest step, so orders pay +${Math.round((bonus - 1) * 100)}% right now</span></div>` : ''}
 <div class="or-actions${lock ? ' one' : ''}">
 ${lock ? '' : button(commCount ? `Commissions (${commCount})` : 'Commissions', { attrs: { 'data-action': 'commissions' } })}
 ${button('Mixing bench', { attrs: { 'data-action': 'bench' } })}
@@ -305,9 +306,10 @@ function paint(force = false) {
   if (!body) return;
   const state = stateOf();
   const html = String(boardHtml(state));
-  if (!force && html === S.html) return;
+  const key = stableKey(html);
+  if (!force && key === S.html) return;
   if (S.down) { S.dirty = true; return; }
-  S.html = html;
+  S.html = key;
   const top = body.scrollTop;
   const keep = {};
   body.querySelectorAll('[data-keepscroll]').forEach((n) => { keep[n.getAttribute('data-keepscroll')] = n.scrollTop; });

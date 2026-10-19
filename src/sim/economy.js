@@ -380,7 +380,7 @@ export function upgradeOptions(state) {
     out.push({ kind: 'mixer', index, cost: stationCost('mixer', m.level), label: `Mixer ${index + 1} to level ${m.level + 1}` });
   });
   (st.vats ?? []).forEach((v, index) => {
-    out.push({ kind: 'vat', index, cost: stationCost('vat', v.level), label: `Vat ${index + 1} to level ${v.level + 1}` });
+    out.push({ kind: 'vat', index, cost: stationCost('vat', v.level), label: `Bigger jars to level ${v.level + 1}` });
   });
   if (st.shop) out.push({ kind: 'shop', cost: stationCost('shop', st.shop.level ?? 1), label: `Shop counter to level ${(st.shop.level ?? 1) + 1}` });
   (st.fleet ?? []).forEach((v, index) => {

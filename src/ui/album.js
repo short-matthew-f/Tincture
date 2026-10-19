@@ -20,7 +20,7 @@
  * flip, and the no-op check ignores each picture's unique clip id, so a render never rebuilds under a turning card.
  */
 
-import { h, raw, backButton, button, progressBar, fadeStrip, lockTag, iconSvg, safeHex, lighten, darken } from './kit.js';
+import { h, raw, backButton, button, progressBar, fadeStrip, lockTag, iconSvg, safeHex, lighten, darken, explainLink } from './kit.js';
 import { FAMILY_HEX } from './map.js';
 import { wireLift, springIn } from './feel.js';
 
@@ -320,7 +320,7 @@ function build(state) {
           : h`<div class="hint">${plural(left, 'more card')} to finish this set: +${bonus}% haul in the ${cur.region.name} and a spot on the workshop wall.</div>`}
     </div>
     <div class="al-grid ${quiet ? 'is-quiet' : ''}">${cards.map((c) => cardHtml(state, c, sessionStart))}</div>
-    <div class="hint center">${extras > 0 ? h`Extra copies turn into ${ctx.sim.DUPLICATE_SEALS} ${iconSvg('seal', { size: 14, cls: 'al-inline' })} Seals each, so nothing is wasted.` : 'Longer trips find more cards, and gold-stamped ones come from long trips.'}</div>`;
+    <div class="hint center">${extras > 0 ? h`Extra copies turn into ${ctx.sim.DUPLICATE_SEALS} ${iconSvg('seal', { size: 14, cls: 'al-inline' })} Seals each, so nothing is wasted. ${explainLink('seals', 'What are Seals for?')}` : 'Longer trips find more cards, and gold-stamped ones come from long trips.'}</div>`;
 }
 
 function paint(state, force = false) {

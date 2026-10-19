@@ -37,7 +37,7 @@
  * starts, and claimable steps arrive softly when the page opens.
  */
 
-import { h, raw, backButton, button, progressBar, fadeStrip, iconSvg, swatch, safeHex, containerSvg, tag } from './kit.js';
+import { h, raw, backButton, button, progressBar, fadeStrip, iconSvg, swatch, safeHex, containerSvg, tag, stableKey } from './kit.js';
 import { pennantSvg } from './map.js';
 import { howThisWorksHtml, markGuideSeen, isSeen } from './guide.js';
 import { questGuide, eventGuide } from '../sim/howto.js';
@@ -363,8 +363,9 @@ function paint(state, force = false) {
   if (!bodyEl) return;
   state = state || ctx.game.state;
   const html = String(build(state));
-  if (!force && html === lastKey) { syncSeals(state); return; }
-  lastKey = html;
+  const key = stableKey(html);
+  if (!force && key === lastKey) { syncSeals(state); return; }
+  lastKey = key;
   const keep = bodyEl.scrollTop;
   bodyEl.innerHTML = html;
   bodyEl.scrollTop = keep;
@@ -627,6 +628,9 @@ function onClick(e) {
         : res.recalled ? 'Your hunters are home. Their finds are on the map.'
           : `${item.name} is running.`;
       ctx.toast(msg);
+    } else if (res && res.reason === 'seals') {
+      const more = Math.max(1, Math.ceil(fin(res.cost) - fin(ctx.game.state.seals)));
+      ctx.toast(`${fmt(more)} more Seals for this one. Finish a quest above to earn them.`);
     } else if (res && res.reason) ctx.toast(SHOP_WHY[res.reason] || 'Not right now');
     paint(ctx.game.state, true);
   } else if (a === 'reroll') {
@@ -724,7 +728,7 @@ const screen = {
     injectStyle();
     root.innerHTML = String(h`<div class="screen-head">${backButton('Back')}
       <div class="titles"><div class="title">Quests and events</div><div class="subtitle">Little goals, no rush</div>${howThisWorksHtml('quests')}</div>
-      <span class="chip qs-head-seals" data-seals-chip aria-label="Seals balance">${sealIcon(18)}<span data-seals-num class="num">0</span><span class="qs-seal-label">Seals</span></span></div>
+      <button type="button" class="chip qs-head-seals" data-seals-chip data-explain="seals" data-tap aria-label="Seals balance: what Seals are for">${sealIcon(18)}<span data-seals-num class="num">0</span><span class="qs-seal-label">Seals</span></button></div>
       <div class="screen-body" data-quests-body></div>`);
     bodyEl = root.querySelector('[data-quests-body]');
     root.addEventListener('click', onClick);

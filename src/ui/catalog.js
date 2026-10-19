@@ -463,7 +463,7 @@ function foundSheet(st, c, d, s) {
   <div class="cat-big" style="background:${safeHex(c.hex)}"></div>
   ${s.rename
     ? h`<div class="stack stack-sm"><div class="row"><input class="cat-input" data-ref="nameinput" type="text" maxlength="24" value="${name}" aria-label="New name" autocomplete="off">${button('Save', { variant: 'primary', attrs: { 'data-action': 'rename-save' } })}</div>
-        <div class="hint" data-ref="msg">${s.msg || 'Letters, spaces, apostrophes and hyphens, up to 24. Your orders and vats will use it.'}</div>
+        <div class="hint" data-ref="msg">${s.msg || 'Letters, spaces, apostrophes and hyphens, up to 24. Your orders and jars will use it.'}</div>
         <div>${button('Cancel', { small: true, attrs: { 'data-action': 'rename-cancel' } })}</div></div>`
     : h`<div class="center stack stack-sm"><div class="serif" style="font-size:22px;line-height:1.15">${name}</div><div>${button('Rename', { small: true, cls: 'cat-rename', attrs: { 'data-action': 'rename' } })}</div>${s.msg ? h`<div class="hint">${s.msg}</div>` : ''}</div>`}
   <div class="cat-ess" aria-label="${stars} of 10 Essence stars">${raw(Array.from({ length: 10 }, (_, i) => (i < stars ? STAR_ON : STAR_OFF)).join(''))}</div>
@@ -524,7 +524,7 @@ function saveName() {
   if (res && res.ok) {
     s.rename = false;
     s.msg = '';
-    ctx.toast(`Named ${res.name}. Orders and vats will use it.`);
+    ctx.toast(`Named ${res.name}. Orders and jars will use it.`);
     renderSheet();
     refresh(true);
     return;

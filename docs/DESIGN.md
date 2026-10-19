@@ -216,7 +216,7 @@ The factory is a five-step chain (Sources, Grinders, Mixers, Vats, Sales), shown
 
 ### Production chain
 
-1. **Sources** produce raw material per second. Era 1 starts with three: Madder Patch (red), Ochre Pit (yellow), Woad Vat (blue). Hunters unlock more (Saffron Field, Indigo Terrace, Murex Cove, Lapis Seam, and so on).
+1. **Sources** produce raw material per second. Era 1 starts with three: Madder Patch (red), Ochre Pit (yellow), Woad Field (blue; named Woad Vat before 0.3.1, renamed so it is not mistaken for a storage vat). Hunters unlock more (Saffron Field, Indigo Terrace, Murex Cove, Lapis Seam, and so on).
 2. **Grinders** turn raw material into pigment at a throughput cap. Mortar, then Millstone, then Roller Mill.
 3. **Mixers** combine pigments into one assigned recipe each. A recipe is available only once its color is in the catalog. Choosing what each mixer makes is the main idle decision.
 4. **Vats** store finished color. Display vats hold active colors; the shared cellar holds the rest (see Storage and shipping).

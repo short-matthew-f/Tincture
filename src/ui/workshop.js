@@ -39,19 +39,22 @@
  */
 
 import {
-  h, raw, button, iconSvg, swatch, escapeHtml, lighten, safeHex, vatSvg, tag, lockTag,
+  h, raw, button, iconSvg, swatch, escapeHtml, lighten, safeHex, vatSvg, tag, lockTag, explainLink,
 } from './kit.js';
 import defaultFx, { touchFeel } from './fx.js';
 import defaultAudio from './audio.js';
 import defaultHaptics from './haptics.js';
 import { ROOMS } from '../content/rooms.js';
 import {
-  GRINDER_KINDS_BY_ID, VEHICLES, VEHICLES_BY_ID, RUSH_COOLDOWN_MS, MIXER,
+  GRINDER_KINDS_BY_ID, VEHICLES, VEHICLES_BY_ID, RUSH_COOLDOWN_MS,
 } from '../content/stations.js';
 import { SOURCES_BY_ID } from '../content/sources.js';
 import { APPRENTICES } from '../content/apprentices.js';
 import { ROUTES_BY_ID } from '../content/routes.js';
 import { getPigment } from '../content/pigments.js';
+import { STATION_NOTES } from '../content/explain.js';
+import { getEvent } from '../content/events.js';
+import { getColor } from '../content/catalog.js';
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -189,6 +192,7 @@ export function ensureStyles() {
 .ws-chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .ws-almost-row { display: flex; align-items: center; gap: 10px; min-height: 44px; width: 100%; text-align: left; font-size: 14px; }
 .ws-almost-row .sw { width: 14px; height: 14px; border-radius: 4px; flex: 0 0 auto; }
+.ws-closeup-note { margin-top: 4px; text-align: center; font-size: 13px; color: var(--ink-soft); line-height: 1.3; }
 .ws-closed { background: var(--walnut-deep); color: var(--paper); box-shadow: 0 3px 0 rgba(0,0,0,.6); }
 .ws-sheet-wrap { position: absolute; inset: 0; z-index: 30; display: flex; align-items: flex-end; justify-content: center; }
 .ws-sheet-back { position: absolute; inset: 0; background: rgba(42, 38, 34, .45); animation: fade-in 160ms ease-out both; }
@@ -266,6 +270,23 @@ export function ensureStyles() {
 .ws-vat-head { display: flex; align-items: center; gap: 12px; }
 .ws-vat-facts { display: flex; flex-direction: column; gap: 2px; font-size: 14px; }
 .ws-use { font-size: 12px; color: var(--walnut); }
+.ws-notable { cursor: pointer; border-radius: 8px; -webkit-tap-highlight-color: transparent; }
+.ws-q { display: inline-flex; align-items: center; justify-content: center; width: 17px; height: 17px; margin-left: 2px; border-radius: 50%; vertical-align: 1px; font-size: 11px; font-weight: 700; color: var(--ink-soft); box-shadow: inset 0 0 0 1.5px #CFC6B8; }
+.ws-intro { font-size: 13px; color: var(--ink-soft); padding: 2px 0 8px; }
+.ws-jarline { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.ws-jarline + .progress { margin: 2px 0 4px; }
+.ws-nw { white-space: nowrap; }
+.ws-what { font-size: 15px; line-height: 1.4; }
+.ws-tip { font-size: 13px; line-height: 1.35; color: var(--ink-soft); }
+.ws-facts { display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
+.ws-fact { line-height: 1.3; }
+.ws-note-acts { display: flex; flex-direction: column; gap: 8px; }
+.ws-note-acts > .btn { width: 100%; min-height: 48px; }
+.ws-note-acts > .ws-buy { flex-direction: row; justify-content: center; gap: 8px; font-size: 15px; }
+.ws-note-acts > .ws-buy .l, .ws-note-acts > .ws-buy .c { font-size: 15px; }
+.ws-chipbtn { min-height: 36px; cursor: pointer; }
+.ws-pennants { cursor: pointer; }
+.ws-meter { cursor: pointer; -webkit-tap-highlight-color: transparent; }
 @media (prefers-reduced-motion: reduce) { .ws-pill[data-collect="on"], .ws-ill .ws-pulse, .ws-flash { animation: none; } }
 `;
   d.head.appendChild(s);
@@ -402,10 +423,10 @@ export function closeUpFlow(ctx, host, { target = null } = {}) {
   const fillMs = sim.storage.fillTimeMs(st);
   const lines = [];
   if (idle) lines.push(`${idle === 1 ? 'Your hunter heads' : `${idle} hunters head`} out on an overnight trip.`);
-  if (empty) lines.push(`${empty === 1 ? 'An idle mixer gets' : `${empty} idle mixers get`} a recipe.`);
-  lines.push(Number.isFinite(fillMs) && fillMs > 0
-    ? `Your vats fill in about ${waitText(ctx.format, fillMs)}.`
-    : 'Everything is set for tomorrow.');
+  if (empty) lines.push(`${empty === 1 ? 'A resting mixer gets' : `${empty} resting mixers get`} the best color you can make.`);
+  if (!idle && !empty) lines.push('Everyone is already busy, so nothing needs changing. It is a nice way to say goodnight.');
+  lines.push('Nothing pauses: the shop keeps selling and the mixers keep working while you are away.');
+  if (Number.isFinite(fillMs) && fillMs > 0) lines.push(`Your jars are full in about ${waitText(ctx.format, fillMs)}.`);
   return new Promise((resolve) => {
     let chosen = false;
     const sheet = openSheet(host, {
@@ -561,7 +582,7 @@ function mixerJarsSvg() {
   let out = '<rect x="38" y="352" width="182" height="5" rx="2" fill="#5E3E28"/>';
   for (let i = 0; i < MAX_JARS; i++) {
     const x = 44 + i * 28;
-    out += `<g class="ws-hit ws-off" data-jar="${i}" data-action="goto-mixers" data-mixer="${i}" data-tap role="button" tabindex="0" aria-label="Mixer ${i + 1}: open the mixers list">
+    out += `<g class="ws-hit ws-off" data-jar="${i}" data-action="goto-mixers" data-mixer="${i}" data-tap role="button" tabindex="0" aria-label="Mixer ${i + 1}: what it makes">
 <g filter="url(#ws-cut)"><rect x="${x + 3}" y="322" width="14" height="5" rx="2" fill="#C9A277"/>
 <rect x="${x}" y="326" width="20" height="26" rx="6" fill="#F2F4F0"/>
 <rect data-jar-fill="${i}" x="${x}" y="338" width="20" height="14" rx="6" fill="#B7BDB3"/>
@@ -617,7 +638,7 @@ const ROOM_UNLOCK = { 'gallery-wing': 'gallery', 'loading-yard': 'shipping' };
 function sceneSvg() {
   const vats = [0, 1, 2].map((i) => {
     const bx = 38 + i * 66;
-    return `<g class="ws-hit" data-action="vat-color" data-vat="${i}" data-tap role="button" tabindex="0" aria-label="Vat ${i + 1}: details">
+    return `<g class="ws-hit" data-action="vat-color" data-vat="${i}" data-tap role="button" tabindex="0" aria-label="Jar ${i + 1}: what it holds">
 <ellipse class="ws-vglow" cx="${bx + 27}" cy="196" rx="40" ry="66" fill="#FFD878"/><g data-vat-art="${i}" transform="translate(${bx - 6} 138)"></g>${hit(bx - 4, 138, 58, 112)}</g>`;
   }).join('');
   const labels = [0, 1, 2].map((i) => {
@@ -626,7 +647,7 @@ function sceneSvg() {
 <text data-vat-label="${i}" x="${cx}" y="277" text-anchor="middle" fill="#2A2622" style="font-family:'Young Serif',Georgia,serif;font-size:10px">&#8203;</text>`;
   }).join('');
   const shelfSlots = SHELF_SLOTS.map(([x, y, w, hh, rx, fill], i) => `<rect data-shelf-slot="${i}" data-default="${fill}" x="${x}" y="${y}" width="${w}" height="${hh}" rx="${rx}" fill="${fill}"/>`).join('');
-  return `<svg class="ws-svg" viewBox="0 0 390 440" role="group" aria-label="The workshop: map window, postcard board, display vats, merge shelf, mixing bench and the Gallery door">
+  return `<svg class="ws-svg" viewBox="0 0 390 440" role="group" aria-label="The workshop: map window, postcard board, the mixers' jars, merge shelf, mixing bench and the Gallery door">
 <defs><filter id="ws-cut" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="2.5" stdDeviation="0.4" style="flood-color:#2A2622;flood-opacity:0.25"/></filter></defs>
 <rect x="0" y="0" width="390" height="440" fill="#E3E6E0"/>
 <rect x="0" y="0" width="390" height="16" fill="#D3D8D0"/>
@@ -732,6 +753,7 @@ ${artYard('ws-cut')}
 <g data-veil="yard" class="ws-off"><rect x="26" y="356" width="92" height="52" rx="6" fill="#9A6A47" fill-opacity=".55"/><path d="M26 392 H118" stroke="#C9A277" stroke-width="3" stroke-dasharray="7 5" stroke-linecap="round"/></g>
 ${hit(24, 356, 96, 62)}</g>
 
+<g class="ws-hit ws-pennants ws-off" data-pennants data-action="pennants" data-tap role="button" tabindex="0" aria-label="Your event banners"></g>
 </svg>${tagPin('map', 82, 84, 112)}${tagPin('shelf', 311, 200, 104)}${tagPin('gallery', 316, 318, 100)}${tagPin('yard', 12, 412, 200, 'l')}${tagPin('commissions', 214, 120, 190)}`;
 }
 
@@ -746,7 +768,7 @@ function shell() {
     </div>
     <button type="button" class="btn-back ws-gear" data-action="settings" data-tap aria-label="Settings">${raw(GEAR)}<span id="settings-dot" class="ws-dot" hidden></span></button>
   </div>
-  <div class="meter" role="group" aria-label="Flow meter">
+  <div class="meter ws-meter" role="button" tabindex="0" aria-label="Make, Store and Ship: what they mean" data-explain="meter" data-tap>
     <div class="seg" data-seg="make"><div class="seg-label">Make</div><div class="seg-value" data-ref="segMake">-</div></div>
     <div class="seg" data-seg="store"><div class="seg-label">Store</div><div class="seg-value" data-ref="segStore">-</div></div>
     <div class="seg" data-seg="ship"><div class="seg-label">Ship</div><div class="seg-value" data-ref="segShip">-</div></div>
@@ -765,7 +787,7 @@ function shell() {
     </div>
   </div>
   <div class="ws-pane" data-pane="stations">
-    ${['sources', 'grinders', 'mixers', 'vats', 'cellar', 'shop'].map((k) => h`<div data-pw="${k}"></div>`)}
+    ${['sources', 'grinders', 'mixers', 'cellar', 'shop'].map((k) => h`<div data-pw="${k}"></div>`)}
   </div>
   <div class="ws-pane" data-pane="shipping" hidden>
     <div data-pw="fleet"></div>
@@ -809,8 +831,60 @@ function milestoneHint(level, what = 'output') {
   return m ? `Level ${m}: ${what} doubles` : '';
 }
 
-function row({ key, lead = '', title, sub = '', hint = '', extra = '', actions = '' }) {
-  return h`<div class="ws-row" data-row="${key}">${lead ? h`<div class="ws-lead">${lead}</div>` : ''}<div class="ws-main"><div class="ws-t">${title}</div>${sub ? h`<div class="ws-s">${sub}</div>` : ''}${hint ? h`<div class="ws-hint">${hint}</div>` : ''}${extra}</div>${actions ? h`<div class="ws-actions">${actions}</div>` : ''}</div>`;
+/** The title with a small "?" glued to its last word, so the mark never wraps onto a line of its own. */
+function withQ(title) {
+  const q = '<span class="ws-q" aria-hidden="true">?</span>';
+  if (typeof title !== 'string') return h`${title}${raw(q)}`;
+  const k = title.lastIndexOf(' ');
+  return h`${title.slice(0, k + 1)}<span class="ws-nw">${title.slice(k + 1)}${raw(q)}</span>`;
+}
+
+function row({ key, lead = '', title, top = '', sub = '', hint = '', extra = '', actions = '', note = '' }) {
+  // `note` ("mixer:0", "source:madder", "jars"...): tapping the row's words opens its "what this is for" note.
+  const main = note ? h`<div class="ws-main ws-notable" data-action="note" data-note="${note}" data-tap role="button" tabindex="0" aria-label="What this is for">` : raw('<div class="ws-main">');
+  return h`<div class="ws-row" data-row="${key}">${lead ? h`<div class="ws-lead">${lead}</div>` : ''}${main}<div class="ws-t">${note ? withQ(title) : title}</div>${top}${sub ? h`<div class="ws-s">${sub}</div>` : ''}${hint ? h`<div class="ws-hint">${hint}</div>` : ''}${extra}</div>${actions ? h`<div class="ws-actions">${actions}</div>` : ''}</div>`;
+}
+
+const PANEL_TITLES = { mixers: 'Mixers and their jars', shop: 'Shop counter' };
+
+/**
+ * The jar a mixer pours into (Part 2 of the 0.3.1 audit: a mixer and its jar are one station).
+ * Mechanics are unchanged: storage is one shared number; a display vat only shows a color. Jar i
+ * belongs to Mixer i (syncJars keeps vat i showing mixer i's color), so the row can say
+ * "312 of 400 jars" exactly as the glass in the scene shows it.
+ */
+function jarOf(s, i) {
+  const m = (s.stations.mixers || [])[i];
+  const v = (s.stations.vats || [])[i];
+  const colorId = m && m.recipe;
+  const jars = colorId ? num(s.stock?.[colorId]?.jars) : 0;
+  const cap = v ? eco().stationOutput('vat', v.level) : 0;
+  return { colorId, jars, cap, vat: v ? i : -1, same: colorId ? (s.stations.mixers || []).findIndex((x) => x && x.recipe === colorId) : -1 };
+}
+
+/** "312 of 400 jars", "Full: 400 jars, and 120 more in the cellar", or the cellar line for a mixer with no glass. */
+function jarLine(s, i) {
+  const j = jarOf(s, i);
+  if (!j.colorId) return 'Its jar waits for a color';
+  if (j.same >= 0 && j.same !== i) return `Pours into the same jar as Mixer ${j.same + 1} · ${fmt(Math.floor(j.jars))} jars`;
+  if (j.vat < 0) return `${fmt(Math.floor(j.jars))} jars, kept in the cellar (no glass jar for it yet)`;
+  if (j.jars > j.cap + 0.5) return `Jar full: ${fmt(j.cap)} jars, and ${fmt(Math.floor(j.jars - j.cap))} more in the cellar`;
+  return `${fmt(Math.floor(j.jars))} of ${fmt(j.cap)} jars`;
+}
+
+/** The jar (display vat) the "Bigger jars" button grows: the smallest one, so they grow together. */
+function smallestJar(s) {
+  let best = -1;
+  (s.stations.vats || []).forEach((v, i) => { if (best < 0 || num(v.level) < num(s.stations.vats[best].level)) best = i; });
+  return best;
+}
+
+/** "about 7 h" before the workshop is full, or '' when nothing is being made. */
+function awayText(s, extraRoom = 0) {
+  const r = eco().rates(s, now()).jars;
+  if (!(r > 0)) return '';
+  const free = Math.max(0, sim().storage.capacity(s).total + extraRoom - sim().storage.stockTotal(s));
+  return waitText(ctx.format, free / r * 1000);
 }
 
 function panel(key, title, summary, rows) {
@@ -847,6 +921,7 @@ function panelSpec(key, s, t) {
           const loan = st.sources[id].eventLoan ? h` <span class="tag ws-loan" data-loan="${id}">this week</span>` : '';
           return row({
             key: `source:${id}`,
+            note: `source:${id}`,
             lead: swatch(pig?.hex ?? hexOf(id), 36),
             title: h`${def?.name ?? cap1(id)}${loan}`,
             sub: L > 0 ? `Level ${L} · ${ba(out, outNext, 'a second')}` : `Found by a hunter · ${fmtRate(out)} a second when built`,
@@ -869,6 +944,7 @@ function panelSpec(key, s, t) {
           const bonus = def?.purityBonus > 0 ? ` · ${Math.round(def.purityBonus * 100)}% purer batches` : '';
           return row({
             key: `grinder:${i}`,
+            note: `grinder:${i}`,
             lead: swatch('#B9B3A8', 36),
             title: def?.name ?? 'Grinder',
             sub: `Level ${g.level} · ${ba(out, outNext, 'pigment a second')}${bonus}`,
@@ -883,47 +959,47 @@ function panelSpec(key, s, t) {
       const ms = st.mixers || [];
       const busy = ms.filter((m) => m.recipe).length;
       const mq = sim().factory.mixerPurchase(s);
+      const vs = st.vats || [];
+      const ji = smallestJar(s);
+      const jv = ji >= 0 ? vs[ji] : null;
+      const jarCap = jv ? eco().stationOutput('vat', jv.level) : 0;
+      const jarCapNext = jv ? eco().stationOutput('vat', jv.level + 1) : 0;
+      const away = awayText(s);
       return {
-        sig: ms.map((m) => `${m.recipe}:${m.level}:${m.accident ? 1 : 0}:${m.recipe ? nameOf(m.recipe) : ''}`).join(',') + `|${mq.available ? Math.round(mq.cost) : 'x'}`,
-        summary: busy === 0 ? `${ms.length} ready for a recipe` : busy === ms.length ? `${busy} busy` : `${busy} busy, ${ms.length - busy} free`,
-        rows: () => h`${ms.map((m, i) => {
+        sig: ms.map((m) => `${m.recipe}:${m.level}:${m.accident ? 1 : 0}:${m.recipe ? nameOf(m.recipe) : ''}`).join(',') + `|${mq.available ? Math.round(mq.cost) : 'x'}|${vs.map((v) => v.level).join(',')}|${away}`,
+        summary: busy === 0 ? `${ms.length} ready for a color` : busy === ms.length ? `${busy} making` : `${busy} making, ${ms.length - busy} free`,
+        rows: () => h`<div class="ws-intro">Each mixer makes one color and pours it into its jar. The shop sells from the jars.</div>${ms.map((m, i) => {
           const rate = eco().stationOutput('mixer', m.level) * pm;
           const rateNext = eco().stationOutput('mixer', m.level + 1) * pm;
           const lead = m.recipe ? swatch(hexOf(m.recipe), 36) : h`<span class="swatch is-empty" style="--size:36px" aria-hidden="true"></span>`;
-          const bar = m.recipe ? h`<div class="progress mt-1" role="progressbar" aria-label="Batch progress" data-mixer-bar="${i}"><span style="width:0%"></span></div>` : '';
+          // The bar under the jar line is the jar's own fill, in its color (the scene's glass shows the same).
+          const bar = m.recipe ? h`<div class="progress ws-jarbar" role="progressbar" aria-label="How full its jar is" data-mixer-bar="${i}"><span style="width:0%;background:${safeHex(hexOf(m.recipe))}"></span></div>` : '';
           return row({
             key: `mixer:${i}`,
-            lead: h`<button type="button" class="ws-pickbtn" data-action="mixer-recipe" data-mixer="${i}" data-tap aria-label="Choose a recipe for mixer ${i + 1}">${lead}</button>`,
-            title: m.recipe ? `Mixer ${i + 1}: ${nameOf(m.recipe)}` : `Mixer ${i + 1}: choose a recipe`,
+            note: `mixer:${i}`,
+            lead: h`<button type="button" class="ws-pickbtn" data-action="mixer-recipe" data-mixer="${i}" data-tap aria-label="Choose what mixer ${i + 1} makes">${lead}</button>`,
+            title: m.recipe ? `Mixer ${i + 1} makes ${nameOf(m.recipe)}` : `Mixer ${i + 1}: pick a color`,
             sub: `Level ${m.level} · ${ba(rate, rateNext, 'jars a second')}`,
             hint: milestoneHint(m.level),
-            extra: h`<div class="ws-use">${m.recipe ? 'Tap the swatch to change what it makes' : 'Tap the swatch to pick what it makes'}</div>${bar}${m.accident ? button('A happy accident! Tap to claim', { small: true, cls: 'ws-claim', attrs: { 'data-action': 'claim-accident', 'data-mixer': String(i) } }) : ''}`,
+            top: h`<div class="ws-jarline" data-jar-line="${i}">${jarLine(s, i)}</div>${bar}`,
+            extra: h`${m.accident ? button('A happy accident! Tap to claim', { small: true, cls: 'ws-claim', attrs: { 'data-action': 'claim-accident', 'data-mixer': String(i) } }) : ''}`,
             actions: h`${buyBtn('Level up', eco().stationCost('mixer', m.level), { 'data-action': 'buy', 'data-kind': 'mixer', 'data-index': String(i) })}${button('Rush', { small: true, cls: 'ws-rush', attrs: { 'data-action': 'rush', 'data-mixer': String(i), 'data-rush': String(i) } })}`,
           });
         })}${mq.available ? row({
           key: 'mixer:new',
           lead: h`<span class="swatch is-empty" style="--size:36px" aria-hidden="true"></span>`,
           title: 'Add a mixer',
-          sub: 'Another jar on the bench: one more recipe running at once',
+          sub: 'One more color running at once',
           actions: buyBtn('Buy', mq.cost, { 'data-action': 'buy-mixer' }),
+        }) : ''}${jv ? row({
+          key: 'jars',
+          note: 'jars',
+          lead: swatch('#CFE0E2', 36),
+          title: 'Bigger jars',
+          sub: `${vs.length === 1 ? 'Your jar holds' : 'Your smallest jar holds'} ${fmt(jarCap)} \u2192 ${fmt(jarCapNext)} jars`,
+          hint: away ? `Bigger jars mean a longer time away: about ${away} before the workshop is full now` : 'Bigger jars mean a longer time away before the workshop is full',
+          actions: buyBtn('Level up', eco().stationCost('vat', jv.level), { 'data-action': 'buy', 'data-kind': 'vat', 'data-index': String(ji) }),
         }) : ''}`,
-      };
-    }
-    case 'vats': {
-      const vs = st.vats || [];
-      let total = 0;
-      for (const v of vs) total += eco().stationOutput('vat', v.level);
-      return {
-        sig: vs.map((v) => `${v.level}:${v.color}`).join(','),
-        summary: `${vs.length} vats · ${fmt(total)} jars`,
-        rows: () => vs.map((v, i) => row({
-          key: `vat:${i}`,
-          lead: h`<button type="button" class="ws-pickbtn" data-action="vat-color" data-vat="${i}" data-tap aria-label="Choose the color shown in vat ${i + 1}">${v.color ? swatch(hexOf(v.color), 36) : h`<span class="swatch is-empty" style="--size:36px" aria-hidden="true"></span>`}</button>`,
-          title: `Vat ${i + 1}${v.color ? `: ${nameOf(v.color)}` : ''}`,
-          sub: `Level ${v.level} · holds ${fmt(eco().stationOutput('vat', v.level))} \u2192 ${fmt(eco().stationOutput('vat', v.level + 1))} jars`,
-          hint: milestoneHint(v.level, 'capacity'),
-          actions: buyBtn('Level up', eco().stationCost('vat', v.level), { 'data-action': 'buy', 'data-kind': 'vat', 'data-index': String(i) }),
-        })),
       };
     }
     case 'cellar': {
@@ -935,10 +1011,11 @@ function panelSpec(key, s, t) {
         summary: `Level ${lvl}`,
         rows: () => row({
           key: 'cellar',
+          note: 'cellar',
           lead: swatch('#6A4630', 36),
           title: 'Cellar',
           sub: `Level ${lvl} · holds ${fmt(cap.cellar)} \u2192 ${fmt(capNext.cellar)} jars`,
-          hint: 'Shared storage for everything not in a display vat',
+          hint: 'Extra room beyond the jars: a longer time away',
           actions: buyBtn('Level up', eco().stationCost('cellar', lvl), { 'data-action': 'buy', 'data-kind': 'cellar' }),
         }),
       };
@@ -950,6 +1027,7 @@ function panelSpec(key, s, t) {
         summary: `Level ${L}`,
         rows: () => row({
           key: 'shop',
+          note: 'shop',
           lead: swatch('#C9A277', 36),
           title: 'Shop counter',
           sub: `Level ${L} · sells ${ba(eco().stationOutput('shop', L), eco().stationOutput('shop', L + 1), 'jars a second')} · prices +${Math.round((eco().shopPriceBonus(s) - 1) * 100)}% \u2192 +${Math.round((eco().shopPriceBonus({ stations: { shop: { level: L + 1 } } }) - 1) * 100)}%`,
@@ -975,6 +1053,7 @@ function panelSpec(key, s, t) {
             const capJ = eco().vehicleCapacity(v);
             return row({
               key: `fleet:${i}`,
+              note: `vehicle:${i}`,
               lead: swatch('#9A6A47', 36),
               title: `${def?.name ?? 'Vehicle'} · Level ${v.level}`,
               sub: h`<span data-veh-status="${i}">${busy ? 'Out' : 'Idle'}</span> · holds ${fmt(capJ)} \u2192 ${fmt(eco().vehicleCapacity({ ...v, level: v.level + 1 }))} jars`,
@@ -984,15 +1063,32 @@ function panelSpec(key, s, t) {
             });
           });
           const catalog = VEHICLES.filter((v) => v.era === (s.era ?? 1));
-          const shop = slots > 0 ? catalog.map((v) => row({
-            key: `veh:${v.id}`,
-            lead: swatch('#C9A277', 36),
-            title: v.name,
-            sub: `Holds ${fmt(v.capacity)} jars · ${waitText(ctx.format, v.tripMs)} round trip`,
-            hint: v.blurb,
-            actions: buyBtn(fl.length < slots ? 'Buy' : 'Swap in', v.cost, { 'data-action': 'buy-vehicle', 'data-kind': v.id }),
-          })) : [row({ key: 'veh:none', title: 'Build the Loading Yard', sub: 'It gives you room for carts and wagons.' })];
-          return h`${owned}<div class="ws-sub-title">Vehicles</div>${shop}`;
+          // With the yard full, buying swaps out the smallest cart at home (shipping.buyVehicle): say which (audit F8).
+          const full = fl.length >= slots;
+          let swapI = -1;
+          if (full) {
+            fl.forEach((v, i) => {
+              if (num(v.arrivesAt) > 0 || v.cargo) return;
+              if (swapI < 0 || eco().vehicleCapacity(v) < eco().vehicleCapacity(fl[swapI])) swapI = i;
+            });
+          }
+          const target = swapI >= 0 ? fl[swapI] : null;
+          const shop = slots > 0 ? catalog.map((v) => {
+            let actions = buyBtn(full ? 'Swap in' : 'Buy', v.cost, { 'data-action': 'buy-vehicle', 'data-kind': v.id });
+            let hint = v.blurb;
+            if (full && !target) { actions = tag('All out', { icon: null }); hint = 'Every cart is on the road. Swap one in when a cart is home.'; }
+            else if (full && target.kind === v.id) { actions = tag('In your yard', { icon: 'check' }); hint = `${v.blurb} Your smallest cart at home is already one.`; }
+            else if (full) hint = `Swaps out your ${VEHICLES_BY_ID[target.kind]?.name ?? 'cart'} (level ${target.level}), your smallest one at home. The new one starts at level 1.`;
+            return row({
+              key: `veh:${v.id}`,
+              lead: swatch('#C9A277', 36),
+              title: v.name,
+              sub: `Holds ${fmt(v.capacity)} jars · ${waitText(ctx.format, v.tripMs)} round trip`,
+              hint,
+              actions,
+            });
+          }) : [row({ key: 'veh:none', title: 'Build the Loading Yard', sub: 'It gives you room for carts and wagons.' })];
+          return h`${owned}<div class="ws-sub-title">${full ? 'Bigger vehicles' : 'Vehicles'}</div>${shop}`;
         },
       };
     }
@@ -1168,8 +1264,60 @@ function springFill(svg, fromRatio, toRatio) {
   });
 }
 
+/** Event banners she has earned (state.cosmetics "<event>-banner"), oldest first: [{id, name, hex}]. */
+function earnedBanners(s) {
+  return (s.cosmetics || []).filter((c) => /-banner$/.test(c)).map((c) => {
+    const ev = getEvent(c.replace(/-banner$/, ''));
+    if (!ev) return null;
+    const col = getColor(`${ev.id}-1`);
+    return { id: ev.id, name: ev.name, hex: col ? col.hex : '#B8433A' };
+  }).filter(Boolean);
+}
+
+/** Bunting along the top of the scene: one pennant per earned banner, on a string from wall to wall. */
+function pennantsSvg(list) {
+  if (!list.length) return '';
+  const n = list.length;
+  const x0 = 158;
+  const x1 = 232;
+  const step = n > 1 ? (x1 - x0) / (n - 1) : 0;
+  const flags = list.map((b, i) => {
+    const x = n > 1 ? x0 + i * step : (x0 + x1) / 2;
+    const y = 6 + Math.sin((i + 0.5) / n * Math.PI) * 6;
+    return `<path d="M${(x - 8).toFixed(1)} ${y.toFixed(1)} L${(x + 8).toFixed(1)} ${y.toFixed(1)} L${x.toFixed(1)} ${(y + 18).toFixed(1)} Z" fill="${safeHex(b.hex)}" stroke="#2A2622" stroke-width="1.2" stroke-linejoin="round"/>`;
+  }).join('');
+  return `<path d="M146 4 Q195 ${n > 1 ? 18 : 12} 244 4" fill="none" stroke="#5E3E28" stroke-width="1.6"/><g filter="url(#ws-cut)">${flags}</g><rect class="ws-focus" x="146" y="0" width="98" height="30" rx="6"/>`;
+}
+
+function openBannerSheet() {
+  closeSheet();
+  const list = earnedBanners(S());
+  const api = openSheet(root, {
+    title: 'Your event banners',
+    html: String(h`<div class="ws-what">A keepsake from each weekly event: step 6 of its track hangs a banner over your workshop for good.</div>
+${list.map((b) => h`<div class="ws-pick" style="cursor:default">${swatch(b.hex, 30)}<span class="grow"><span class="pt">${b.name}</span><br><span class="ps">Earned on its event track</span></span></div>`)}
+${button('See this week\'s event', { block: true, attrs: { 'data-action': 'banner-event' } })}`),
+    onAction(name) { if (name === 'banner-event') { closeSheet(); ctx.navigate('quests', { section: 'event' }); } },
+    onClose() { if (sheet && sheet.api === api) sheet = null; },
+  });
+  sheet = { api, kind: 'banners' };
+}
+
 function patchScene(s, t) {
   const sm = sim();
+
+  // Event banners she has earned hang as bunting over the bench (audit F6).
+  const pg = root.querySelector('[data-pennants]');
+  if (pg) {
+    const list = earnedBanners(s);
+    const sig = list.map((b) => b.id).join(',');
+    if (pg.dataset.sig !== sig) {
+      pg.dataset.sig = sig;
+      pg.innerHTML = pennantsSvg(list);
+      pg.classList.toggle('ws-off', !list.length);
+      pg.setAttribute('aria-label', list.length ? `Your event banners: ${list.map((b) => b.name).join(', ')}` : 'Your event banners');
+    }
+  }
 
   // Display vats.
   for (let i = 0; i < 3; i++) {
@@ -1242,7 +1390,7 @@ function patchScene(s, t) {
     const hex = m.recipe ? hexOf(m.recipe) : 'none';
     const want = hex === 'none' ? 'transparent' : hex;
     if (fill.getAttribute('fill') !== want) fill.setAttribute('fill', want);
-    g.setAttribute('aria-label', `Mixer ${i + 1}${m.recipe ? `: ${nameOf(m.recipe)}` : ': resting'}. Open the mixers list`);
+    g.setAttribute('aria-label', `Mixer ${i + 1}${m.recipe ? ` makes ${nameOf(m.recipe)}` : ': resting'}. What it is for`);
   });
   if (jarCount !== null && mixers.length > jarCount) {
     // A new mixer jar springs into the scene with weight (the heavy spring: a cask landing on a shelf).
@@ -1329,18 +1477,21 @@ function patchAlmost(s, t) {
 }
 
 function patchPanels(s, t) {
-  for (const key of ['sources', 'grinders', 'mixers', 'vats', 'cellar', 'shop', 'fleet']) {
+  for (const key of ['sources', 'grinders', 'mixers', 'cellar', 'shop', 'fleet']) {
     const wrap = root.querySelector(`[data-pw="${key}"]`);
     const spec = panelSpec(key, s, t);
     if (!spec) { wrap.hidden = true; sigs[`p:${key}`] = 'none'; continue; }
     wrap.hidden = false;
-    setSection(`p:${key}`, wrap, `${openPanels.has(key) ? 1 : 0}|${spec.sig}`, () => panel(key, cap1(key), spec.summary, spec.rows));
+    setSection(`p:${key}`, wrap, `${openPanels.has(key) ? 1 : 0}|${spec.sig}`, () => panel(key, PANEL_TITLES[key] || cap1(key), spec.summary, spec.rows));
   }
-  // Live bits: batch progress, rush cooldown, vehicle status.
+  // Live bits: batch progress, jar level, rush cooldown, vehicle status.
   (s.stations.mixers || []).forEach((m, i) => {
+    const jl = root.querySelector(`[data-jar-line="${i}"]`);
+    if (jl) { const txt = jarLine(s, i); if (jl.textContent !== txt) jl.textContent = txt; }
     const bar = root.querySelector(`[data-mixer-bar="${i}"] > span`);
     if (bar) {
-      const w = `${(clamp01(num(m.progress) / MIXER.batchJars) * 100).toFixed(1)}%`;
+      const j = jarOf(s, i);
+      const w = `${(clamp01(j.cap > 0 ? j.jars / j.cap : 0) * 100).toFixed(1)}%`;
       if (bar.style.width !== w) bar.style.width = w;
     }
     const rb = root.querySelector(`[data-rush="${i}"]`);
@@ -1429,10 +1580,11 @@ function patchApprentices(s) {
   setSection('apprentices', root.querySelector('[data-sec="apprentices"]'), sig, () => {
     if (!owned.length && !avail.length) return '';
     return h`<div class="card"><div class="card-title">Apprentices</div>
-${owned.length ? h`<div class="ws-chip-row">${owned.map((a) => h`<span class="chip">${iconSvg('check', { size: 14 })}${a.name}</span>`)}</div>` : ''}
-${owned.some((a) => a.id === 'steward') ? h`<div class="ws-switch-row"><div class="grow"><div class="semi">Steward buys upgrades</div><div class="hint">Picks the cheapest fix for your weakest step.</div></div><button type="button" class="switch" role="switch" aria-checked="${s.stewardOn ? 'true' : 'false'}" aria-label="Steward" data-action="steward-toggle" data-tap></button></div>` : ''}
+${owned.length ? h`<div class="ws-chip-row">${owned.map((a) => h`<button type="button" class="chip ws-chipbtn" data-action="note" data-note="apprentice:${a.id}" data-tap aria-label="${a.name}: what they do">${iconSvg('check', { size: 14 })}${a.name}</button>`)}</div>` : ''}
+${owned.some((a) => a.id === 'steward') ? h`<div class="ws-switch-row"><div class="grow ws-notable" data-action="note" data-note="steward" data-tap role="button" tabindex="0"><div class="semi">Steward buys upgrades<span class="ws-q" aria-hidden="true">?</span></div><div class="hint">${s.stewardOn ? 'On: it buys the cheapest fix for your slowest step.' : 'Off: you choose every upgrade.'}</div></div><button type="button" class="switch" role="switch" aria-checked="${s.stewardOn ? 'true' : 'false'}" aria-label="Steward" data-action="steward-toggle" data-tap></button></div>` : ''}
 ${avail.map((a) => row({
     key: `apprentice:${a.id}`,
+    note: `apprentice:${a.id}`,
     title: a.name,
     sub: a.blurb,
     actions: a.cost > 0 ? buyBtn('Hire', a.cost, { 'data-action': 'buy-apprentice', 'data-id': a.id }) : button('Hire (free)', { small: true, attrs: { 'data-action': 'buy-apprentice', 'data-id': a.id } }),
@@ -1449,15 +1601,15 @@ function patchCloseUp(s) {
   const sig = `${on ? 1 : 0}|${closedInfo ? 1 : 0}`;
   setSection('closeup', root.querySelector('[data-sec="closeup"]'), sig, () => {
     if (!on) return '';
-    return button(closedInfo ? '' : 'Close up shop', {
+    return h`${button(closedInfo ? '' : 'Close up shop', {
       variant: 'wood', block: true, cls: `tall ${closedInfo ? 'ws-closed' : ''}`,
       attrs: { 'data-action': closedInfo ? 'close-up-reopen' : 'close-up', 'data-coach': 'close-up', 'data-closeup-btn': '1' },
-    });
+    })}<div class="ws-closeup-note">${closedInfo ? 'Tap it again whenever you are back.' : 'For when you put the phone down: hunters head out, resting mixers get a color.'} ${explainLink('closeup', 'What does it do?')}</div>`;
   });
   const b = root.querySelector('[data-closeup-btn]');
   if (b && closedInfo) {
     const fill = sim().storage.fillTimeMs(s);
-    const label = Number.isFinite(fill) && fill > 0 ? `Shop closed. Vats fill in ${waitText(ctx.format, fill)}` : 'Shop closed. Everything is set for tomorrow';
+    const label = Number.isFinite(fill) && fill > 0 ? `All set for tonight. Jars full in about ${waitText(ctx.format, fill)}` : 'All set for tonight';
     if (b.textContent !== label) b.textContent = label;
   }
 }
@@ -1467,6 +1619,27 @@ function patchCloseUp(s) {
 // ---------------------------------------------------------------------------
 
 let assigning = false;
+
+/**
+ * Jar i shows Mixer i's color (display only: vat.color picks which stock a glass shows, storage is shared).
+ * Runs every render and acts only when a working mixer's jar shows something else.
+ */
+function syncJars(s) {
+  if (assigning) return;
+  const vats = s.stations.vats || [];
+  const mixers = s.stations.mixers || [];
+  const fix = [];
+  for (let i = 0; i < Math.min(vats.length, mixers.length); i++) {
+    const r = mixers[i] && mixers[i].recipe;
+    if (r && vats[i].color !== r) fix.push([i, r]);
+  }
+  if (!fix.length) return;
+  assigning = true;
+  try {
+    act((st) => { for (const [i, r] of fix) sim().factory.setVatColor(st, { vat: i, colorId: r }); });
+  } finally { assigning = false; }
+}
+
 function autoAssignVats(s) {
   if (assigning) return;
   const vats = s.stations.vats || [];
@@ -1498,6 +1671,7 @@ function renderAll(state) {
   renderMemo.has = false;
   try {
     const t = now();
+    syncJars(s);
     autoAssignVats(s);
     const c = { meter: eco().flowMeter(s, t), cap: sim().storage.capacity(s) };
     patchHead(s, t, c);
@@ -1512,6 +1686,8 @@ function renderAll(state) {
     patchCloseUp(s);
     patchAfford(s);
     refreshVatSheet();
+    refreshNoteSheet();
+    refreshRecipeSheet();
   } catch (e) {
     console.error('workshop render failed', e);
   } finally {
@@ -1565,8 +1741,14 @@ export function unlockTag(c, id, { cls = '' } = {}) {
   const info = UNLOCK_INFO[id] || {};
   let main;
   if (!u.revealed) {
-    const goal = u.colorsLeft > 0 ? moreColors(u.colorsLeft) : id === 'commissions' ? 'after the Loading Yard' : 'soon';
-    main = lockTag(`${info.short || u.name}: ${u.revealColors} colors · ${fmt(u.cost)} coins — ${goal}`, { cls });
+    if (!u.phaseOk) {
+      // Commissions wait for the Loading Yard, which asks more colors than they do (audit F1): name the real goal.
+      const g = sim().factory.phaseGoal(S(), u.phase);
+      main = lockTag(`${info.short || u.name}: ${fmt(u.cost)} coins, after the ${g.room.name}`, { cls });
+    } else {
+      const goal = u.colorsLeft > 0 ? moreColors(u.colorsLeft) : 'soon';
+      main = lockTag(`${info.short || u.name}: ${u.revealColors} colors · ${fmt(u.cost)} coins — ${goal}`, { cls });
+    }
   } else {
     const isNext = nextUnlockId(nextOf(S(), now())) === id;
     main = button(`Open ${UNLOCK_LABEL[id] || u.name} for ${fmt(u.cost)}`, {
@@ -1604,7 +1786,9 @@ export function openUnlockSheet(c, id, { host = null } = {}) {
     const st = unlockStatus(id) || u;
     const waiting = id === 'shelf' ? Math.max(0, Math.floor(num(S().shelf && S().shelf.waiting))) : 0;
     const more = Math.max(1, Math.ceil(num(st.cost) - num(S().coins)));
-    const goal = st.colorsLeft > 0 ? `${moreColors(st.colorsLeft)} to open it` : id === 'commissions' ? 'Opens after the Loading Yard' : 'Not ready to open yet';
+    const pg = !st.phaseOk ? sim().factory.phaseGoal(S(), st.phase) : null;
+    const goal = pg ? (pg.hasRoom ? `${moreColors(pg.colorsLeft)} to open it` : `Opens after the ${pg.room.name} (${pg.room.colorsRequired} colors, ${fmt(pg.room.cost)} coins)`)
+      : st.colorsLeft > 0 ? `${moreColors(st.colorsLeft)} to open it` : 'Not ready to open yet';
     const body = h`<div class="ws-ill">${illustrationSvg(info)}</div>
 <div class="ws-unlock-name">${st.name}</div>
 <div class="ws-unlock-says">${info.says}</div>
@@ -1903,8 +2087,23 @@ export function openRecipeSheet(c, { mixer = null, colorId = null, onDone = null
     },
     onClose() { if (sheet && sheet.api === api) sheet = null; },
   });
-  sheet = { api, kind: 'recipe' };
+  sheet = { api, kind: 'recipe', mixer, colorId, byColor: !!byColor, sig: recipeSheetSig() };
   return api;
+}
+
+/** What changes the recipe list: the colors she can mix (a find while it is open shows up at once). */
+function recipeSheetSig() {
+  const s = S();
+  return sim().discoveredColors(s).filter((c) => sim().factory.canMix(s, c.id)).map((c) => c.id).join(',')
+    + `|${(s.stations.mixers || []).map((m) => m.recipe).join(',')}`;
+}
+
+function refreshRecipeSheet() {
+  if (!sheet || sheet.kind !== 'recipe' || pointerDown) return;
+  const sig = recipeSheetSig();
+  if (sig === sheet.sig) return;
+  sheet.sig = sig;
+  sheet.api.set(sheet.byColor ? mixerPickerHtml(sheet.colorId) : recipeSheetHtml(sheet.mixer, sheet.colorId));
 }
 
 /**
@@ -1932,6 +2131,188 @@ function assignFromCatalog(colorId) {
   openRecipeSheet(ctx, { colorId });
 }
 
+// --- station notes ("what this is for") -------------------------------------------------------------
+
+/** A tap on a scene jar: its mixer's note when a mixer pours into it, else the spare-jar chooser. */
+function openJar(vi) {
+  const m = (S().stations.mixers || [])[vi];
+  if (m && m.recipe) openStationNote(`mixer:${vi}`);
+  else openVatSheet(vi);
+}
+
+const noteFact = (txt, live = '') => h`<div class="ws-fact"${live ? raw(` data-live="${escapeHtml(live)}"`) : ''}>${txt}</div>`;
+
+/**
+ * The note's body: what the station is for (content/explain.js), its live facts, and what she can do here.
+ * Buttons carry the screen's own data-actions; handleAction runs them and the note redraws.
+ */
+function noteHtml(note) {
+  const s = S();
+  const [kind, key] = String(note || '').split(':');
+  const st = s.stations;
+  const pm = eco().productionMultiplier(s, now());
+  const text = STATION_NOTES[kind === 'vehicle' ? 'vehicle' : kind] || null;
+  let head = '';
+  let facts = [];
+  let acts = [];
+  if (kind === 'source') {
+    const L = num(st.sources?.[key]?.level);
+    const def = SOURCES_BY_ID[key];
+    const pig = getPigment(def?.pigment ?? key);
+    head = h`${swatch(pig?.hex ?? hexOf(key), 44)}<div class="semi">${def?.name ?? cap1(key)}</div>`;
+    facts = [L > 0 ? `Level ${L}: ${fmtRate(eco().stationOutput('source', L, key) * pm)} ${pig?.name ?? 'pigment'} a second` : 'Not built yet'];
+    acts = [buyBtn(L > 0 ? 'Level up' : 'Build', eco().stationCost('source', L, key), { 'data-action': 'buy', 'data-kind': 'source', 'data-id': key })];
+  } else if (kind === 'grinder') {
+    const i = Number(key) || 0;
+    const g = (st.grinders || [])[i];
+    if (!g) return '';
+    const def = GRINDER_KINDS_BY_ID[g.kind];
+    const nx = def?.next ? GRINDER_KINDS_BY_ID[def.next] : null;
+    head = h`${swatch('#B9B3A8', 44)}<div class="semi">${def?.name ?? 'Grinder'}</div>`;
+    facts = [`Level ${g.level}: ${fmtRate(eco().stationOutput('grinder', g.level, g.kind) * pm)} pigment a second${def?.purityBonus > 0 ? `, ${Math.round(def.purityBonus * 100)}% purer batches` : ''}`];
+    acts = [buyBtn('Level up', eco().stationCost('grinder', g.level), { 'data-action': 'buy', 'data-kind': 'grinder', 'data-index': String(i) })];
+    if (nx) acts.push(buyBtn(`Upgrade to ${nx.name}`, def.upgradeCost, { 'data-action': 'buy-grinder-kind', 'data-index': String(i) }));
+  } else if (kind === 'mixer') {
+    const i = Number(key) || 0;
+    const m = (st.mixers || [])[i];
+    if (!m) return '';
+    head = h`${m.recipe ? swatch(hexOf(m.recipe), 44) : h`<span class="swatch is-empty" style="--size:44px" aria-hidden="true"></span>`}<div class="semi">${m.recipe ? `Mixer ${i + 1} makes ${nameOf(m.recipe)}` : `Mixer ${i + 1} is resting`}</div>`;
+    facts = [
+      noteFact(jarLine(s, i), `jar:${i}`),
+      `Level ${m.level}: ${fmtRate(eco().stationOutput('mixer', m.level) * pm)} jars a second`,
+    ];
+    if (m.recipe) facts.push(useLine(m.recipe));
+    acts = [
+      button(m.recipe ? 'Change the color' : 'Pick a color', { variant: m.recipe ? 'paper' : 'primary', attrs: { 'data-action': 'mixer-recipe', 'data-mixer': String(i) } }),
+      buyBtn('Level up', eco().stationCost('mixer', m.level), { 'data-action': 'buy', 'data-kind': 'mixer', 'data-index': String(i) }),
+    ];
+    if (m.recipe) {
+      const readyAt = num(m.rushedAt) + RUSH_COOLDOWN_MS;
+      const cooling = num(m.rushedAt) > 0 && now() < readyAt;
+      acts.push(button(cooling ? `Rush again in ${waitText(ctx.format, readyAt - now())}` : 'Rush a batch now', { attrs: { 'data-action': 'rush', 'data-mixer': String(i), 'aria-disabled': cooling ? 'true' : 'false' } }));
+    }
+    if (m.recipe) {
+      const keep = keepOf(m.recipe);
+      facts.push(h`<div class="ws-pick" style="cursor:default"><span class="grow"><span class="pt">Keep ${fmt(keep)} ${keep === 1 ? 'jar' : 'jars'} back</span><br><span class="ps">The shop sells only above this</span></span>
+<span class="ws-stepper"><button type="button" class="ws-step" data-action="keep-step" data-color="${m.recipe}" data-delta="-${KEEP_STEP}" data-tap aria-label="Keep fewer jars" aria-disabled="${keep <= 0 ? 'true' : 'false'}">&minus;</button><span class="n num">${fmt(keep)}</span><button type="button" class="ws-step" data-action="keep-step" data-color="${m.recipe}" data-delta="${KEEP_STEP}" data-tap aria-label="Keep more jars">+</button></span></div>`);
+    }
+  } else if (kind === 'jars') {
+    const ji = smallestJar(s);
+    const v = (st.vats || [])[ji];
+    if (!v) return '';
+    const cap = sim().storage.capacity(s);
+    const delta = eco().stationOutput('vat', v.level + 1) - eco().stationOutput('vat', v.level);
+    const away = awayText(s);
+    const away2 = awayText(s, delta);
+    head = h`${swatch('#CFE0E2', 44)}<div class="semi">${(st.vats || []).length} glass jars</div>`;
+    facts = [
+      `Room for ${fmt(cap.total)} jars in all: ${fmt(cap.display)} in the glass jars and ${fmt(cap.cellar)} in the cellar`,
+      noteFact(sim().storage.isFull(s) ? 'Everything is full: the mixers rest until something sells or ships' : away ? `About ${away} before the workshop is full` : 'Pick a color for a mixer and the jars start to fill', 'away'),
+      away && away2 && away !== away2 ? `One size bigger: about ${away2}` : `One size bigger: ${fmt(delta)} more jars of room`,
+    ];
+    acts = [buyBtn('Bigger jars', eco().stationCost('vat', v.level), { 'data-action': 'buy', 'data-kind': 'vat', 'data-index': String(ji) })];
+  } else if (kind === 'cellar') {
+    const lvl = num(s.cellarLevel, 1);
+    const cap = sim().storage.capacity(s);
+    head = h`${swatch('#6A4630', 44)}<div class="semi">Cellar, level ${lvl}</div>`;
+    facts = [`Holds ${fmt(cap.cellar)} jars, beside ${fmt(cap.display)} in the glass jars`];
+    acts = [buyBtn('Level up', eco().stationCost('cellar', lvl), { 'data-action': 'buy', 'data-kind': 'cellar' })];
+  } else if (kind === 'shop') {
+    const L = num(st.shop.level, 1);
+    const pending = Math.floor(num(s.pendingCollect));
+    head = h`${swatch('#C9A277', 44)}<div class="semi">Shop counter, level ${L}</div>`;
+    facts = [`Sells ${fmtRate(eco().stationOutput('shop', L))} jars a second, prices +${Math.round((eco().shopPriceBonus(s) - 1) * 100)}%`,
+      s.apprentices?.errandRunner ? 'Your Errand Runner brings the till to you.' : pending >= 1 ? `${fmt(pending)} coins wait in the till` : 'The till is empty for now'];
+    acts = [buyBtn('Level up', eco().stationCost('shop', L), { 'data-action': 'buy', 'data-kind': 'shop' })];
+    if (pending >= 1) acts.unshift(button(`Collect ${fmt(pending)}`, { variant: 'primary', attrs: { 'data-action': 'collect' } }));
+  } else if (kind === 'vehicle') {
+    const i = Number(key) || 0;
+    const v = (st.fleet || [])[i];
+    if (!v) return '';
+    const def = VEHICLES_BY_ID[v.kind];
+    const busy = num(v.arrivesAt) > 0;
+    head = h`${swatch('#9A6A47', 44)}<div class="semi">${def?.name ?? 'Cart'}, level ${v.level}</div>`;
+    facts = [`Holds ${fmt(eco().vehicleCapacity(v))} jars · ${waitText(ctx.format, eco().vehicleTripMs(v))} round trip`, busy ? `On the road, home in ${waitText(ctx.format, v.arrivesAt - now())}` : 'Home, ready to load'];
+    acts = [];
+    if (!busy) acts.push(button('Ship', { variant: 'primary', attrs: { 'data-action': 'fleet-ship', 'data-vehicle': String(i) } }));
+    acts.push(buyBtn('Level up', eco().stationCost('vehicle', v.level, v.kind), { 'data-action': 'buy', 'data-kind': 'fleet', 'data-index': String(i) }));
+  } else if (kind === 'steward') {
+    head = h`${swatch('#7B5236', 44)}<div class="semi">The Steward is ${s.stewardOn ? 'on' : 'off'}</div>`;
+    acts = [button(s.stewardOn ? 'Turn the Steward off' : 'Turn the Steward on', { variant: s.stewardOn ? 'paper' : 'primary', attrs: { 'data-action': 'steward-toggle' } })];
+  } else if (kind === 'apprentice') {
+    const ap = APPRENTICES.find((x) => x.id === key);
+    if (!ap) return '';
+    const owned = !!s.apprentices?.[ap.id];
+    head = h`${swatch('#7B5236', 44)}<div class="semi">${ap.name}${owned ? ' works here' : ''}</div>`;
+    facts = [ap.blurb];
+    if (!owned && ap.phase <= (s.phase ?? 1)) acts = [ap.cost > 0 ? buyBtn('Hire', ap.cost, { 'data-action': 'buy-apprentice', 'data-id': ap.id }) : button('Hire (free)', { attrs: { 'data-action': 'buy-apprentice', 'data-id': ap.id } })];
+  } else return '';
+  return h`<div class="ws-vat-head">${head}</div>
+${text ? h`<div class="ws-what">${text.what}</div>` : ''}
+${facts.length ? h`<div class="ws-facts">${facts.map((f) => (typeof f === 'string' ? noteFact(f) : f))}</div>` : ''}
+${text && text.tip ? h`<div class="ws-tip">${text.tip}</div>` : ''}
+${acts.length ? h`<div class="ws-note-acts">${acts}</div>` : ''}`;
+}
+
+/** What makes a note redraw (never the live jar counts, so a tap never lands on a redraw). */
+function noteSig(note) {
+  const s = S();
+  const st = s.stations;
+  const t = now();
+  return [note, JSON.stringify(st.sources), (st.grinders || []).map((g) => `${g.kind}${g.level}`).join(), (st.mixers || []).map((m) => `${m.recipe}${m.level}${num(m.rushedAt) + RUSH_COOLDOWN_MS > t ? 'c' : ''}`).join(),
+    (st.vats || []).map((v) => v.level).join(), s.cellarLevel, st.shop?.level, (st.fleet || []).map((v) => `${v.kind}${v.level}${num(v.arrivesAt) > 0 ? 'o' : ''}`).join(),
+    s.stewardOn ? 1 : 0, JSON.stringify(s.apprentices), JSON.stringify(s.keep || {}), Math.floor(num(s.pendingCollect)) >= 1 ? 1 : 0].join('|');
+}
+
+/**
+ * openStationNote(note): the short "what this is for" sheet for any station ("source:madder", "grinder:0",
+ * "mixer:1", "jars", "cellar", "shop", "vehicle:0", "steward", "apprentice:dispatcher").
+ */
+function openStationNote(note) {
+  closeSheet();
+  const html = noteHtml(note);
+  if (!html) return;
+  const [kind] = String(note).split(':');
+  const text = STATION_NOTES[kind];
+  const api = openSheet(root, {
+    title: text ? text.title : 'What this is for',
+    html: String(html),
+    onAction(name, el) {
+      if (name === 'keep-step') {
+        const colorId = el.dataset.color;
+        const next = Math.max(0, Math.min(Math.floor(sim().storage.capacity(S()).total), keepOf(colorId) + Number(el.dataset.delta)));
+        act(sim().storage.setKeep, { colorId, jars: next });
+        audio().tick();
+      } else if (name === 'mixer-recipe' || name === 'fleet-ship') {
+        handleAction(name, el); // these open their own sheet in place of the note
+        return;
+      } else handleAction(name, el);
+      if (sheet && sheet.kind === 'note' && sheet.api === api) { sheet.sig = noteSig(note); api.set(noteHtml(note)); }
+    },
+    onClose() { if (sheet && sheet.api === api) sheet = null; },
+  });
+  sheet = { api, kind: 'note', note, sig: noteSig(note) };
+  patchAfford(S());
+}
+
+function refreshNoteSheet() {
+  if (!sheet || sheet.kind !== 'note') return;
+  const s = S();
+  // Live facts patch in place every render.
+  sheet.api.el.querySelectorAll('[data-live]').forEach((el) => {
+    const k = el.dataset.live;
+    let txt = null;
+    if (k.startsWith('jar:')) txt = jarLine(s, Number(k.slice(4)));
+    else if (k === 'away') { const a = awayText(s); txt = sim().storage.isFull(s) ? 'Everything is full: the mixers rest until something sells or ships' : a ? `About ${a} before the workshop is full` : null; }
+    if (txt && el.textContent !== txt) el.textContent = txt;
+  });
+  if (pointerDown) return;
+  const sig = noteSig(sheet.note);
+  if (sig === sheet.sig) return;
+  sheet.sig = sig;
+  sheet.api.set(noteHtml(sheet.note));
+}
+
 // --- vat detail sheet -------------------------------------------------------------------------------
 
 const KEEP_STEP = 5;
@@ -1948,7 +2329,7 @@ function vatSheetHtml(vi) {
   const jars = v.color ? num(s.stock?.[v.color]?.jars) : 0;
   const pm = eco().productionMultiplier(s, now());
   const rate = v.color ? (s.stations.mixers || []).filter((m) => m && m.recipe === v.color).reduce((a, m) => a + eco().stationOutput('mixer', m.level) * pm, 0) : 0;
-  const fill = !v.color ? 'Choose a color to fill this vat'
+  const fill = !v.color ? 'Pick a color for this jar to show'
     : jars >= capV ? 'The glass is full'
       : rate > 0 ? `Fills in about ${waitText(ctx.format, (capV - jars) / rate * 1000)}` : 'No mixer is making it right now';
   const keep = v.color ? keepOf(v.color) : 0;
@@ -1956,10 +2337,11 @@ function vatSheetHtml(vi) {
   const list = sim().vatChoices(s).map((c) => ({ ...c, name: nameOf(c.id), hex: hexOf(c.id) }));
   const vatSub = (c) => (c.jars > 0.05 ? `${fmt(c.jars)} jars in stock` : c.making ? 'A mixer is making it' : c.canMix ? 'Not made yet: set a mixer to it' : 'Not made yet');
   return h`<div class="ws-vat-head">${v.color ? swatch(hexOf(v.color), 52) : h`<span class="swatch is-empty" style="--size:52px" aria-hidden="true"></span>`}
-<div class="ws-vat-facts"><div class="semi">${v.color ? nameOf(v.color) : 'Empty glass'}</div><div>${fmt(jars)} of ${fmt(capV)} jars</div><div class="muted">${fill}</div></div></div>
+<div class="ws-vat-facts"><div class="semi">${v.color ? nameOf(v.color) : 'An empty jar'}</div><div>${fmt(jars)} of ${fmt(capV)} jars</div><div class="muted">${fill}</div></div></div>
 ${v.color && rate <= 0 && sim().factory.canMix(s, v.color) ? button(`Set a mixer to make ${nameOf(v.color)}`, { block: true, attrs: { 'data-action': 'vat-make', 'data-color': v.color } }) : ''}
 ${v.color ? h`<div class="ws-pick" style="cursor:default"><span class="grow"><span class="pt">Keep ${fmt(keep)} ${keep === 1 ? 'jar' : 'jars'} back</span><br><span class="ps">The shop sells only above this</span></span>
 <span class="ws-stepper"><button type="button" class="ws-step" data-action="keep-step" data-color="${v.color}" data-delta="-${KEEP_STEP}" data-tap aria-label="Keep fewer jars" aria-disabled="${keep <= 0 ? 'true' : 'false'}">&minus;</button><span class="n num" data-keep-n>${fmt(keep)}</span><button type="button" class="ws-step" data-action="keep-step" data-color="${v.color}" data-delta="${KEEP_STEP}" data-tap aria-label="Keep more jars">+</button></span></div>` : ''}
+<div class="ws-what">No mixer pours into this jar right now, so it shows a color you have in stock. Every jar adds room while you are away.</div>
 <div class="ws-sub-title">Show a different color</div>
 ${pickRow({ action: 'set-vat', attrs: { 'data-vat': String(vi), 'data-color': '' }, lead: h`<span class="swatch is-empty" style="--size:36px"></span>`, title: 'Empty glass', on: !v.color })}
 ${list.length ? list.map((c) => pickRow({ action: 'set-vat', attrs: { 'data-vat': String(vi), 'data-color': c.id }, lead: swatch(c.hex, 36), title: c.name, sub: vatSub(c), on: v.color === c.id })) : h`<div class="muted">Make some color and it will be waiting here.</div>`}`;
@@ -1986,7 +2368,7 @@ function openVatSheet(vi) {
   const v = S().stations.vats[vi];
   if (!v) return;
   const api = openSheet(root, {
-    title: `Vat ${vi + 1}`,
+    title: `Jar ${vi + 1}`,
     html: String(vatSheetHtml(vi)),
     onAction(name, el) {
       if (name === 'keep-step') {
@@ -2200,7 +2582,7 @@ ${routes.map((r) => pickRow({ action: 'set-route', attrs: { 'data-route': r.id }
 
 const SEGMENT_KEY = 'tincture.workshop.segment';
 const SEGMENTS = ['stations', 'shipping', 'rooms'];
-const STATION_PANELS = ['sources', 'grinders', 'mixers', 'vats', 'cellar', 'shop'];
+const STATION_PANELS = ['sources', 'grinders', 'mixers', 'cellar', 'shop'];
 const PANEL_SEGMENT = { fleet: 'shipping', rooms: 'rooms', apprentices: 'rooms', doors: 'rooms', unlocks: 'rooms' };
 
 function loadSegment() {
@@ -2254,7 +2636,8 @@ function applyParams(params) {
   }
   if (params.sheet === 'yard') focusPanel('fleet');
   if (params.sheet === 'unlock' && params.id) openUnlockSheet(ctx, params.id);
-  if (params.sheet === 'vat' && Number.isInteger(params.vat)) openVatSheet(params.vat);
+  if (params.sheet === 'vat' && Number.isInteger(params.vat)) openJar(params.vat);
+  if (params.note) openStationNote(params.note);
   if (params.assign) assignFromCatalog(params.assign);
 }
 
@@ -2263,7 +2646,8 @@ function goto(screen, params) {
   ctx.navigate(screen, params || {});
 }
 
-const UPGRADE_PANEL = { source: 'sources', grinder: 'grinders', mixer: 'mixers', vat: 'vats', shop: 'shop', fleet: 'fleet', cellar: 'cellar' };
+// Vats live with the mixers since 0.3.1 ("Bigger jars"); old links to 'vats' land there too.
+const UPGRADE_PANEL = { source: 'sources', grinder: 'grinders', mixer: 'mixers', vat: 'mixers', vats: 'mixers', shop: 'shop', fleet: 'fleet', cellar: 'cellar' };
 
 /**
  * Deep link into a section: picks the segment, opens the panel, scrolls the row (or panel) into view
@@ -2278,7 +2662,7 @@ function focusPanel(name, { row = '', index = null } = {}) {
   if (key === 'fleet' || STATION_PANELS.includes(key)) { openPanels.add(key); savePanels(); }
   setSegment(seg);
   renderAll();
-  const rowKey = row || (index != null && UPGRADE_PANEL[name] ? `${name}:${index}` : '');
+  const rowKey = row || ((name === 'vat' || name === 'vats') ? 'jars' : index != null && UPGRADE_PANEL[name] ? `${name}:${index}` : '');
   const target = (rowKey && root.querySelector(`[data-row="${rowKey}"]`))
     || root.querySelector(`[data-pw="${key}"]`) || root.querySelector(`[data-sec="${key === 'unlocks' ? 'doors' : key}"]`);
   scrollFlash(target);
@@ -2290,14 +2674,17 @@ function needMore(cost) {
 }
 
 /** The level number in a row's sub line ("Level 3 · ..."), or null. */
+function levelSub(rowEl) {
+  return rowEl ? [...rowEl.querySelectorAll('.ws-s')].find((e) => /^Level \d+/.test(e.textContent)) || null : null;
+}
 function levelOf(rowEl) {
-  const m = rowEl && /^Level (\d+)/.exec((rowEl.querySelector('.ws-s') || {}).textContent || '');
+  const m = rowEl && /^Level (\d+)/.exec((levelSub(rowEl) || {}).textContent || '');
   return m ? Number(m[1]) : null;
 }
 
 /** Roll the "Level N" number in a freshly drawn row from `from` to its new value. */
 function rollLevel(rowEl, from) {
-  const sub = rowEl && rowEl.querySelector('.ws-s');
+  const sub = levelSub(rowEl);
   const to = levelOf(rowEl);
   if (!sub || from === null || to === null || to === from) return;
   const m = /^(Level )(\d+)([\s\S]*)$/.exec(sub.textContent);
@@ -2334,7 +2721,7 @@ function buyFrom(el) {
   if (el.dataset.id) args.id = el.dataset.id;
   const cost = Number(el.dataset.cost);
   if (cost > num(S().coins)) { needMore(cost); return; }
-  const key = kind === 'source' ? `source:${args.id}` : kind === 'cellar' || kind === 'shop' ? kind : `${kind}:${args.index}`;
+  const key = kind === 'source' ? `source:${args.id}` : kind === 'cellar' || kind === 'shop' ? kind : kind === 'vat' ? 'jars' : `${kind}:${args.index}`;
   const before = levelBefore(key);
   const res = act(sim().factory.buyUpgrade, args);
   if (res && res.ok) {
@@ -2396,7 +2783,7 @@ function doNext() {
       const args = { kind: a.upgrade };
       if (a.index !== undefined) args.index = a.index;
       if (a.id) args.id = a.id;
-      const key = a.upgrade === 'source' ? `source:${a.id}` : a.upgrade === 'cellar' || a.upgrade === 'shop' ? a.upgrade : `${a.upgrade}:${a.index}`;
+      const key = a.upgrade === 'source' ? `source:${a.id}` : a.upgrade === 'cellar' || a.upgrade === 'shop' ? a.upgrade : a.upgrade === 'vat' ? 'jars' : `${a.upgrade}:${a.index}`;
       const before = levelBefore(key);
       const res = act(sim().factory.buyUpgrade, args);
       if (res && res.ok) {
@@ -2438,7 +2825,7 @@ function doRush(el) {
     renderAll();
     squashOnce(fx(), root.querySelector(`[data-row="mixer:${i}"]`));
     toast(`Rushed ${fmt(res.jars)} jars`, { hex: hexOf(S().stations.mixers[i].recipe) });
-  } else if (res && res.reason === 'full') toast('The vats are full, so there is no room for more yet.');
+  } else if (res && res.reason === 'full') toast('The jars are full, so there is no room for more yet. Collect, ship or sell and they make room.');
   else toast(rushWait(S().stations.mixers[i]));
 }
 
@@ -2476,8 +2863,14 @@ function openOrBuy(id, go) {
 function onClick(e) {
   const el = e.target.closest('[data-action]');
   if (!el || !root.contains(el)) return;
-  const a = el.dataset.action;
+  handleAction(el.dataset.action, el);
+}
+
+/** Every workshop action, shared by the screen and its station notes (which pass their own buttons). */
+function handleAction(a, el) {
   switch (a) {
+    case 'note': openStationNote(el.dataset.note); break;
+    case 'pennants': openBannerSheet(); break;
     case 'settings': break; // the app's own click handler opens Settings; navigating here too would fire twice
     case 'collect': doCollect(); break;
     case 'next': doNext(); break;
@@ -2490,12 +2883,12 @@ function onClick(e) {
     case 'open-ledger': ctx.navigate('ledger', {}); break;
     case 'open-commissions': openOrBuy('commissions', () => ctx.navigate('commissions', {})); break;
     case 'open-yard': openOrBuy('shipping', () => focusPanel('fleet')); break;
-    case 'goto-mixers': focusPanel('mixers', { row: `mixer:${Number(el.dataset.mixer) || 0}` }); break;
+    case 'goto-mixers': openStationNote(`mixer:${Number(el.dataset.mixer) || 0}`); break;
     case 'unlock-open': openUnlockSheet(ctx, el.dataset.unlock); break;
     case 'segment': setSegment(el.dataset.segment); break;
     case 'dismiss-whatsnew': act((st) => { if (st.flags) delete st.flags.whatsNew; }); sigs.whatsnew = ''; renderAll(); break;
     case 'claim-accident': doClaim(el); break;
-    case 'vat-color': openVatSheet(Number(el.dataset.vat)); break;
+    case 'vat-color': openJar(Number(el.dataset.vat)); break;
     case 'toggle-panel': {
       const k = el.dataset.panel;
       if (openPanels.has(k)) openPanels.delete(k); else openPanels.add(k);
