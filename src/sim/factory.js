@@ -24,7 +24,7 @@ import { tickSpillover } from './shelf.js';
 import { tickAdmission, unlock as unlockGallery } from './gallery.js';
 import { undiscoveredNear, discover, isDiscovered } from './discovery.js';
 import { puzzleReward } from './economy.js';
-import { TIERS as PURIFY_TIERS } from '../puzzles/purify.js';
+import { TIERS as PURIFY_TIERS, MURKY as PURIFY_MURKY } from '../puzzles/purify.js';
 
 /**
  * Muddy batches (docs/V02-CONTRACTS.md "Purify"): a production-time clock, not a
@@ -730,12 +730,13 @@ export function unlockSource(state, args = {}) {
 }
 
 /**
- * purifyBatch(state, {batchId, tier}, now) -> {ok, jars, coins, reward, purity, tier}.
+ * purifyBatch(state, {batchId, tier, murky?}, now) -> {ok, jars, coins, reward, purity, tier, murky}.
  * A solved tube sort on a difficulty tier (puzzles/purify.js TIERS): the
  * batch's jars go to stock at that tier's purity (pure / pure / flawless /
  * flawless; any that don't fit are sold at that purity, so nothing is lost)
  * and the puzzle reward is paid: economy.puzzleReward(tier, {k: TIERS[tier].k})
- * minutes of production (4 / 6 / 10 / 16). `coins` = overflow sales + reward.
+ * minutes of production (4 / 6 / 10 / 16), times MURKY.pay (1.25) for a Murky
+ * board (hidden layers). `coins` = overflow sales + reward.
  * Legacy call without `tier` ({purity}): purity only, no reward (v0.1 shape).
  */
 export function purifyBatch(state, args = {}, now = 0) {
@@ -749,9 +750,10 @@ export function purifyBatch(state, args = {}, now = 0) {
   const kept = addStock(state, b.color, b.jars, purity);
   const rest = Math.max(0, b.jars - kept);
   const sold = earn(state, rest * colorPrice(state, b.color, purity) * incomeMultiplier(state, now));
-  const reward = t ? earn(state, puzzleReward(state, t, { k: PURIFY_TIERS[t].k, now })) : 0;
+  const murky = !!(t && args.murky);
+  const reward = t ? earn(state, puzzleReward(state, t, { k: PURIFY_TIERS[t].k, now }) * (murky ? PURIFY_MURKY.pay : 1)) : 0;
   questEvent(state, 'batchPurified', 1, { colorId: b.color, purity, tier: t });
-  return { ok: true, jars: kept, coins: sold + reward, reward, purity, tier: t };
+  return { ok: true, jars: kept, coins: sold + reward, reward, purity, tier: t, murky };
 }
 
 /** muddyValue(state, now) -> coins every waiting muddy batch would sell for as is (the "Sell all" confirm line). */

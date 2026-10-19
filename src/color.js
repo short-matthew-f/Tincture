@@ -53,6 +53,20 @@ const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 /** '#rgb' or '#rrggbb' (leading '#' optional, any case) -> {r,g,b} 0..255. */
 export function hexToRgb(hex) {
   if (typeof hex !== 'string') throw new TypeError('hexToRgb: expected a string, got ' + typeof hex);
+  const hit = HEX_CACHE.get(hex);
+  if (hit) return { r: hit[0], g: hit[1], b: hit[2] };
+  const rgb = parseHex(hex);
+  if (HEX_CACHE.size >= HEX_CACHE_MAX) HEX_CACHE.clear();
+  HEX_CACHE.set(hex, [rgb.r, rgb.g, rgb.b]);
+  return rgb;
+}
+
+// Parsing is a pure function of the string and runs thousands of times per simulated day
+// (the same catalog hexes again and again); bounded so a long session cannot grow it forever.
+const HEX_CACHE = new Map();
+const HEX_CACHE_MAX = 4096;
+
+function parseHex(hex) {
   let h = hex.trim().replace(/^#/, '');
   if (/^[0-9a-f]{3}$/i.test(h)) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
   if (!/^[0-9a-f]{6}$/i.test(h)) throw new TypeError('hexToRgb: invalid hex color ' + JSON.stringify(hex));
@@ -81,8 +95,12 @@ export function linearToSrgb(c) {
 }
 
 // Internal: {r,g,b} 0..255 <-> linear [r,g,b] 0..1.
+// 8-bit channels (everything hexToRgb returns) go through a 256-entry table of the very same
+// srgbToLinear(i / 255) values, so results are identical; other inputs compute directly.
+const SRGB_LUT = Array.from({ length: 256 }, (_, i) => srgbToLinear(i / 255));
+const lin8 = (v) => ((v & 255) === v ? SRGB_LUT[v] : srgbToLinear(v / 255));
 function rgbToLinear({ r, g, b }) {
-  return [srgbToLinear(r / 255), srgbToLinear(g / 255), srgbToLinear(b / 255)];
+  return [lin8(r), lin8(g), lin8(b)];
 }
 function linearToRgb([r, g, b]) {
   const enc = (c) => clamp(Math.round(linearToSrgb(c) * 255), 0, 255);

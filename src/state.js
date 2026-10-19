@@ -47,6 +47,7 @@ export function createInitialState(now = 0, seed) {
       notifyHunters: false,
       notifyVats: false,
       puzzleTier: { grading: 'relaxed', purify: 'relaxed' },
+      purifyMurky: false, // Purify's Murky mode (hidden layers), on top of any tier
     },
     // `seen`: one entry per subgame guide (src/ui/guide.js) that has run.
     onboarding: { step: 0, done: false, flags: {}, seen: {} },

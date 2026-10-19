@@ -111,6 +111,12 @@ and its offline cache: https://short-matthew-f.github.io/Tincture/proto/
 
 ## Status
 
+- **0.3.3** (Purify): every board is checked by a solver and rated, so each
+  tier feels the same from board to board and none is ever a dead end
+  (Relaxed 9–13 pours, Steady 16–21, Tricky 24–29, Master 28–34). Tricky and
+  Master keep the batch color and two neighbors and pick the rest far apart.
+  New Murky mode, with any tier: lower layers start cloudy and clear as they
+  reach the top, for 25% more reward.
 - **0.3.2** (playtest): Purify boards are made from the batch's own corner of
   the wheel (a coral batch sorts into corals, roses and peaches), mixed-in
   colors are never near-white, empty tubes read as dark glass, and the

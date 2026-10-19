@@ -17,7 +17,7 @@ import { eventPoints } from './events.js';
 import {
   colorPrice, colorFamily, incomeMultiplier, vehicleCapacity, vehicleTripMs, discoveredCount,
 } from './economy.js';
-import { takeStock, addStock, keepOf, PURITY_ORDER } from './storage.js';
+import { takeStock, addStock, keepOf, stockTotal, PURITY_ORDER } from './storage.js';
 
 const DAY = 86400e3;
 const num = (x, d = 0) => (Number.isFinite(x) ? x : d);
@@ -249,10 +249,14 @@ function bestPicks(state, routeId, room, now) {
 export function autoDispatch(state, now = 0) {
   if (!state?.apprentices?.dispatcher) return { dispatched: 0 };
   let dispatched = 0;
-  const open = new Set(availableRoutes(state, now).map((r) => r.id));
+  let open = null; // routes are only worked out once a vehicle is actually waiting
   (state.stations.fleet ?? []).forEach((v, i) => {
-    if (!isIdle(v) || !v.route || !open.has(v.route)) return;
+    if (!isIdle(v) || !v.route) return;
+    open ??= new Set(availableRoutes(state, now).map((r) => r.id));
+    if (!open.has(v.route)) return;
     const cap = vehicleCapacity(v);
+    // Picks can never exceed the stock on hand, so a near-empty cellar cannot reach a quarter load.
+    if (stockTotal(state) + cargoJars(v.cargo) < cap * 0.25) return;
     const picks = bestPicks(state, v.route, cap - cargoJars(v.cargo), now);
     const avail = picks.reduce((s, p) => s + p.jars, 0) + cargoJars(v.cargo);
     if (avail < cap * 0.25) return;

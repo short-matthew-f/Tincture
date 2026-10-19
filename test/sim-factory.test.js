@@ -303,7 +303,7 @@ import {
 } from '../src/sim/factory.js';
 import { catchUp } from '../src/sim/offline.js';
 import { isAllCaughtUp, pendingItems, buildReturnSummary, snapshot } from '../src/sim/ledger.js';
-import { TIERS as PURIFY_TIERS } from '../src/puzzles/purify.js';
+import { TIERS as PURIFY_TIERS, MURKY as PURIFY_MURKY } from '../src/puzzles/purify.js';
 
 function muddyState(seed = 3) {
   const s = orangeState(seed);
@@ -398,6 +398,22 @@ test('muddy: purifyBatch sets purity by tier and pays the puzzle reward', () => 
   const ks = Object.keys(PURIFY_TIERS).map((t) => puzzleReward(s, t, { k: PURIFY_TIERS[t].k, now: NOW }));
   for (let i = 1; i < ks.length; i++) assert.ok(ks[i] >= ks[i - 1]);
   assert.equal(purifyBatch(s, { batchId: 'missing', tier: 'relaxed' }, NOW).ok, false);
+});
+
+test('muddy: a Murky board pays 25% more puzzle reward, and nothing else changes', () => {
+  for (const tier of ['relaxed', 'master']) {
+    const plain = muddyState(21);
+    const murky = muddyState(21);
+    for (const s of [plain, murky]) s.muddyBatches = [{ id: 'b', color: 'orange', jars: 5, value: 1, at: NOW, tier: null }];
+    const a = purifyBatch(plain, { batchId: 'b', tier }, NOW);
+    const b = purifyBatch(murky, { batchId: 'b', tier, murky: true }, NOW);
+    assert.equal(a.murky, false);
+    assert.equal(b.murky, true);
+    assert.ok(close(b.reward, a.reward * PURIFY_MURKY.pay, 1e-9), tier);
+    assert.equal(b.purity, a.purity);
+    assert.equal(b.jars, a.jars);
+  }
+  assert.equal(PURIFY_MURKY.pay, 1.25);
 });
 
 test('muddy: sellAllMuddy sells every batch as is in one go', () => {

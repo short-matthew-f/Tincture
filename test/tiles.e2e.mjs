@@ -254,7 +254,7 @@ async function walk(viewport, tag) {
   await tap(page, '#tabbar [data-tab="puzzles"]');
   await page.waitForSelector('#pz-tiles', { state: 'visible' });
   must(await page.locator('#pz-tiles [data-action="unlock-open"]').count() === 1, `${tag}: the hub's Tile Room card carries the price button`);
-  await page.locator('#pz-tiles').scrollIntoViewIfNeeded();
+  await page.evaluate(() => document.querySelector('#pz-tiles').scrollIntoView({ block: 'center' }));
   await shot('01-hub-locked');
   await tap(page, '#pz-tiles [data-action="unlock-open"]');
   await page.waitForSelector('[data-action="unlock-buy"]', { state: 'visible' });
@@ -264,7 +264,7 @@ async function walk(viewport, tag) {
   check(await page.evaluate(() => window.tincture.game.state.coins) < 1100, `${tag}: buying the Tile Room spent 5,000 coins`);
   await page.waitForSelector('#pz-tiles [data-action="open-tiles"]', { state: 'visible' });
   await page.waitForTimeout(400);
-  await page.locator('#pz-tiles').scrollIntoViewIfNeeded();
+  await page.evaluate(() => document.querySelector('#pz-tiles').scrollIntoView({ block: 'center' }));
   await shot('03-hub-open');
 
   // --- the picker ----------------------------------------------------------------------
@@ -385,7 +385,7 @@ async function walk(viewport, tag) {
     const card = await page.locator('#pz-tiles').textContent();
     check(/Round 2/.test(card) && /Continue the wall/.test(card), `${tag}: the hub card shows her wall at a glance ("${card.replace(/\s+/g, ' ').trim().slice(0, 90)}")`);
     await shot('10-hub-continue');
-    await page.locator('#pz-tiles').scrollIntoViewIfNeeded();
+    await page.evaluate(() => document.querySelector('#pz-tiles').scrollIntoView({ block: 'center' }));
     await shot('10b-hub-card');
     await tap(page, '#pz-tiles [data-action="open-tiles"]');
     await page.waitForSelector('#screen-tiles [data-dishes]', { state: 'visible' });
@@ -462,7 +462,7 @@ async function walk(viewport, tag) {
   await page.evaluate(() => window.tincture.ctx.navigate('puzzles'));
   await page.waitForSelector('#pz-tiles', { state: 'visible' });
   check(await page.locator('#pz-tiles .tag, #pz-tiles [data-action="unlock-open"]').count() >= 1, `${tag}: the hub card shows the lock again`);
-  await page.locator('#pz-tiles').scrollIntoViewIfNeeded();
+  await page.evaluate(() => document.querySelector('#pz-tiles').scrollIntoView({ block: 'center' }));
   await shot('14-renovated');
   await page.evaluate(() => {
     const { game, ctx } = window.tincture;

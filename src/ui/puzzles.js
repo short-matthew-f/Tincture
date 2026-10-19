@@ -204,15 +204,36 @@ export function purifyTier(ctx, state) {
   return t;
 }
 
+/** Murky (hidden layers) opens with Steady: at the same discovery count, always free. */
+export function murkyUnlocked(ctx, state) {
+  try { return !ctx.sim.unlocks || ctx.sim.unlocks.tierRevealed(state, 'steady'); } catch { return true; }
+}
+
+/** Her remembered Murky choice (settings.purifyMurky), only once Murky is open. */
+export function purifyMurky(ctx, state) {
+  return !!(state && state.settings && state.settings.purifyMurky) && murkyUnlocked(ctx, state);
+}
+
+/** One line under the Murky chip. */
+export const MURKY_LINE = 'Lower layers start cloudy and clear as they reach the top. Pays 25% more.';
+
+/** The on/off Murky chip (hub card and board share it). */
+export function murkyChip(on, { action = 'purify-murky', label = '' } = {}) {
+  return h`<button type="button" class="chip pz-murky${on ? ' is-on' : ''}" data-action="${action}" data-tap aria-pressed="${on ? 'true' : 'false'}"><span class="pz-murky-dot" aria-hidden="true"></span><span>${label || `Murky · ${on ? 'On' : 'Off'}`}</span></button>`;
+}
+
 /**
  * Create the tube-sort puzzle for a muddy batch at `tier` (default: her
  * remembered Purify tier) and store it as activePuzzles.purify =
- * {batchId, color, puzzle, tier, startedAt}. Returns the entry or null.
+ * {batchId, color, puzzle, tier, startedAt}. `murky` (default: her remembered
+ * choice) hides the layers below each top (puzzle.murky / puzzle.hidden).
+ * Returns the entry or null.
  */
-export function createPurifyPuzzle(ctx, s, { batchId, tier } = {}, now = 0) {
+export function createPurifyPuzzle(ctx, s, { batchId, tier, murky } = {}, now = 0) {
   const batch = (s.muddyBatches || []).find((b) => b.id === batchId);
   if (!batch) return null;
   const t = TIER_IDS.includes(tier) ? tier : purifyTier(ctx, s);
+  const m = typeof murky === 'boolean' ? murky && murkyUnlocked(ctx, s) : purifyMurky(ctx, s);
   const hex = ctx.sim.economy.colorHex(batch.color);
   const near = ctx.sim.discovery.discoveredColors(s)
     .map((c) => ({ hex: c.hex, de: deltaEHex(c.hex, hex) }))
@@ -223,7 +244,7 @@ export function createPurifyPuzzle(ctx, s, { batchId, tier } = {}, now = 0) {
   const rng = stateRng(s);
   let puzzle = null;
   for (let attempt = 0; attempt < 8; attempt++) {
-    puzzle = ctx.puzzles.purify.createForTier(t, rng, { palette, target: hex });
+    puzzle = ctx.puzzles.purify.createForTier(t, rng, { palette, target: hex, murky: m });
     if (puzzle.colors.some((c) => deltaEHex(c, hex) < 3)) break; // her batch's own color is in the tubes
   }
   const entry = { batchId, color: batch.color, puzzle, tier: t, startedAt: now };
@@ -321,6 +342,11 @@ export const PZ_CSS = `
 .pz-hub .btn.small, .pz-nudge .btn.small { min-height: 44px; }
 .pz-hub .btn.quiet { box-shadow: 0 3px 0 var(--shadow), inset 0 0 0 1.5px rgba(42,38,34,.2); }
 .pz-hub .tierdesc { min-height: 18px; position: relative; }
+.pz-murkyrow { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.pz-murkyrow .hint { flex: 1 1 auto; min-width: 0; font-size: 12.5px; line-height: 1.3; }
+.chip.pz-murky { flex: 0 0 auto; border: 0; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.pz-murky-dot { flex: 0 0 auto; width: 14px; height: 14px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #D8D0BE, #9A9080 55%, #6E6656); box-shadow: inset 0 0 0 1.5px rgba(42,38,34,.35); }
+.chip.pz-murky[aria-pressed="true"] .pz-murky-dot { box-shadow: 0 0 0 1.5px rgba(255,255,255,.55); }
 .pz-hub .pz-xfade { position: absolute; left: 0; right: 0; top: 0; pointer-events: none; }
 .pz-hub .seg-control > button { touch-action: manipulation; }
 .pz-hub .seg-control > button.has-sub { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; padding: 4px 2px; line-height: 1.15; min-width: 0; }
@@ -347,6 +373,11 @@ export const PZ_CSS = `
 let C = null;      // ctx
 let ROOT = null;
 let SIG = '';
+// A finger is on the table: hold the background redraw until just after it lifts, so a
+// redraw never swaps a button out from under her tap (the click lands after pointerup).
+let HOLD = false;
+let PENDING = false;
+let holdTimer = 0;
 let section = null;
 let confirmSell = false;
 let nudgeShown = false; // the Try Tricky nudge has lifted in on this visit
@@ -376,6 +407,10 @@ function purifyCardHtml(state, active) {
 ${lockedNext ? h`<div class="pz-tiertag" data-tier-tag>${lockTag(`${TIER_LABEL[lockedNext]} at ${needColors} colors \u2014 ${moreToGo} more`, { cls: 'pz-tag' })}</div>` : ''}`;
   const def = P.TIERS[tier];
   const tierDesc = `${def.colors} colors, ${def.tubes} tubes${def.extraTube ? ', plus a spare tube' : ''}. ${PURITY_LINE[def.purity]}`;
+  const murky = purifyMurky(C, state);
+  const murkyRow = murkyUnlocked(C, state)
+    ? h`<div class="pz-murkyrow" data-coach="purify-murky-chip">${murkyChip(murky)}<span class="hint">${MURKY_LINE}</span></div>`
+    : '';
 
   const batches = state.muddyBatches || [];
   const pur = active.purify;
@@ -387,7 +422,7 @@ ${lockedNext ? h`<div class="pz-tiertag" data-tier-tag>${lockTag(`${TIER_LABEL[l
     return h`<div class="batch-row" data-batch-row="${b.id}">${swatch(hex, 36, { label: name })}<div class="grow"><div class="semi pz-name">${name}</div><div class="hint">${jars} ${jars === 1 ? 'jar' : 'jars'}${going ? ', a pour is under way' : ''}</div></div>${button('Sell as is', { small: true, cls: 'quiet', attrs: { 'data-action': 'sell-muddy', 'data-batch': b.id } })}</div>`;
   });
   const underway = pur && batches.some((b) => b.id === pur.batchId) ? pur : null;
-  const keepGoing = !!(underway && (underway.puzzle.moves > 0 || underway.tier === tier));
+  const keepGoing = !!(underway && (underway.puzzle.moves > 0 || (underway.tier === tier && !!underway.puzzle.murky === murky)));
   const sortLabel = keepGoing ? 'Continue sorting' : 'Sort one';
   let sellAll = '';
   if (confirmSell && batches.length) {
@@ -408,6 +443,7 @@ ${button('Go to the workshop', { block: true, cls: 'quiet', attrs: { 'data-actio
 <div class="hint">Sort the layers of a muddy batch into pure tubes.</div>
 ${seg}
 <div class="hint tierdesc">${tierDesc}</div>
+${murkyRow}
 ${waiting}
 </div>`;
 }
@@ -527,7 +563,7 @@ function sigOf(state) {
   return JSON.stringify([
     tier, fmt(rewardOf(state, tier)), a.grading ? [a.grading.tier, C.puzzles.grading.wrongCount(a.grading)] : 0,
     a.purify ? [a.purify.batchId, a.purify.tier, a.purify.puzzle.moves > 0] : 0, a.packing ? 1 : 0, tw ? tw.id : 0,
-    purifyTier(C, state), confirmSell, confirmSell ? Math.round(C.sim.factory.muddyValue(state, C.game.now())) : 0,
+    purifyTier(C, state), purifyMurky(C, state), a.purify ? !!a.purify.puzzle.murky : 0, confirmSell, confirmSell ? Math.round(C.sim.factory.muddyValue(state, C.game.now())) : 0,
     (state.muddyBatches || []).map((b) => [b.id, Math.round(num(b.jars))]),
     (() => { const y = yardStatus(C, state); const u = C.sim.unlocks.status(state, 'shipping'); return [y.open, y.need, u.revealed, u.affordable]; })(),
     num(state.stats && state.stats.fastSolves) >= 3,
@@ -631,14 +667,22 @@ function onClick(e) {
     const tier = t.dataset.tier;
     if (C.sim.unlocks && !C.sim.unlocks.tierRevealed(C.game.state, tier)) return;
     changeTier('pz-purify', tier, () => C.game.act((s, a) => C.sim.settings.setPuzzleTier(s, { puzzle: 'purify', tier: a.tier }), { tier }));
+  } else if (act === 'purify-murky') {
+    if (!murkyUnlocked(C, C.game.state)) return;
+    const on = !purifyMurky(C, C.game.state);
+    C.game.act((s, a) => C.sim.setSetting(s, { key: 'purifyMurky', value: a.on }), { on });
+    draw(C.game.state, true);
+    const chip = ROOT.querySelector('#pz-purify [data-action="purify-murky"]');
+    if (chip && C.fx) C.fx.squash(chip);
   } else if (act === 'sort-one' || act === 'purify') {
     const st = C.game.state;
     const cur = activeOf(st).purify;
     const batches = st.muddyBatches || [];
     const tier = purifyTier(C, st);
+    const murky = purifyMurky(C, st);
     let batchId = t.dataset.batch || (cur && batches.some((b) => b.id === cur.batchId) ? cur.batchId : (batches[0] && batches[0].id));
     if (!batchId) { draw(st, true); return; }
-    const keep = cur && cur.batchId === batchId && (cur.puzzle.moves > 0 || cur.tier === tier);
+    const keep = cur && cur.batchId === batchId && (cur.puzzle.moves > 0 || (cur.tier === tier && !!cur.puzzle.murky === murky));
     if (!keep) {
       const made = C.game.act((s, a, now) => createPurifyPuzzle(C, s, a, now), { batchId, tier });
       if (!made) { C.toast('That batch is already taken care of.'); draw(C.game.state, true); return; }
@@ -685,6 +729,17 @@ export default {
     ROOT = root;
     injectStyle('shared', PZ_CSS);
     root.addEventListener('click', onClick);
+    root.addEventListener('pointerdown', () => { HOLD = true; clearTimeout(holdTimer); }, { passive: true, capture: true });
+    const release = () => {
+      if (!HOLD) return;
+      clearTimeout(holdTimer);
+      holdTimer = setTimeout(() => {
+        HOLD = false;
+        if (PENDING) { PENDING = false; draw(C.game.state); }
+      }, 400);
+    };
+    window.addEventListener('pointerup', release, { passive: true });
+    window.addEventListener('pointercancel', release, { passive: true });
   },
 
   show(params = {}) {
@@ -706,6 +761,7 @@ export default {
 
   render(state) {
     if (!ROOT) return;
+    if (HOLD) { PENDING = true; return; }
     draw(state);
   },
 };

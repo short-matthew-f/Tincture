@@ -76,3 +76,25 @@ test('discovery: pins (max 3), bench mixing and pigments', () => {
   assert.ok(Array.isArray(res.hints) && res.hints.length <= 3);
   assert.ok(Array.isArray(shimmerHints(s, '#888888')));
 });
+
+test('discoveredCount stays exact across discoveries, per state, and incomeMultiplier follows it', async () => {
+  const { incomeMultiplier } = await import('../src/sim/economy.js');
+  const a = createInitialState(NOW, 21);
+  const b = createInitialState(NOW, 22);
+  const base = discoveredCount(a); // read first, so the value is cached
+  assert.equal(base, Object.keys(a.catalog.discovered).length);
+  for (const id of ['orange', 'green']) assert.ok(discover(a, { colorId: id, method: 'bench' }, NOW));
+  assert.equal(discoveredCount(a), base + 2, 'a discovery after a read is counted');
+  assert.equal(discoveredCount(a), Object.keys(a.catalog.discovered).length);
+  assert.equal(discoveredCount(b), base, 'another state is unaffected');
+  assert.equal(discover(a, { colorId: 'orange', method: 'bench' }, NOW), null);
+  assert.equal(discoveredCount(a), base + 2, 'a repeat finds nothing new');
+  // Reach the next +2% catalog step through discover() and read the multiplier before and after.
+  const before = incomeMultiplier(a, NOW);
+  const ids = CATALOG.map((c) => c.id).filter((id) => !a.catalog.discovered[id]);
+  while (Math.floor(discoveredCount(a) / 10) === Math.floor((base + 2) / 10)) {
+    assert.ok(discover(a, { colorId: ids.shift(), method: 'bench' }, NOW));
+  }
+  assert.ok(incomeMultiplier(a, NOW) > before, 'the catalog bonus follows the new count');
+  assert.equal(discoveredCount(a), Object.keys(a.catalog.discovered).length);
+});

@@ -17,7 +17,7 @@ import { stateRng } from '../rng.js';
 import { emit } from './bus.js';
 import { questEvent } from './quests.js';
 import { eventPoints } from './events.js';
-import { colorDef, discoveredCount } from './economy.js';
+import { colorDef, discoveredCount, invalidateDiscoveredCount } from './economy.js';
 
 export const DISCOVER_DE = 4;
 export const HINT_DE = 12;
@@ -148,6 +148,7 @@ export function discover(state, args = {}, now = 0) {
   if (!c || isDiscovered(state, colorId)) return null;
   if (!state.catalog) state.catalog = { discovered: {}, pinned: [] };
   state.catalog.discovered[colorId] = { at: now, name: c.name ?? colorId, custom: false, essence: 0 };
+  invalidateDiscoveredCount(state);
   if (!state.lifetime) state.lifetime = { earned: 0, puzzles: 0, discoveries: 0, renovations: 0 };
   state.lifetime.discoveries = (state.lifetime.discoveries ?? 0) + 1;
   state.catalog.pinned = (state.catalog.pinned ?? []).filter((id) => id !== colorId);

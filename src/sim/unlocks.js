@@ -59,10 +59,10 @@ function phaseNeeded(def) {
  * unknown id. `revealed` = colors met AND phase met (the price shows from the
  * start; `revealed` says whether it can be bought yet).
  */
-export function status(state, id) {
+export function status(state, id, colorCount) {
   const def = UNLOCKS_BY_ID[id];
   if (!def) return null;
-  const colors = discoveredCount(state);
+  const colors = colorCount ?? discoveredCount(state);
   const colorsLeft = Math.max(0, def.revealColors - colors);
   const phase = phaseNeeded(def);
   const phaseOk = num(state?.phase, 1) >= phase;
@@ -77,8 +77,9 @@ export function status(state, id) {
 }
 
 /** statusAll(state) -> status for every unlock, in UNLOCKS order. */
-export function statusAll(state) {
-  return UNLOCKS.map((u) => status(state, u.id));
+export function statusAll(state, colorCount) {
+  const colors = colorCount ?? discoveredCount(state); // once, not once per unlock
+  return UNLOCKS.map((u) => status(state, u.id, colors));
 }
 
 /** canBuy(state, id) -> boolean (revealed, affordable, not yet open). */

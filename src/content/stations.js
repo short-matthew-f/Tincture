@@ -12,7 +12,7 @@ export const MILESTONES = Object.freeze([10, 25, 50, 100, 150, 200]);
 /** How many milestone doublings a station at `level` has earned. */
 export function milestonesPassed(level) {
   let n = 0;
-  for (const m of MILESTONES) if (level >= m) n++;
+  for (let i = 0; i < MILESTONES.length; i++) if (level >= MILESTONES[i]) n++;
   return n;
 }
 

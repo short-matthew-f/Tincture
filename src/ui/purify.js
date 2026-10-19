@@ -18,6 +18,12 @@
  * the target, and a tap anywhere on the shelf (gaps, planks) resolves to the
  * nearest column of the nearest row from the pointer's x and y.
  *
+ * Murky (puzzle.murky): every layer below a tube's top is drawn as cloudy
+ * glass with a small "?" (never its color, never its colorblind pattern) until
+ * it reaches the top; then the cloud clears off it (a short fade). The board's
+ * chip turns Murky on or off for this batch (it starts over, "Tap again" once
+ * she has poured) and remembers the choice (settings.purifyMurky).
+ *
  * Back keeps the puzzle: it lives in state.activePuzzles.purify
  * ({batchId, color, puzzle, tier, startedAt}) until it is solved or the batch
  * is sold. Wrong pours are never red: an illegal pour is a quiet low tick.
@@ -30,7 +36,7 @@ import { h, raw, backButton, button, swatch, iconSvg, safeHex } from './kit.js';
 import { markGuideSeen } from './guide.js';
 import {
   injectStyle, PZ_CSS, ensureActive, activeOf, createPurifyPuzzle, patternFill, ensureDefs, lightnessOf, coinsText,
-  TIER_IDS, TIER_LABEL,
+  TIER_IDS, TIER_LABEL, murkyUnlocked, murkyChip, MURKY_LINE,
 } from './puzzles.js';
 
 const CSS = `
@@ -62,7 +68,12 @@ const CSS = `
 .pu-empty-actions .btn.is-quiet, .pu-tools .btn.is-quiet { box-shadow: 0 3px 0 var(--shadow), inset 0 0 0 1.5px rgba(42,38,34,.2); }
 .pu-purity { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 14px; }
 .pu-result .coinline b { font-variant-numeric: tabular-nums; }
-@media (prefers-reduced-motion: reduce) { .pu-tube svg { transition: none; } }
+.pu-clearing { animation: pu-clear 520ms var(--ease-out) 120ms both; }
+@keyframes pu-clear { from { opacity: 1; } to { opacity: 0; } }
+.pu-tierswitch-wrap { display: flex; flex-direction: column; gap: 10px; }
+.pu-tierswitch-wrap:empty { display: none; }
+.pu-murkyrow { flex: 1 1 100%; }
+@media (prefers-reduced-motion: reduce) { .pu-tube svg { transition: none; } .pu-clearing { animation-duration: 1ms; } }
 `;
 
 let C = null;
@@ -70,7 +81,7 @@ let ROOT = null;
 const P = {
   visible: false, entry: null, sel: null, busy: false, celebrating: false, result: null,
   timers: [], cb: false, sig: '', el: {}, name: '', hex: '#B7BDB3', reward: null,
-  lay: { per: 6, col: 51, tw: 44, L: 40, rows: 1 }, armed: null, guide: null, tier: 'relaxed',
+  lay: { per: 6, col: 51, tw: 44, L: 40, rows: 1 }, armed: null, guide: null, murkyGuide: null, tier: 'relaxed',
 };
 let uid = 0;
 
@@ -85,6 +96,8 @@ const isDone = (puz, t) => t.length === puz.capacity && t.every((c) => c === t[0
 const entryTier = (e) => (e && TIER_IDS.includes(e.tier) ? e.tier : (e && e.puzzle && TIER_IDS.includes(e.puzzle.tier) ? e.puzzle.tier : 'relaxed'));
 const canExtra = (e) => !!(e && e.puzzle.extraTube !== false && C.puzzles.purify.extraTubeAllowed(entryTier(e)));
 const tierRevealed = (t) => !C.sim.unlocks || C.sim.unlocks.tierRevealed(C.game.state, t);
+const hiddenOf = (puz, i) => C.puzzles.purify.hiddenCount(puz, i);
+const isMurky = (e) => !!(e && e.puzzle && e.puzzle.murky);
 
 // ---------------------------------------------------------------------------
 // Layout: how many tubes per row, how wide
@@ -124,7 +137,7 @@ function pourAct(s, args, now) {
     const batch = (s.muddyBatches || []).find((b) => b.id === e.batchId);
     const colorId = e.color;
     const tier = entryTier(e);
-    const done = sim.factory.purifyBatch(s, { batchId: e.batchId, tier }, now);
+    const done = sim.factory.purifyBatch(s, { batchId: e.batchId, tier, murky: !!e.puzzle.murky }, now);
     sim.events.eventPoints(s, 'purify', 1, { colorId });
     if (s.lifetime) s.lifetime.puzzles = (Number.isFinite(s.lifetime.puzzles) ? s.lifetime.puzzles : 0) + 1;
     if (!s.stats || typeof s.stats !== 'object') s.stats = {};
@@ -132,7 +145,7 @@ function pourAct(s, args, now) {
     ensureActive(s).purify = null;
     r.reward = {
       ok: !!done.ok, jars: done.jars || 0, coins: done.coins || 0, bonus: done.reward || 0,
-      purity: done.purity || 'pure', tier, colorId, total: batch ? batch.jars : done.jars,
+      purity: done.purity || 'pure', tier, colorId, total: batch ? batch.jars : done.jars, murky: !!done.murky,
     };
   }
   return r;
@@ -158,8 +171,18 @@ const CORK = `<path d="M11.5 8 H32.5 L31 18 H13 Z" fill="#C9A277" stroke="#2A262
 <path d="M13 5.2 H31" stroke="#7B5236" stroke-opacity=".45" stroke-width="1.4" stroke-linecap="round"/>
 <circle cx="18" cy="13" r="1" fill="#7B5236" fill-opacity=".5"/><circle cx="25" cy="14.2" r="1.1" fill="#7B5236" fill-opacity=".5"/><circle cx="29" cy="11.8" r=".9" fill="#7B5236" fill-opacity=".5"/>`;
 
-/** One tube as an inline SVG. `newN` = layers that just landed; `corkNew` animates the cork in. */
-function tubeSvg(puz, i, { newN = 0, corkNew = false } = {}) {
+/** Cloudy glass over a hidden layer: murky water, a soft swirl and a small "?" (no color, no pattern). */
+const MURK = '#958B7A';
+function murkLayer(y, L, cls = '') {
+  const cy = y + L / 2;
+  return `<g class="pu-murk${cls}" data-hidden="1"><rect x="5" y="${y}" width="34" height="${L}" fill="${MURK}"/>
+<ellipse cx="15" cy="${cy - L * 0.18}" rx="9" ry="${L * 0.16}" fill="#FFFFFF" fill-opacity=".16"/><ellipse cx="29" cy="${cy + L * 0.2}" rx="8" ry="${L * 0.13}" fill="#2A2622" fill-opacity=".12"/>
+<path d="M11 ${cy + 3} q5 -6 10 0 t10 0" fill="none" stroke="#FFFFFF" stroke-opacity=".28" stroke-width="1.6" stroke-linecap="round"/>
+<text x="22" y="${cy + 4.5}" text-anchor="middle" font-size="13" font-weight="700" font-family="system-ui, sans-serif" fill="#FFFFFF" fill-opacity=".72">?</text></g>`;
+}
+
+/** One tube as an inline SVG. `newN` = layers that just landed; `corkNew` animates the cork in; `cleared` = layers whose cloud just lifted. */
+function tubeSvg(puz, i, { newN = 0, corkNew = false, cleared = [] } = {}) {
   const tube = puz.tubes[i];
   const cap = puz.capacity;
   const L = P.lay.L;
@@ -169,14 +192,17 @@ function tubeSvg(puz, i, { newN = 0, corkNew = false } = {}) {
   const id = `pu${++uid}`;
   const yb = top + bodyH - 17;
   const shape = `M5 ${top} V${yb} A17 17 0 0 0 39 ${yb} V${top}`;
+  const hidden = hiddenOf(puz, i);
   const layers = tube.map((c, k) => {
     const y = top + bodyH - (k + 1) * L;
+    if (k < hidden) return `<g>${murkLayer(y, L)}<rect x="5" y="${y}" width="34" height="1.5" fill="#2A2622" fill-opacity=".18"/></g>`;
     const hex = puz.colors[c];
     const fresh = k >= tube.length - newN && newN > 0;
     const cls = fresh ? ' class="pu-layer-new"' : '';
     const dly = fresh ? ` style="--d:${150 + (k - (tube.length - newN)) * 60}ms"` : '';
     const rect = `<rect x="5" y="${y}" width="34" height="${L}" fill="${hex}"/>${C.game.state.settings && C.game.state.settings.colorblind ? `<rect x="5" y="${y}" width="34" height="${L}" fill="${patternFill(c)}"/>` : ''}`;
-    return `<g${cls}${dly}>${rect}<rect x="5" y="${y}" width="34" height="1.5" fill="#2A2622" fill-opacity=".18"/></g>`;
+    const clearing = cleared.includes(k) ? murkLayer(y, L, ' pu-clearing') : '';
+    return `<g${cls}${dly}>${rect}${clearing}<rect x="5" y="${y}" width="34" height="1.5" fill="#2A2622" fill-opacity=".18"/></g>`;
   }).join('');
   const corked = isDone(puz, tube);
   const cork = corked ? `<g class="pu-cork${corkNew ? ' pu-cork-new' : ''}">${CORK}</g>` : '';
@@ -198,8 +224,9 @@ function tubeButton(puz, i, opts) {
   const tube = puz.tubes[i];
   const lifted = P.sel === i ? ' is-sel' : '';
   const corked = isDone(puz, tube);
+  const hidden = hiddenOf(puz, i);
   const label = tube.length
-    ? `Tube ${i + 1}, ${tube.length} of ${puz.capacity} layers${corked ? ', corked' : ''}`
+    ? `Tube ${i + 1}, ${tube.length} of ${puz.capacity} layers${corked ? ', corked' : ''}${hidden ? `, ${hidden} still cloudy` : ''}`
     : `Tube ${i + 1}, empty`;
   const goal = corked && isGoalColor(puz.colors[tube[0]]);
   return `<button type="button" class="pu-tube${lifted}${corked ? ' is-corked' : ''}${goal ? ' is-goal' : ''}" data-tube="${i}" aria-label="${label}${goal ? `, your ${P.name}` : ''}">${tubeSvg(puz, i, opts)}</button>`;
@@ -229,10 +256,14 @@ function markCoach() {
   const puz = P.entry && P.entry.puzzle;
   if (!puz || !P.el.shelf) return;
   P.el.shelf.querySelectorAll('[data-coach="purify-near"]').forEach((n) => n.removeAttribute('data-coach'));
-  let idx = puz.tubes.findIndex((t) => t.length === puz.capacity - 1 && t.every((c) => c === t[0]));
+  let idx = puz.tubes.findIndex((t, i) => t.length === puz.capacity - 1 && t.every((c) => c === t[0]) && !hiddenOf(puz, i));
   if (idx < 0) idx = puz.tubes.findIndex((t) => isDone(puz, t));
   const el = idx >= 0 ? tubeEl(idx) : null;
   if (el) el.setAttribute('data-coach', 'purify-near');
+  P.el.shelf.querySelectorAll('[data-coach="purify-murky"]').forEach((n) => n.removeAttribute('data-coach'));
+  const m = puz.tubes.findIndex((t, i) => hiddenOf(puz, i) > 0);
+  const mel = m >= 0 ? tubeEl(m) : null;
+  if (mel) mel.setAttribute('data-coach', 'purify-murky');
 }
 
 function statusHtml(puz) {
@@ -242,7 +273,9 @@ function statusHtml(puz) {
   const hl = corked
     ? (left <= 0 ? 'Every color is corked' : `${corked} ${corked === 1 ? 'color' : 'colors'} corked, ${left} more to go`)
     : 'Pour each color into its own tube';
-  return h`<div class="hl">${hl}</div><div class="dt"><span class="pu-goal" style="background:${safeHex(P.hex)}"></span>Your ${P.name} is in here with colors that got mixed in. Tap a tube, then tap where to pour: onto the same color or into an empty tube.</div>`;
+  const cloudy = C.puzzles.purify.hiddenTotal(puz);
+  const murk = puz.murky ? (cloudy ? ` ${cloudy} cloudy ${cloudy === 1 ? 'layer clears' : 'layers clear'} as you pour.` : ' Every layer is clear now.') : '';
+  return h`<div class="hl">${hl}</div><div class="dt"><span class="pu-goal" style="background:${safeHex(P.hex)}"></span>Your ${P.name} is in here with colors that got mixed in. Tap a tube, then tap where to pour: onto the same color or into an empty tube.${murk}</div>`;
 }
 
 function updateStatus() {
@@ -255,7 +288,20 @@ function otherTiers() {
   return TIER_IDS.filter((t) => t !== cur && tierRevealed(t));
 }
 
+/** The Murky chip on the board: on/off for this batch (starts over), with its one line. */
+function murkyHtml() {
+  if (!P.entry || !murkyUnlocked(C, C.game.state)) return '';
+  const on = isMurky(P.entry);
+  const armed = P.armed === 'murky';
+  const label = armed ? `Start over ${on ? 'clear' : 'Murky'}? Tap again` : '';
+  return h`<div class="pz-murkyrow pu-murkyrow">${murkyChip(on, { action: 'murky-toggle', label })}<span class="hint">${MURKY_LINE}</span></div>`;
+}
+
 function switchHtml() {
+  return `${murkyHtml()}${tierSwitchHtml()}`;
+}
+
+function tierSwitchHtml() {
   const others = otherTiers();
   if (!others.length) return '';
   const armed = P.armed;
@@ -305,7 +351,7 @@ function drawAll() {
     ? button(puz.extraTubeUsed ? 'Extra tube added' : 'Add a tube', { disabled: puz.extraTubeUsed, cls: 'is-quiet', attrs: { 'data-action': 'add-tube' } })
     : '';
   ROOT.innerHTML = String(h`<div class="screen-head pu-head">${backButton('Back to the puzzle table')}
-<div class="titles"><div class="title">Purify</div><div class="subtitle" data-subtitle>${TIER_LABEL[P.tier]} · ${P.name}</div></div>
+<div class="titles"><div class="title">Purify</div><div class="subtitle" data-subtitle>${TIER_LABEL[P.tier]}${isMurky(e) ? ' · Murky' : ''} · ${P.name}</div></div>
 ${C.guide.howThisWorksHtml('purify')}
 <button type="button" class="btn pu-undo" data-action="undo" data-tap${puz.history.length ? '' : ' disabled'}>Undo</button></div>
 <div class="screen-body pz-body">
@@ -322,7 +368,7 @@ ${C.guide.howThisWorksHtml('purify')}
 }
 
 function sigOf(e) {
-  return `${e.batchId}|${e.puzzle.moves}|${e.puzzle.history.length}|${e.puzzle.tubes.length}|${P.cb ? 1 : 0}|${entryTier(e)}`;
+  return `${e.batchId}|${e.puzzle.moves}|${e.puzzle.history.length}|${e.puzzle.tubes.length}|${P.cb ? 1 : 0}|${entryTier(e)}|${e.puzzle.murky ? 1 : 0}`;
 }
 
 function tubeEl(i) {
@@ -493,13 +539,20 @@ function pour(from, to) {
   }
   const before = puz.tubes[to].length;
   const colorIdx = topOf(puz.tubes[from]);
+  const hidBefore = hiddenOf(puz, from);
+  const hidBeforeTo = hiddenOf(puz, to);
   const ra = svgRect(from); // measured before the tubes are redrawn
   const rb = svgRect(to);
   const res = C.game.act(pourAct, { from, to });
   if (!res || !res.ok) { setSel(null); return; }
   setSel(null);
-  const fromEl = redrawTube(from);
-  const toEl = redrawTube(to, { newN: res.moved, corkNew: res.completedTube });
+  // Layers whose cloud lifted with this pour (the new top of the source; a corked tube clears whole).
+  const range = (a, b) => { const r = []; for (let k = a; k < b; k++) r.push(k); return r; };
+  const clearedFrom = range(hiddenOf(puz, from), Math.min(hidBefore, puz.tubes[from].length));
+  const clearedTo = range(hiddenOf(puz, to), hidBeforeTo);
+  const fromEl = redrawTube(from, { cleared: clearedFrom });
+  const toEl = redrawTube(to, { newN: res.moved, corkNew: res.completedTube, cleared: clearedTo });
+  if (clearedFrom.length) safe(() => C.audio.tink(lightnessOf(C, puz.colors[topOf(puz.tubes[from])]), 0.26, 0.16)); // a soft glassy note as the cloud lifts
   markCoach();
   safe(() => streamTo(ra, rb, puz.colors[colorIdx], before + res.moved, res.moved));
   safe(() => tipBack(fromEl, ra, rb));
@@ -522,6 +575,7 @@ function pour(from, to) {
     P.celebrating = true;
     P.reward = res.reward;
     if (P.guide) { P.guide.stop(); P.guide = null; }
+    if (P.murkyGuide) { P.murkyGuide.stop(); P.murkyGuide = null; }
     C.game.act(markGuideSeen, { id: 'purify' }); // she has finished a batch: the coach is done
     later(startCelebration, 440);
   }
@@ -566,7 +620,7 @@ function finalize() {
 <div class="row">${swatch(P.hex, 44, { label: P.name })}<div class="grow"><div class="hl" data-purity>${pc.head} batch of <span class="pz-name">${P.name}</span>: ${pc.sells}</div></div></div>
 <ul class="lines">
 <li>${iconSvg('check', { size: 18 })}<span>${jarsIn} ${jarsIn === 1 ? 'jar' : 'jars'} of ${pc.head.toLowerCase()} ${P.name} added to your stock</span></li>
-<li class="coinline">${iconSvg('coin', { size: 18 })}<span>+<b data-roll>0</b> coins${r.coins > r.bonus + 0.0001 ? ', with jars that did not fit' : ' for sorting it'}</span></li>
+<li class="coinline">${iconSvg('coin', { size: 18 })}<span>+<b data-roll>0</b> coins${r.coins > r.bonus + 0.0001 ? ', with jars that did not fit' : ' for sorting it'}${r.murky ? ', with the Murky bonus' : ''}</span></li>
 </ul>
 <div class="pz-actions">${more.length ? button('Next batch', { variant: 'primary', attrs: { 'data-action': 'next-batch', 'data-batch': more[0].id } }) : ''}${button('Back to the table', { variant: more.length ? 'paper' : 'primary', attrs: { 'data-action': 'done' } })}</div>
 </div>`;
@@ -578,7 +632,7 @@ function finalize() {
     P.el.status.replaceWith(cardEl);
     P.el.status = null;
   }
-  ROOT.querySelectorAll('[data-action="undo"],[data-action="add-tube"],[data-action="restart-tier"]').forEach((b) => { b.disabled = true; });
+  ROOT.querySelectorAll('[data-action="undo"],[data-action="add-tube"],[data-action="restart-tier"],[data-action="murky-toggle"]').forEach((b) => { b.disabled = true; });
   const sw = ROOT.querySelector('[data-tools]');
   if (sw) sw.hidden = true;
   if (cardEl) playReward(cardEl, r);
@@ -613,7 +667,7 @@ const pz = () => {
 };
 const nearFull = () => {
   const p = pz();
-  return !!p && p.tubes.some((t) => t.length === p.capacity - 1 && t.every((c) => c === t[0]));
+  return !!p && p.tubes.some((t, i) => t.length === p.capacity - 1 && t.every((c) => c === t[0]) && !C.puzzles.purify.hiddenCount(p, i));
 };
 const anyCork = () => {
   const p = pz();
@@ -630,9 +684,17 @@ function coachSteps() {
 
 function startCoach() {
   if (P.guide) { P.guide.stop(); P.guide = null; }
+  if (P.murkyGuide) { P.murkyGuide.stop(); P.murkyGuide = null; }
   if (!P.entry || !C.guide) return;
   P.guide = C.guide('purify', coachSteps(), { screen: 'purify' });
   P.guide.start();
+  // The first Murky board: one short bubble on a cloudy tube.
+  if (isMurky(P.entry) && C.puzzles.purify.hiddenTotal(P.entry.puzzle) > 0) {
+    P.murkyGuide = C.guide('purify-murky', [
+      { anchor: '[data-coach="purify-murky"]', text: 'Cloudy layers clear up for good once they reach the top.', endsOn: 'got-it' },
+    ], { screen: 'purify' });
+    P.murkyGuide.start();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -701,10 +763,25 @@ function onClick(e) {
     if (!TIER_IDS.includes(tier) || !tierRevealed(tier)) return;
     if (P.entry.puzzle.moves > 0 && P.armed !== tier) { P.armed = tier; updateTools(); return; }
     const batchId = P.entry.batchId;
-    C.game.act((s, args, now) => createPurifyPuzzle(C, s, args, now), { batchId, tier });
+    C.game.act((s, args, now) => createPurifyPuzzle(C, s, args, now), { batchId, tier, murky: isMurky(P.entry) });
     P.entry = activeOf(C.game.state).purify || null;
     drawAll();
     startCoach();
+  } else if (act === 'murky-toggle') {
+    if (!P.entry || P.result || !murkyUnlocked(C, C.game.state)) return;
+    if (P.entry.puzzle.moves > 0 && P.armed !== 'murky') { P.armed = 'murky'; updateTools(); return; }
+    const on = !isMurky(P.entry);
+    const batchId = P.entry.batchId;
+    const tier = entryTier(P.entry);
+    C.game.act((s, args, now) => {
+      C.sim.setSetting(s, { key: 'purifyMurky', value: args.murky });
+      return createPurifyPuzzle(C, s, args, now);
+    }, { batchId, tier, murky: on });
+    P.entry = activeOf(C.game.state).purify || null;
+    drawAll();
+    startCoach();
+    const chip = ROOT.querySelector('[data-action="murky-toggle"]');
+    if (chip) safe(() => C.fx.squash(chip));
   } else if (act === 'done') {
     P.result = null;
     C.back();
@@ -773,6 +850,7 @@ export default {
     P.celebrating = false;
     P.result = null;
     if (P.guide) { P.guide.stop(); P.guide = null; }
+    if (P.murkyGuide) { P.murkyGuide.stop(); P.murkyGuide = null; }
   },
 
   render(state) {

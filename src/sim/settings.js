@@ -11,6 +11,7 @@ export const SETTING_KEYS = Object.freeze({
   reducedMotion: ['system', 'on', 'off'],
   notation: ['short', 'sci'],
   disabledQuestTypes: 'array',
+  purifyMurky: 'boolean', // Purify's Murky mode (hidden layers), remembered like her tier
 });
 
 export const PUZZLE_TIER_IDS = Object.freeze(['relaxed', 'steady', 'tricky', 'master']);

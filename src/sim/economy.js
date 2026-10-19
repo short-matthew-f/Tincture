@@ -89,8 +89,15 @@ export function colorTier(id) {
 export function colorFamily(id) {
   const d = colorDef(id);
   if (d && d.family) return d.family;
+  // Content is static, so a color's family (an Oklch conversion) is worked out once per id.
+  if (typeof id === 'string' && d) {
+    let f = FAMILY_CACHE.get(id);
+    if (f === undefined) { f = hueFamily(d.hex ?? '#888888'); FAMILY_CACHE.set(id, f); }
+    return f;
+  }
   return hueFamily(d?.hex ?? '#888888');
 }
+const FAMILY_CACHE = new Map();
 
 // ---------------------------------------------------------------------------
 // Curves
@@ -122,7 +129,19 @@ export function stationCost(kind, level, id) {
   if (k === 'source' && id && SOURCES_BY_ID[id]) c0 = SOURCES_BY_ID[id].baseCost;
   if (k === 'vehicle' && id && VEHICLES_BY_ID[id]) c0 = VEHICLES_BY_ID[id].cost;
   const growth = k === 'vat' ? 1.10 : def.costGrowth;
-  return c0 * Math.pow(growth, L);
+  return c0 * growthPow(growth, L);
+}
+
+// Math.pow(growth, level) for whole levels, remembered: the flow meter prices every station
+// on every call. Same value as calling Math.pow directly.
+const POW_CACHE = new Map();
+function growthPow(growth, L) {
+  if (!Number.isInteger(L) || L > 4096) return Math.pow(growth, L);
+  let row = POW_CACHE.get(growth);
+  if (!row) { row = []; POW_CACHE.set(growth, row); }
+  let v = row[L];
+  if (v === undefined) { v = Math.pow(growth, L); row[L] = v; }
+  return v;
 }
 
 /**
@@ -167,9 +186,21 @@ export function colorPrice(state, colorId, purity = 'standard') {
   return base * scale * pm * (1 + ESSENCE_STEP * essenceOf(state, colorId));
 }
 
+// discoveredCount is read thousands of times per simulated day (incomeMultiplier, unlock
+// status, routes), and Object.keys on the catalog allocates each time. The count is cached
+// per `catalog.discovered` object (a new object, e.g. a new game or a loaded save, starts
+// uncached). Contract: colors are added only through discovery.discover(), which calls
+// invalidateDiscoveredCount; code that writes catalog.discovered directly after the count
+// has been read must call it too (test/sim-discovery.test.js pins this).
+const COUNTS = new WeakMap();
 export function discoveredCount(state) {
-  return Object.keys(state?.catalog?.discovered ?? {}).length;
+  const d = state?.catalog?.discovered;
+  if (!d || typeof d !== 'object') return 0;
+  let n = COUNTS.get(d);
+  if (n === undefined) { n = Object.keys(d).length; COUNTS.set(d, n); }
+  return n;
 }
+export function invalidateDiscoveredCount(state) { const d = state?.catalog?.discovered; if (d) COUNTS.delete(d); }
 
 function boostSum(state, kind, now) {
   const t = now ?? state?.lastTick ?? 0;
@@ -246,6 +277,20 @@ export function grinderPurityBonus(state) {
 
 /** Recipe weights normalized to shares, split into consumed pigments (white/black drops are free). */
 export function recipeShares(colorId) {
+  // Content is static (colorDef reads frozen content tables), so the shares for an id
+  // never change; rates() asks for each mixer's recipe several times per call.
+  if (typeof colorId === 'string') {
+    if (SHARES_CACHE.has(colorId)) return SHARES_CACHE.get(colorId);
+    const v = computeRecipeShares(colorId);
+    SHARES_CACHE.set(colorId, v);
+    return v;
+  }
+  return computeRecipeShares(colorId);
+}
+
+const SHARES_CACHE = new Map();
+
+function computeRecipeShares(colorId) {
   const d = colorDef(colorId);
   const recipe = d?.recipe;
   if (!Array.isArray(recipe) || !recipe.length) return null;
@@ -256,7 +301,7 @@ export function recipeShares(colorId) {
     if (r.pigment === 'white' || r.pigment === 'black') continue;
     out[r.pigment] = (out[r.pigment] ?? 0) + Math.max(0, num(r.weight)) / total;
   }
-  return out;
+  return Object.freeze(out); // shared between callers: read-only
 }
 
 // ---------------------------------------------------------------------------

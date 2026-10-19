@@ -99,7 +99,8 @@ export function next(state, now = num(state?.lastTick)) {
   }
 
   // 3. An unlock she can buy now (cheapest first).
-  const ready = statusAll(state).filter((u) => u && u.canBuy).sort((a, b) => a.cost - b.cost);
+  const colors = discoveredCount(state); // shared by the unlock ladder and the room check below
+  const ready = statusAll(state, colors).filter((u) => u && u.canBuy).sort((a, b) => a.cost - b.cost);
   if (ready.length) {
     const u = ready[0];
     return pick('unlock', unlockLabel(u.id, u.cost, notation), { id: u.id }, u.cost, true, 'unlock');
@@ -107,7 +108,6 @@ export function next(state, now = num(state?.lastTick)) {
 
   // 4. A room whose colors are met (rooms that ARE unlocks are covered above),
   //    or another mixer: whichever is cheaper.
-  const colors = discoveredCount(state);
   const owned = new Set(state?.rooms ?? []);
   const room = ROOMS.find((r) => !owned.has(r.id) && !r.unlock && r.cost > 0
     && colors >= r.colorsRequired && num(state?.phase, 1) >= r.phase && coins >= r.cost);
