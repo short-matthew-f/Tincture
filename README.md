@@ -111,6 +111,10 @@ and its offline cache: https://short-matthew-f.github.io/Tincture/proto/
 
 ## Status
 
+- **0.3.2** (playtest): Purify boards are made from the batch's own corner of
+  the wheel (a coral batch sorts into corals, roses and peaches), mixed-in
+  colors are never near-white, empty tubes read as dark glass, and the
+  batch's own color glows once corked.
 - **0.3.1** (whole-game "does it work?" audit, docs/AUDIT-0.3.1.md): each
   mixer and its jar are one station ("Mixer 1 makes Rose · 312 of 400 jars"),
   with "Bigger jars" for a longer time away; tap any station, the Make / Store

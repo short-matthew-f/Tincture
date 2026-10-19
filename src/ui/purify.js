@@ -26,7 +26,7 @@
  * stats.purified.
  */
 
-import { h, raw, backButton, button, swatch, iconSvg } from './kit.js';
+import { h, raw, backButton, button, swatch, iconSvg, safeHex } from './kit.js';
 import { markGuideSeen } from './guide.js';
 import {
   injectStyle, PZ_CSS, ensureActive, activeOf, createPurifyPuzzle, patternFill, ensureDefs, lightnessOf, coinsText,
@@ -40,6 +40,8 @@ const CSS = `
 .pu-tube { display: flex; justify-content: center; align-items: flex-start; box-sizing: border-box; width: var(--col); border: 0; padding: 18px 0 0; background: transparent; position: relative; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
 .pu-tube svg { display: block; overflow: visible; width: var(--tw); height: auto; transition: transform 140ms var(--ease-out); }
 .pu-tube.is-sel svg { transform: translateY(-16px); }
+.pu-tube.is-goal svg { filter: drop-shadow(0 0 6px rgba(240, 196, 92, .95)); }
+.pz-status .pu-goal { display: inline-block; width: 14px; height: 14px; border-radius: 4px; vertical-align: -2px; margin-right: 6px; box-shadow: inset 0 0 0 1.5px rgba(42,38,34,.3); }
 .pu-tube:focus-visible { outline: 2px solid var(--paper); outline-offset: -2px; border-radius: 8px; }
 .pu-layer-new, .pu-cork-new { transform-box: fill-box; transform-origin: 50% 100%; }
 .pu-tube.fx-lifted { transform-origin: 50% 100%; }
@@ -180,11 +182,16 @@ function tubeSvg(puz, i, { newN = 0, corkNew = false } = {}) {
   const cork = corked ? `<g class="pu-cork${corkNew ? ' pu-cork-new' : ''}">${CORK}</g>` : '';
   return `<svg viewBox="0 0 44 ${H}" aria-hidden="true" focusable="false" data-h="${H}" data-l="${L}">
 <defs><clipPath id="${id}"><path d="${shape} Z"/></clipPath></defs>
-<path d="${shape} Z" fill="#F2F4F0" fill-opacity=".9"/>
+<path d="${shape} Z" fill="#2A2622" fill-opacity=".38"/>
 <g clip-path="url(#${id})">${layers}</g>
 <rect x="10" y="${top + 8}" width="4" height="${Math.max(10, bodyH - 36)}" rx="2" fill="#FFFFFF" fill-opacity=".45"/>
 <path d="${shape}" fill="none" stroke="#2A2622" stroke-width="2.5" stroke-linecap="round"/>
 ${cork}</svg>`;
+}
+
+/** True for the batch's own color (the one she is purifying). */
+function isGoalColor(hex) {
+  try { return !!(hex && P.hex && C.color.deltaEHex(hex, P.hex) < 3); } catch { return false; }
 }
 
 function tubeButton(puz, i, opts) {
@@ -194,7 +201,8 @@ function tubeButton(puz, i, opts) {
   const label = tube.length
     ? `Tube ${i + 1}, ${tube.length} of ${puz.capacity} layers${corked ? ', corked' : ''}`
     : `Tube ${i + 1}, empty`;
-  return `<button type="button" class="pu-tube${lifted}${corked ? ' is-corked' : ''}" data-tube="${i}" aria-label="${label}">${tubeSvg(puz, i, opts)}</button>`;
+  const goal = corked && isGoalColor(puz.colors[tube[0]]);
+  return `<button type="button" class="pu-tube${lifted}${corked ? ' is-corked' : ''}${goal ? ' is-goal' : ''}" data-tube="${i}" aria-label="${label}${goal ? `, your ${P.name}` : ''}">${tubeSvg(puz, i, opts)}</button>`;
 }
 
 function shelfHtml(puz) {
@@ -234,7 +242,7 @@ function statusHtml(puz) {
   const hl = corked
     ? (left <= 0 ? 'Every color is corked' : `${corked} ${corked === 1 ? 'color' : 'colors'} corked, ${left} more to go`)
     : 'Pour each color into its own tube';
-  return h`<div class="hl">${hl}</div><div class="dt">Tap a tube, then tap where to pour. You can pour onto the same color or into an empty tube.</div>`;
+  return h`<div class="hl">${hl}</div><div class="dt"><span class="pu-goal" style="background:${safeHex(P.hex)}"></span>Your ${P.name} is in here with colors that got mixed in. Tap a tube, then tap where to pour: onto the same color or into an empty tube.</div>`;
 }
 
 function updateStatus() {

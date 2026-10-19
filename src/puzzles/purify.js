@@ -20,7 +20,7 @@
 // "sorted but split" one.
 
 import {
-  hexToRgb, rgbToHex, oklchToHex, clampToGamut, deltaEHex,
+  hexToRgb, rgbToHex, oklchToHex, hexToOklch, clampToGamut, deltaEHex,
 } from '../color.js';
 import { shuffle, pick } from '../rng.js';
 
@@ -97,6 +97,62 @@ function chooseColors(n, palette, rng) {
   return out.slice(0, n);
 }
 
+/** What an empty tube looks like on the shelf (ui/purify.js: dark glass over walnut). */
+export const EMPTY_GLASS = '#5C412E';
+
+/**
+ * Colors for a batch of `target`: the batch's own color plus its "impurities", drawn
+ * from the same corner of the color wheel (her nearby colors first, then lighter,
+ * darker and neighboring-hue versions of the target), so a coral batch sorts into
+ * corals, roses, peaches and russets. Never near-white or near-black (those read as
+ * an empty tube or a shadow), unless the batch itself is that pale.
+ */
+function themedColors(n, target, palette, rng) {
+  const norm = (h) => {
+    try { return rgbToHex(hexToRgb(h)); } catch { return null; }
+  };
+  const t = norm(target);
+  if (!t) return chooseColors(n, palette, rng);
+  const out = [t];
+  const fits = (hex, minDE) => out.every((h) => deltaEHex(h, hex) >= minDE);
+  const tl = hexToOklch(t);
+  const hue = Number.isFinite(tl.h) ? tl.h : 30;
+  const C = Math.min(0.16, Math.max(0.08, tl.C * 1.3 + 0.03));
+  // Not near-white, and clearly apart from the dark glass of an empty tube.
+  const okL = (hex) => { const L = hexToOklch(hex).L; return L >= 0.4 && L <= 0.86 && deltaEHex(hex, EMPTY_GLASS) >= 16; };
+  // Candidates in widening hue windows: the batch's own hue family first (lighter,
+  // darker, softer, brighter), then its neighbors, then the wider wheel.
+  const ring = (dhs) => {
+    const g = [];
+    for (const dh of dhs) for (const L of [0.44, 0.52, 0.6, 0.68, 0.76, 0.84]) for (const c of [C * 0.6, C, C * 1.4]) {
+      g.push(oklchToHex(clampToGamut({ L, C: c, h: (hue + dh + 360) % 360 })));
+    }
+    return g.filter(okL);
+  };
+  const near = (palette || []).map(norm).filter(Boolean).filter((h) => h !== t && okL(h));
+  // Closest to the batch first, with a little shuffle so boards differ.
+  const byNear = (list) => list.map((h) => ({ h, k: deltaEHex(h, t) + rng() * 6 })).sort((a, b) => a.k - b.k).map((x) => x.h);
+  const within = (list, deg) => list.filter((h) => {
+    const o = hexToOklch(h);
+    const d = Math.abs((((o.h - hue) % 360) + 540) % 360 - 180);
+    return o.C < 0.03 || d <= deg;
+  });
+  const passes = [
+    [byNear([...within(near, 30), ...ring([0, 15, -15, 30, -30])]), [13, 11]],
+    [byNear([...within(near, 70), ...ring([50, -50, 70, -70])]), [13, 11]],
+    [byNear([...near, ...ring([100, -100, 140, -140, 180])]), [14, 11, 9]],
+  ];
+  for (const [cands, ladder] of passes) {
+    for (const minDE of ladder) {
+      for (const h of cands) if (out.length < n && !out.includes(h) && fits(h, minDE)) out.push(h);
+    }
+  }
+  if (out.length < n) {
+    for (const h of chooseColors(n + 4, palette, rng)) if (out.length < n && !out.includes(h) && fits(h, 8)) out.push(h);
+  }
+  return shuffle(rng, out.slice(0, n));
+}
+
 /** Legacy (v0.1): puzzle size for a batch worth `valueMinutes` minutes of production. Use sizeForTier. */
 export function sizeForBatch(valueMinutes) {
   const v = Number.isFinite(valueMinutes) ? Math.max(0, valueMinutes) : 0;
@@ -141,7 +197,7 @@ function reversePour(tubes, capacity, rng) {
 }
 
 /**
- * create({tier?, colors = 4..9, tubes = colors + 2, capacity = 4, extraTube?}, rng, {palette}) -> puzzle
+ * create({tier?, colors = 4..9, tubes = colors + 2, capacity = 4, extraTube?}, rng, {palette, target?}) -> puzzle
  * {tubes:[[colorIndex…]] bottom→top, capacity, colors:[hex], history:[], moves:0,
  *  extraTubeUsed:false, tier, extraTube}
  * With a `tier`, colors / tubes / extraTube come from TIERS (explicit numbers
@@ -154,7 +210,9 @@ export function create(opts, rng, extra) {
   const nColors = clamp(Math.floor(o.colors || (t && t.colors) || MIN_COLORS), 2, 12);
   const capacity = Math.max(2, Math.floor(o.capacity || CAPACITY));
   const nTubes = Math.max(nColors + 1, Math.floor(o.tubes || (t && t.tubes) || nColors + 2));
-  const colors = chooseColors(nColors, extra && extra.palette, rng);
+  const colors = extra && extra.target
+    ? themedColors(nColors, extra.target, extra.palette, rng)
+    : chooseColors(nColors, extra && extra.palette, rng);
   const allowExtra = typeof o.extraTube === 'boolean' ? o.extraTube : (t ? t.extraTube : true);
 
   const fresh = () => {

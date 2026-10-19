@@ -512,3 +512,22 @@ test('packing: a missort is neutral, only that crate loses its bonus', () => {
   assert.equal(r.perCrate['harbor-town'].clean, true);
   assert.equal(packing.drop(packing.create({ routes: ROUTES, jars: JARS }, mulberry32(3)), 'nowhere').ok, false);
 });
+
+test('purify: a batch sorts into its own color and nearby ones, none mistakable for an empty tube', () => {
+  const { createForTier, EMPTY_GLASS } = purify;
+  const target = '#eacac0'; // a pale coral tint
+  for (let sd = 1; sd <= 6; sd++) {
+    const p = createForTier('steady', mulberry32(sd), { target, palette: [] });
+    assert.ok(p.colors.some((c) => deltaEHex(c, target) < 3), 'the batch color is one of the tubes');
+    for (let i = 0; i < p.colors.length; i++) {
+      for (let j = i + 1; j < p.colors.length; j++) assert.ok(deltaEHex(p.colors[i], p.colors[j]) >= 10, 'colors stay tellable apart');
+      if (deltaEHex(p.colors[i], target) >= 3) {
+        assert.ok(deltaEHex(p.colors[i], EMPTY_GLASS) >= 16, 'not mistakable for empty glass');
+        assert.ok(hexToOklch(p.colors[i]).L <= 0.86, 'no near-white impurities');
+      }
+    }
+    // Relaxed boards stay in the batch's corner of the wheel.
+    const r = createForTier('relaxed', mulberry32(sd), { target, palette: [] });
+    for (const c of r.colors) assert.ok(deltaEHex(c, target) <= 40, `${c} is near the batch`);
+  }
+});

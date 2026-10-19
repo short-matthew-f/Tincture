@@ -217,13 +217,13 @@ export function createPurifyPuzzle(ctx, s, { batchId, tier } = {}, now = 0) {
   const near = ctx.sim.discovery.discoveredColors(s)
     .map((c) => ({ hex: c.hex, de: deltaEHex(c.hex, hex) }))
     .sort((a, b) => a.de - b.de)
-    .slice(0, 8)
+    .slice(0, 12)
     .map((c) => c.hex);
   const palette = [hex, ...near];
   const rng = stateRng(s);
   let puzzle = null;
   for (let attempt = 0; attempt < 8; attempt++) {
-    puzzle = ctx.puzzles.purify.createForTier(t, rng, { palette });
+    puzzle = ctx.puzzles.purify.createForTier(t, rng, { palette, target: hex });
     if (puzzle.colors.some((c) => deltaEHex(c, hex) < 3)) break; // her batch's own color is in the tubes
   }
   const entry = { batchId, color: batch.color, puzzle, tier: t, startedAt: now };
