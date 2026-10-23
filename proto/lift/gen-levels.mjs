@@ -15,6 +15,7 @@ import {
 const SEEDS = +(process.env.SEEDS || 24);
 const FITS = [0.95, 0.8, 0.65, 0.5, 0.35];
 const SOLVE_CAP = 60000;
+const RERANK = 12;
 export const CASUAL_SEED = 4242, CASUAL_RUNS = 100;
 
 function generateOne(idx) {
@@ -34,6 +35,12 @@ function generateOne(idx) {
     }
   }
   cands.sort((a, b) => a.d - b.d || a.seed - b.seed || b.fit - a.fit);
+  // The quick 40-run estimate is noisy, so re-rank the closest few by the rate
+  // that gets stored (the 100-run casual measure) before picking one.
+  const head = cands.slice(0, RERANK);
+  for (const c of head) c.d = Math.abs(casualRate(c.L, CASUAL_SEED, CASUAL_RUNS) - gen.target);
+  head.sort((a, b) => a.d - b.d || a.seed - b.seed || b.fit - a.fit);
+  cands.splice(0, head.length, ...head);
   // Late levels (target under 15%) all sit near 0% casual, so among the
   // closest few solved layouts keep the one with the most trap steps.
   const late = gen.target < 0.15;

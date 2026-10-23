@@ -67,7 +67,7 @@ test('the solver independently solves the early levels within a small node cap',
 test('difficulty climbs across the bands (casual clears, traps, parking, length)', () => {
   const band = (a, b) => LEVELS.slice(a, b).map((L) => L.stats);
   const mean = (xs, k) => xs.reduce((s, x) => s + x[k], 0) / xs.length;
-  const early = band(0, 4), mid = band(4, 13), late = band(19, LEVELS.length);
+  const early = band(0, BANDS[1].from), mid = band(BANDS[1].from, BANDS[4].from), late = band(BANDS[6].from, LEVELS.length);
   assert.ok(mean(early, 'casual') >= 0.8, 'early levels teach: casual players nearly always clear');
   assert.ok(mean(early, 'casual') > mean(mid, 'casual') && mean(mid, 'casual') > mean(late, 'casual'), 'casual clears fall band by band');
   assert.ok(Math.max(...late.map((x) => x.casual)) < 0.1, 'the hardest levels: under 10% for a random player');

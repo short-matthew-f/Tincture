@@ -2,10 +2,12 @@
 // into a Lifting Table picture grid in palette letters. No dependencies.
 //
 //   node proto/lift/import-art.mjs <file.png> --id fox2 [--size 28x36] [--colors 10]
-//        [--palette sxogjr...] [--min 3] [--png preview.png] [--write] [--gen]
+//        [--crop 0,0.4,1,1] [--palette sxogjr...] [--min 3] [--png preview.png] [--write] [--gen]
 //
 //  --size     target grid, columns x rows (default 28x36; the image is
 //             center-cropped to that aspect, then area-averaged)
+//  --crop     l,t,r,b as fractions of the image, e.g. 0,0.4,1,1 for the lower 60%
+//             (the grid's aspect is center-cropped inside that box)
 //  --colors   at most this many palette colors (default 10)
 //  --palette  only these palette letters (default: the whole palette)
 //  --min      regions smaller than this many cells merge into a neighbor (default 3)
@@ -89,11 +91,15 @@ const PAPER = hexLin('#EFE7D6');
 // ---------- the pipeline ----------
 // Center-crop to the grid's aspect, then average each cell's area in linear
 // light (alpha composited over the paper). Returns W*H OKLab colors.
-export function downsample(img, W, H) {
-  const want = W / H, have = img.W / img.H;
-  let cw = img.W, chh = img.H;
-  if (have > want) cw = img.H * want; else chh = img.W / want;
-  const x0 = (img.W - cw) / 2, y0 = (img.H - chh) / 2, sx = cw / W, sy = chh / H;
+export function downsample(img, W, H, crop) {
+  // crop = [left, top, right, bottom] as fractions of the image (default whole);
+  // the grid's aspect is then center-cropped inside that box.
+  const [fl, ft, fr, fb] = crop || [0, 0, 1, 1];
+  const bx0 = fl * img.W, by0 = ft * img.H, bw = (fr - fl) * img.W, bh = (fb - ft) * img.H;
+  const want = W / H, have = bw / bh;
+  let cw = bw, chh = bh;
+  if (have > want) cw = bh * want; else chh = bw / want;
+  const x0 = bx0 + (bw - cw) / 2, y0 = by0 + (bh - chh) / 2, sx = cw / W, sy = chh / H;
   const out = [];
   for (let r = 0; r < H; r++) for (let c = 0; c < W; c++) {
     const ax = x0 + c * sx, bx = ax + sx, ay = y0 + r * sy, by = ay + sy;
@@ -180,8 +186,8 @@ export function quantize(labs, W, H, { letters = Object.keys(PALETTE), colors = 
   return rows;
 }
 
-export function importPNG(buf, { W = 28, H = 36, ...opts } = {}) {
-  return quantize(downsample(decodePNG(buf), W, H), W, H, opts);
+export function importPNG(buf, { W = 28, H = 36, crop, ...opts } = {}) {
+  return quantize(downsample(decodePNG(buf), W, H, crop), W, H, opts);
 }
 
 // ---------- command line ----------
@@ -190,10 +196,10 @@ if (process.argv[1] === here) {
   const args = process.argv.slice(2);
   const opt = (k, d) => { const i = args.indexOf(`--${k}`); return i >= 0 ? args[i + 1] : d; };
   const file = args.find((a, i) => !a.startsWith('--') && !(i > 0 && args[i - 1].startsWith('--') && !['--write', '--gen'].includes(args[i - 1])));
-  if (!file) { console.log('usage: node proto/lift/import-art.mjs <file.png> --id <id> [--size 28x36] [--colors 10] [--palette letters] [--min 3] [--png preview.png] [--write] [--gen]'); process.exit(1); }
+  if (!file) { console.log('usage: node proto/lift/import-art.mjs <file.png> --id <id> [--size 28x36] [--crop l,t,r,b] [--colors 10] [--palette letters] [--min 3] [--png preview.png] [--write] [--gen]'); process.exit(1); }
   const [W, H] = opt('size', '28x36').split('x').map(Number);
   const id = opt('id', 'imported');
-  const rows = importPNG(readFileSync(file), { W, H, colors: +opt('colors', 10), min: +opt('min', 3), letters: opt('palette') ? [...opt('palette')] : undefined });
+  const rows = importPNG(readFileSync(file), { W, H, crop: opt('crop') ? opt('crop').split(',').map(Number) : undefined, colors: +opt('colors', 10), min: +opt('min', 3), letters: opt('palette') ? [...opt('palette')] : undefined });
   const used = [...new Set(rows.join(''))].sort().join('');
   console.log(`${id}: ${W}x${H}, ${used.length} colors (${used})`);
   if (opt('png')) {
