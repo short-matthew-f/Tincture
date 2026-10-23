@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#F4EFE4">
+<title>The Tangle Basket</title>
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Young+Serif&amp;family=Figtree:wght@400;500;600;700&amp;display=swap">
+<link rel="stylesheet" href="../shared.css">
+<style>
+  :root { --gutter: 12px; --wood: #B48A5A; --wood-d: #8E6A42; --wood-l: #D2AF7E; --gold-soft: #F3E3B8; }
+  [hidden] { display: none !important; }
+  button { font: inherit; color: inherit; }
+  body { overscroll-behavior-y: none; background: radial-gradient(120% 70% at 50% 0%, #F8F3E8 0%, var(--paper) 60%, #EDE4D2 100%); }
+  .app { max-width: 480px; margin: 0 auto; padding: 0 var(--gutter) calc(8px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 6px; min-height: 100dvh; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .sr:focus-within { position: static; width: auto; height: auto; clip: auto; white-space: normal; }
+
+  /* top bar */
+  .top { display: flex; align-items: center; gap: 4px; padding-top: 2px; }
+  .iconbtn { appearance: none; border: 0; background: none; min-width: 44px; min-height: 44px; display: grid; place-items: center; border-radius: 12px; color: var(--ink-soft); cursor: pointer; text-decoration: none; font-size: 22px; touch-action: manipulation; }
+  .iconbtn:active { background: rgba(42,38,34,.06); }
+  .levelbtn { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px; text-align: left; padding: 0 10px; }
+  .levelbtn .nm { font: 400 17px var(--font-display); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .levelbtn .no { font-size: 12px; font-variant-numeric: tabular-nums; font-weight: 700; color: var(--ink-soft); white-space: nowrap; }
+  .levelbtn .chev { margin-left: auto; color: var(--ink-soft); font-size: 13px; }
+  .tog { min-width: 44px; padding: 0 8px; font-size: 15px; }
+  .settings .btn svg { width: 18px; height: 18px; vertical-align: -4px; margin-right: 4px; }
+
+  /* the finished-skein shelf */
+  .shelfrow { display: flex; align-items: flex-end; gap: 8px; height: 26px; font-size: 12px; color: var(--ink-soft); position: relative; }
+  .shelfrow::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 4px; border-radius: 2px; background: linear-gradient(var(--wood-l), var(--wood-d)); box-shadow: 0 2px 0 rgba(42,38,34,.12); }
+  .shelfrow b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+  #shelfCount { padding-bottom: 6px; white-space: nowrap; }
+  #shelf { flex: 1; display: flex; gap: 1px; overflow: hidden; height: 22px; align-items: flex-end; padding-bottom: 3px; }
+  #shelf svg { flex: none; width: 26px; height: 17px; }
+
+  /* the rack of spools */
+  .rack { display: grid; grid-template-columns: repeat(var(--slots, 5), minmax(0, 1fr)); gap: 6px; padding: 7px 8px 5px; border-radius: 14px;
+    background: repeating-linear-gradient(90deg, rgba(0,0,0,.03) 0 1px, transparent 1px 21px), linear-gradient(#CDAF83, #B8996B); box-shadow: inset 0 1px 0 rgba(255,240,210,.5), 0 3px 0 rgba(42,38,34,.16); }
+  .rack.nudge { animation: nudge .32s ease-in-out; }
+  @keyframes nudge { 0%, 100% { transform: none; } 30% { transform: translateX(3px); } 65% { transform: translateX(-2px); } }
+  .slot { position: relative; display: flex; flex-direction: column; align-items: center; gap: 1px; min-width: 0; }
+  .peg { position: relative; width: 100%; max-width: 64px; height: 62px; display: grid; place-items: end center; }
+  .peg::after { content: ''; position: absolute; left: 14%; right: 14%; bottom: 0; height: 5px; border-radius: 50%; background: rgba(70,46,22,.28); }
+  .peg.empty::before { content: ''; position: absolute; left: 50%; bottom: 3px; width: 6px; height: 40px; margin-left: -3px; border-radius: 3px; background: linear-gradient(90deg, #8E6A42, #C9A472, #8E6A42); box-shadow: 0 1px 0 rgba(42,38,34,.2); }
+  .peg.spare { outline: 2px dashed var(--gold); outline-offset: -2px; border-radius: 10px; }
+  .peg.hot { animation: hot 1.1s ease-in-out 2; border-radius: 10px; }
+  @keyframes hot { 0%, 100% { box-shadow: 0 0 0 0 rgba(226,176,74,0); } 50% { box-shadow: 0 0 0 4px rgba(226,176,74,.55); } }
+  .cnt { font-size: 11px; font-weight: 700; line-height: 14px; color: rgba(42,38,34,.72); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .cnt.soft { font-weight: 600; color: rgba(42,38,34,.5); }
+
+  /* a spool: two wooden flanges, the core, and the yarn wound on it */
+  .spool { --c: #999; --f: 0; position: relative; width: 40px; height: 54px; margin-bottom: 2px; }
+  .spool .fl { position: absolute; left: 0; right: 0; height: 8px; border-radius: 50%; background: radial-gradient(70% 90% at 45% 35%, #E2C493, #B38A57 70%, #8E6A42); box-shadow: 0 1px 0 rgba(42,38,34,.25); z-index: 2; }
+  .spool .fl.t { top: 0; } .spool .fl.b { bottom: 0; }
+  .spool .core { position: absolute; left: 50%; top: 4px; bottom: 4px; width: 14px; margin-left: -7px; background: linear-gradient(90deg, #9C7A4C, #D6B888 45%, #9C7A4C); z-index: 1; }
+  .spool .wrap { position: absolute; top: 6px; bottom: 6px; left: 50%; width: calc(14px + var(--f) * 22px); transform: translateX(-50%); border-radius: 6px; z-index: 1; opacity: calc(var(--f) * 8);
+    background:
+      linear-gradient(90deg, rgba(0,0,0,.28), rgba(0,0,0,0) 30%, rgba(255,255,255,.18) 50%, rgba(0,0,0,0) 70%, rgba(0,0,0,.3)),
+      repeating-linear-gradient(115deg, rgba(255,248,230,.22) 0 1.6px, rgba(0,0,0,0) 1.6px 3.4px, rgba(0,0,0,.16) 3.4px 4.4px, rgba(0,0,0,0) 4.4px 5.6px),
+      var(--c);
+    background-size: 100% 100%, 22px 100%, 100% 100%; transition: width .18s ease-out; }
+  .spool.winding .wrap { animation: wind .22s linear infinite; }
+  @keyframes wind { to { background-position: 0 0, 22px 0, 0 0; } }
+  .spool.winding { animation: wobble .22s ease-in-out infinite; }
+  @keyframes wobble { 50% { transform: rotate(1.2deg); } }
+  .spool .gl { position: absolute; left: 50%; top: 50%; width: 15px; height: 15px; margin: -7.5px 0 0 -7.5px; z-index: 3; display: none; filter: drop-shadow(0 0 1.5px rgba(255,255,255,.8)); }
+  .glyphs .spool .gl { display: block; }
+  .spool.hinted, .peg.hinted { animation: hot 1.1s ease-in-out infinite; border-radius: 10px; }
+
+  /* the basket */
+  .basketwrap { position: relative; display: flex; justify-content: center; align-items: center; flex: 1 0 auto; }
+  .basket { position: relative; padding: 9px; border-radius: 28px;
+    background:
+      repeating-linear-gradient(45deg, rgba(90,60,28,.16) 0 3px, rgba(255,240,210,.08) 3px 7px),
+      repeating-linear-gradient(-45deg, rgba(90,60,28,.12) 0 3px, rgba(255,240,210,.06) 3px 7px),
+      linear-gradient(160deg, #C9A06A, #A9804C 60%, #8C6638);
+    box-shadow: inset 0 0 0 1px rgba(42,38,34,.3), inset 0 2px 0 rgba(255,236,200,.4), 0 5px 12px rgba(42,38,34,.22); }
+  #heap { display: block; border-radius: 20px; touch-action: none; cursor: pointer; -webkit-user-select: none; user-select: none; }
+  .cheer { position: absolute; left: 50%; top: 42%; z-index: 6; pointer-events: none; transform: translate(-50%, -50%); font: 400 23px var(--font-display); color: #4A3A26; background: rgba(251,246,234,.9); padding: 7px 16px; border-radius: 999px; box-shadow: 0 2px 10px rgba(42,38,34,.18); white-space: nowrap; }
+  #fly { position: fixed; left: 0; top: 0; pointer-events: none; z-index: 40; visibility: hidden; }
+
+  /* message row: in thumb reach */
+  .msgrow { display: flex; align-items: center; gap: 6px; min-height: 48px; flex-wrap: wrap; }
+  #msg { flex: 1 1 150px; margin: 0; font-size: 14px; line-height: 1.3; font-weight: 500; }
+  .msgrow .btns { display: flex; gap: 6px; margin-left: auto; }
+  .msgrow .btn { white-space: nowrap; }
+  .btn:disabled { opacity: .45; }
+
+  /* sheets */
+  .sheet { position: fixed; inset: 0; z-index: 60; background: rgba(42,38,34,.32); display: flex; align-items: flex-end; justify-content: center; }
+  .sheet .panel { width: 100%; max-width: 480px; max-height: 92dvh; overflow-y: auto; background: var(--paper); border-radius: 20px 20px 0 0; padding: 14px 16px calc(16px + env(safe-area-inset-bottom)); box-shadow: 0 -8px 30px rgba(42,38,34,.2); }
+  .sheet h2 { font: 400 24px var(--font-display); margin: 4px 0 6px; }
+  .sheet .x { float: right; }
+  .settings { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .band { font: 600 11px var(--font-ui); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-soft); margin: 14px 2px 6px; }
+  .lvls { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .lvls button { width: 100%; min-height: 64px; display: flex; align-items: center; gap: 8px; text-align: left; border: 0; border-radius: 12px; background: var(--card); box-shadow: 0 1px 0 var(--line); padding: 6px 8px; cursor: pointer; position: relative; }
+  .lvls button[aria-current="true"] { box-shadow: 0 0 0 2px var(--gold); background: #FBF3DD; }
+  .lvls canvas { flex: none; width: 40px; height: 50px; border-radius: 7px; background: #EDE3CF; box-shadow: inset 0 0 0 1px rgba(42,38,34,.12); }
+  .lvls .t { min-width: 0; font-size: 13px; line-height: 1.25; }
+  .lvls .t b { display: block; font-size: 11px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+  .lvls .chip { display: inline-block; margin-top: 2px; font-size: 10px; font-weight: 700; color: #6A5A1E; background: var(--gold-soft); border-radius: 999px; padding: 1px 6px; }
+  .tick { position: absolute; left: 34px; top: 4px; width: 20px; height: 20px; border-radius: 50%; background: var(--gold-soft); box-shadow: 0 0 0 2px #fff, 0 1px 2px rgba(42,38,34,.3); display: grid; place-items: center; color: #6A5A1E; font-size: 12px; font-weight: 800; }
+  .steps { display: flex; gap: 6px; justify-content: center; margin: 10px 0; }
+  .steps i { width: 8px; height: 8px; border-radius: 50%; background: rgba(42,38,34,.18); }
+  .steps i.on { background: var(--accent); }
+  .how p { font-size: 15px; line-height: 1.45; margin: 8px 0; }
+  .how svg.ill { display: block; width: 100%; max-width: 320px; height: auto; margin: 6px auto; }
+  .row2 { display: flex; gap: 8px; margin-top: 12px; }
+  .row2 .btn { flex: 1; }
+  .intro .item { display: flex; gap: 12px; align-items: center; margin: 10px 0; }
+  .intro .item svg { flex: none; width: 56px; height: 56px; }
+  .intro .item p { margin: 0; font-size: 15px; line-height: 1.4; }
+  .intro .item strong { display: block; font: 400 17px var(--font-display); }
+
+  /* finish: the shelf of skeins */
+  .finish { text-align: center; }
+  .bigshelf { margin: 14px 0 10px; padding: 10px 6px 0; border-radius: 12px; background: linear-gradient(180deg, #F3EAD8, #EADBBE); }
+  .bigshelf .row { display: flex; justify-content: center; align-items: flex-end; flex-wrap: wrap; gap: 6px 4px; padding-bottom: 6px; border-bottom: 9px solid var(--wood-d); box-shadow: 0 2px 0 rgba(42,38,34,.15); margin-bottom: 12px; }
+  .pile { display: flex; flex-direction: column; align-items: center; gap: 2px; flex: 0 1 23%; min-width: 0; }
+  .pile .sk { display: flex; flex-direction: column-reverse; align-items: center; }
+  .pile .sk svg { width: 50px; height: 30px; margin-top: -11px; }
+  .pile .sk svg:last-child { margin-top: 0; }
+  .pile .tag { font-size: 11px; line-height: 1.2; color: var(--ink); background: var(--card); padding: 2px 6px; border-radius: 6px; box-shadow: 0 1px 0 var(--line); max-width: 100%; }
+  .knits { font: 400 18px/1.35 var(--font-display); margin: 4px 0 2px; }
+  .finish .btn { width: 100%; margin-top: 8px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .spool.winding, .spool.winding .wrap, .peg.hot, .spool.hinted, .peg.hinted, .rack.nudge { animation: none; }
+    .spool .wrap { transition: none; }
+    .peg.hot, .peg.hinted { box-shadow: 0 0 0 3px rgba(226,176,74,.6); }
+  }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <header class="top">
+    <a class="iconbtn" href="../" aria-label="Back to the prototypes">&#8592;</a>
+    <button type="button" class="btn small levelbtn" id="levelsBtn" aria-haspopup="dialog">
+      <span class="no" id="lvNo">1/20</span><span class="nm" id="lvName">First tangle</span><span class="chev" aria-hidden="true">&#9662;</span>
+    </button>
+    <button type="button" class="btn small tog" id="howBtn" aria-haspopup="dialog" aria-label="How this works">?</button>
+  </header>
+
+  <div class="shelfrow"><span id="shelfCount">Skeins <b>0</b></span><div id="shelf" aria-hidden="true"></div></div>
+
+  <section class="rack" id="rack" aria-label="The spool rack"></section>
+
+  <section class="basketwrap" aria-label="The yarn heap">
+    <div class="basket" id="basket"><canvas id="heap" role="img" aria-label="A heap of yarn strands"></canvas></div>
+  </section>
+  <div class="sr" id="srList" aria-label="Strands you can reach"></div>
+
+  <div class="msgrow">
+    <p id="msg" role="status" aria-live="polite"></p>
+    <span class="btns">
+      <button type="button" class="btn small primary" id="stuckBtn" hidden>Add a spare slot</button>
+      <button type="button" class="btn small" id="hintBtn">Hint</button>
+      <button type="button" class="btn small" id="undoBtn">Undo</button>
+    </span>
+  </div>
+</div>
+<canvas id="fly" aria-hidden="true"></canvas>
+
+<div class="sheet" id="levelSheet" role="dialog" aria-modal="true" aria-labelledby="lvTitle" hidden>
+  <div class="panel">
+    <button type="button" class="iconbtn x" data-close aria-label="Close">&#10005;</button>
+    <h2 id="lvTitle">Baskets</h2>
+    <p class="hint" style="margin:0">Any basket, in any order. A tick means you’ve untangled it.</p>
+    <div class="settings">
+      <button type="button" class="btn small" id="restartBtn">Start this basket over</button>
+      <button type="button" class="btn small" id="howBtn2">How this works</button>
+      <button type="button" class="btn small" id="glyphBtn" aria-pressed="false">Color symbols: off</button>
+      <button type="button" class="btn small" id="soundBtn" aria-pressed="false">Soft sounds: off</button>
+    </div>
+    <div id="lvList"></div>
+  </div>
+</div>
+
+<div class="sheet" id="howSheet" role="dialog" aria-modal="true" aria-labelledby="howTitle" hidden>
+  <div class="panel how">
+    <button type="button" class="iconbtn x" data-close aria-label="Close">&#10005;</button>
+    <h2 id="howTitle">How this works</h2>
+    <div id="howBody"></div>
+    <div class="steps" id="howDots"></div>
+    <div class="row2">
+      <button type="button" class="btn" id="howBack">Back</button>
+      <button type="button" class="btn primary" id="howNext">Next</button>
+    </div>
+  </div>
+</div>
+
+<div class="sheet" id="introSheet" role="dialog" aria-modal="true" aria-labelledby="introTitle" hidden>
+  <div class="panel intro">
+    <h2 id="introTitle">Something new in the basket</h2>
+    <div id="introBody"></div>
+    <button type="button" class="btn primary" id="introOk" style="width:100%;margin-top:8px">Lovely, let's untangle</button>
+  </div>
+</div>
+
+<div class="sheet" id="finishSheet" role="dialog" aria-modal="true" aria-labelledby="finTitle" hidden>
+  <div class="panel finish">
+    <h2 id="finTitle">All untangled</h2>
+    <p class="muted" id="finSub" style="margin:0"></p>
+    <div class="bigshelf" id="finShelf"></div>
+    <p class="knits" id="finKnits"></p>
+    <p class="hint" id="finYards" style="margin:0 0 6px"></p>
+    <button type="button" class="btn primary" id="finNext">Next basket</button>
+    <button type="button" class="btn" id="finAgain">Untangle this one again</button>
+    <button type="button" class="btn" id="finAll">All baskets</button>
+  </div>
+</div>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>
