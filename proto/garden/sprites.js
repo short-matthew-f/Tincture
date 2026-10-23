@@ -288,6 +288,86 @@ const SHAPES = {
     ctx.save(); ctx.scale(0.55, 0.55); SHAPES.pad(ctx, rnd, c); ctx.restore();
     if (!SH) { circ(ctx, 0.1, -0.35, 0.09, '#E7B23C'); circ(ctx, -0.4, 0.15, 0.09, '#E7B23C'); }
   },
+  // ---------- landmarks (the very last, biggest things) ----------
+  cart(ctx, rnd, c) {
+    const rot = (rnd() - 0.5) * 0.5;
+    ctx.save(); ctx.rotate(rot);
+    // shafts
+    ctx.beginPath(); ctx.moveTo(0.6, -0.3); ctx.lineTo(1.0, -0.22); ctx.moveTo(0.6, 0.3); ctx.lineTo(1.0, 0.22); stroke(ctx, '#7A5530', 0.06);
+    // wheels
+    for (const [x, y] of [[-0.45, -0.58], [0.3, -0.58], [-0.45, 0.58], [0.3, 0.58]]) {
+      ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x - 0.17, y - 0.07, 0.34, 0.14, 0.05) : ctx.rect(x - 0.17, y - 0.07, 0.34, 0.14); fill(ctx, '#4E3A26');
+    }
+    // the bed
+    ctx.beginPath(); ctx.roundRect ? ctx.roundRect(-0.78, -0.5, 1.4, 1.0, 0.08) : ctx.rect(-0.78, -0.5, 1.4, 1.0); fill(ctx, '#9A6C3A');
+    ctx.beginPath(); ctx.roundRect ? ctx.roundRect(-0.72, -0.44, 1.28, 0.88, 0.06) : ctx.rect(-0.72, -0.44, 1.28, 0.88); fill(ctx, '#B88550');
+    if (!SH) for (let k = -0.3; k <= 0.31; k += 0.15) { ctx.beginPath(); ctx.moveTo(-0.7, k); ctx.lineTo(0.54, k); stroke(ctx, 'rgba(90,60,30,.35)', 0.02); }
+    // heaped load: straw with the dye plant through it
+    const straw = '#E3C567';
+    for (let i = 0; i < 9; i++) ell(ctx, -0.55 + (i % 5) * 0.26 + rnd() * 0.06, i < 5 ? -0.16 : 0.18, 0.24, 0.2, rnd(), i % 2 ? straw : light(straw, 0.15));
+    if (!SH) for (let i = 0; i < 22; i++) circ(ctx, -0.6 + rnd() * 1.1, -0.34 + rnd() * 0.68, 0.06, i % 3 ? c : light(c, 0.3));
+    ctx.restore();
+  },
+  shed(ctx, rnd, c) {
+    const rot = (rnd() - 0.5) * 0.3;
+    ctx.save(); ctx.rotate(rot);
+    // walls peeking out below the eaves, then the roof seen from above
+    ctx.beginPath(); ctx.rect(-0.78, -0.62, 1.56, 1.26); fill(ctx, '#B9A27E');
+    ctx.beginPath(); ctx.rect(-0.86, -0.66, 1.72, 0.66); fill(ctx, '#8C5A44');
+    ctx.beginPath(); ctx.rect(-0.86, 0, 1.72, 0.66); fill(ctx, '#7A4C3A');
+    if (!SH) {
+      for (let y = -0.56; y < 0.62; y += 0.13) { if (Math.abs(y) < 0.05) continue; ctx.beginPath(); ctx.moveTo(-0.84, y); ctx.lineTo(0.84, y); stroke(ctx, 'rgba(40,24,16,.25)', 0.022); }
+      ctx.beginPath(); ctx.moveTo(-0.88, 0); ctx.lineTo(0.88, 0); stroke(ctx, '#5E3A2A', 0.06);
+      // chimney pipe and bunches of drying flowers at the eaves
+      circ(ctx, 0.5, -0.32, 0.08, '#5A5550');
+      for (let i = 0; i < 7; i++) { const x = -0.72 + i * 0.24; circ(ctx, x, 0.72, 0.08, i % 2 ? c : light(c, 0.25)); circ(ctx, x + 0.05, 0.78, 0.06, dark(c, 0.1)); }
+    }
+    ctx.restore();
+  },
+  vat(ctx, rnd, c) {
+    circ(ctx, 0, 0, 0.98, '#6E4C2C');
+    if (!SH) ring(ctx, 24, 0, (a, i) => { ctx.beginPath(); ctx.arc(0, 0, 0.93, a, a + TAU / 24); ctx.arc(0, 0, 0.8, a + TAU / 24, a, true); ctx.closePath(); fill(ctx, i % 2 ? '#8A6038' : '#7A5432'); });
+    ctx.beginPath(); ctx.arc(0, 0, 0.96, 0, TAU); stroke(ctx, '#3E3A36', 0.05);
+    ctx.beginPath(); ctx.arc(0, 0, 0.84, 0, TAU); stroke(ctx, '#3E3A36', 0.04);
+    circ(ctx, 0, 0, 0.78, dark(c, 0.1));
+    circ(ctx, 0.04, 0.05, 0.7, c);
+    if (!SH) {
+      // the coppery "flower" of foam on the vat, and a stirring stick
+      for (let i = 0; i < 9; i++) { const a = rnd() * TAU, d = Math.sqrt(rnd()) * 0.25; circ(ctx, -0.12 + Math.cos(a) * d, -0.1 + Math.sin(a) * d, 0.1, i % 2 ? '#8E6A3A' : '#A88048'); }
+      ell(ctx, 0.2, 0.25, 0.28, 0.12, 0.4, light(c, 0.18));
+      ctx.beginPath(); ctx.moveTo(-0.7, 0.75); ctx.lineTo(0.45, -0.35); stroke(ctx, '#C8A06A', 0.07);
+    }
+  },
+  oak(ctx, rnd, c) {
+    const canopy = mix('#56683A', '#6E7A40', 0.3);
+    for (let i = 0; i < 13; i++) {
+      const a = (i / 13) * TAU + rnd() * 0.2;
+      circ(ctx, Math.cos(a) * 0.66, Math.sin(a) * 0.66, 0.32, i % 2 ? canopy : dark(canopy, 0.1));
+    }
+    circ(ctx, 0, 0, 0.74, light(canopy, 0.05));
+    for (let i = 0; i < 6; i++) { const a = rnd() * TAU, d = 0.2 + rnd() * 0.35; circ(ctx, Math.cos(a) * d, Math.sin(a) * d, 0.26, i % 2 ? light(canopy, 0.12) : canopy); }
+    if (!SH) for (let i = 0; i < 26; i++) {
+      const a = rnd() * TAU, d = Math.sqrt(rnd()) * 0.86;
+      const x = Math.cos(a) * d, y = Math.sin(a) * d;
+      ell(ctx, x, y + 0.02, 0.045, 0.06, 0, light(c, 0.1));
+      ell(ctx, x, y - 0.03, 0.05, 0.03, 0, '#6E5638');
+    }
+  },
+  boat(ctx, rnd, c) {
+    const rot = -0.5 + (rnd() - 0.5) * 0.4;
+    ctx.save(); ctx.rotate(rot);
+    const hull = (k, col) => { ctx.beginPath(); ctx.moveTo(-0.98 * k, 0); ctx.quadraticCurveTo(-0.6 * k, -0.5 * k, 0.2, -0.46 * k); ctx.quadraticCurveTo(0.8 * k, -0.4 * k, 0.98 * k, 0); ctx.quadraticCurveTo(0.8 * k, 0.4 * k, 0.2, 0.46 * k); ctx.quadraticCurveTo(-0.6 * k, 0.5 * k, -0.98 * k, 0); fill(ctx, col); };
+    hull(1, '#5F7F96');
+    hull(0.86, '#A88458');
+    if (!SH) {
+      for (const x of [-0.25, 0.35]) { ctx.beginPath(); ctx.rect(x - 0.06, -0.38, 0.12, 0.76); fill(ctx, '#C9A472'); }
+      for (let i = 0; i < 10; i++) { const x = -0.65 + rnd() * 0.5, y = (rnd() - 0.5) * 0.4; ell(ctx, x, y, 0.16, 0.08, rnd() * TAU, i % 2 ? c : dark(c, 0.15)); }
+      for (let i = 0; i < 6; i++) { const x = 0.5 + rnd() * 0.3, y = (rnd() - 0.5) * 0.3; ell(ctx, x, y, 0.12, 0.06, rnd() * TAU, i % 2 ? c : light(c, 0.2)); }
+      ctx.beginPath(); ctx.moveTo(-0.1, 0.2); ctx.lineTo(0.9, 0.75); stroke(ctx, '#C9A472', 0.05);
+      ell(ctx, 0.9, 0.75, 0.12, 0.05, 0.5, '#C9A472');
+    }
+    ctx.restore();
+  },
 };
 
 /** A plant sprite: { canvas, half } where half is the half-size in plant radii. */
@@ -306,7 +386,27 @@ export function plantSprite(speciesId, variant, pxRadius) {
     SHAPES[s.shape](ctx, rnd, c);
   }
   SH = false;
-  return { canvas: cv, half: PAD };
+  return { canvas: cv, half: PAD, box: opaqueBox(cv) };
+}
+
+/** The opaque part of a sprite as fractions of its box, found on a small scratch copy (the sprite
+ *  itself is never read back). Drawing only this part skips blending the empty margins. */
+let scratch = null;
+function opaqueBox(src) {
+  const N = 48;
+  if (!scratch) { scratch = document.createElement('canvas'); scratch.width = scratch.height = N; }
+  const sx = scratch.getContext('2d', { willReadFrequently: true });
+  sx.clearRect(0, 0, N, N);
+  sx.drawImage(src, 0, 0, N, N);
+  let data;
+  try { data = sx.getImageData(0, 0, N, N).data; } catch { return { x: 0, y: 0, w: 1, h: 1 }; }
+  let x0 = N, y0 = N, x1 = -1, y1 = -1;
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    if (data[(y * N + x) * 4 + 3] > 6) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  }
+  if (x1 < 0) return { x: 0, y: 0, w: 1, h: 1 };
+  x0 = Math.max(0, x0 - 1); y0 = Math.max(0, y0 - 1); x1 = Math.min(N - 1, x1 + 1); y1 = Math.min(N - 1, y1 + 1);
+  return { x: x0 / N, y: y0 / N, w: (x1 - x0 + 1) / N, h: (y1 - y0 + 1) / N };
 }
 
 /** The basket, seen from above: a woven rim around a dark opening. */
@@ -377,5 +477,79 @@ export function decorSprite(kind, gr, px) {
   } else if (kind === 'stone') {
     ell(ctx, 0, 0, 0.7, 0.5, 0.2, '#C4A882'); ell(ctx, -0.15, -0.12, 0.3, 0.18, 0.2, '#D7BF9C');
   }
+  return cv;
+}
+
+/** A small, cheap copy of a sprite for plants that are tiny on screen. */
+export function shrinkSprite(sp, px) {
+  const size = Math.max(6, Math.min(sp.canvas.width, Math.ceil(px)));
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = size;
+  const ctx = cv.getContext('2d');
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(sp.canvas, 0, 0, size, size);
+  return { canvas: cv, half: sp.half, box: sp.box };
+}
+
+/** The neighbor's goat, side on, in two steps of a walk. Unit: half-height of the sprite box. */
+export function goatSprite(px, frame) {
+  const size = Math.max(16, Math.ceil(px * 2));
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = size;
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(size / 2, 0, 0, size / 2, size / 2, size / 2);
+  SH = false;
+  ell(ctx, 0, 0.78, 0.62, 0.12, 0, 'rgba(42,38,34,.18)');
+  const coat = '#F1EADB', shade = '#D9CDB6', hoof = '#5E5248';
+  const legs = frame ? [[-0.42, 0.06], [-0.22, -0.06], [0.22, 0.06], [0.42, -0.06]] : [[-0.42, -0.06], [-0.22, 0.06], [0.22, -0.06], [0.42, 0.06]];
+  for (const [x, dx] of legs) { ctx.beginPath(); ctx.moveTo(x, 0.2); ctx.lineTo(x + dx, 0.7); stroke(ctx, shade, 0.11); circ(ctx, x + dx, 0.71, 0.06, hoof); }
+  ell(ctx, -0.02, 0.08, 0.6, 0.33, 0, coat);
+  ell(ctx, -0.1, 0.18, 0.42, 0.16, 0, '#E6DCC8');
+  // tail
+  ell(ctx, -0.6, -0.12, 0.08, 0.14, -0.6, coat);
+  // neck and head
+  ell(ctx, 0.5, -0.14, 0.16, 0.26, 0.5, coat);
+  ell(ctx, 0.7, -0.36, 0.22, 0.16, 0.35, coat);
+  ell(ctx, 0.86, -0.28, 0.1, 0.08, 0.3, '#E8C9B8');
+  // ear, horns, eye, beard
+  ell(ctx, 0.56, -0.38, 0.14, 0.05, -0.6, shade);
+  ctx.beginPath(); ctx.moveTo(0.62, -0.5); ctx.quadraticCurveTo(0.56, -0.72, 0.44, -0.74); stroke(ctx, '#A08C6E', 0.06);
+  circ(ctx, 0.74, -0.4, 0.035, '#2A2622');
+  ctx.beginPath(); ctx.moveTo(0.8, -0.22); ctx.lineTo(0.77, -0.08); stroke(ctx, shade, 0.05);
+  // a little bell on a ribbon
+  circ(ctx, 0.5, 0.02, 0.06, '#E2B04A');
+  return cv;
+}
+
+/** A sparkly find, drawn in a unit circle: a wide brim, a breeze or a lost spindle. */
+export function findSprite(kind, px) {
+  const size = Math.max(12, Math.ceil(px * 2));
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = size;
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(size / 2, 0, 0, size / 2, size / 2, size / 2);
+  SH = false;
+  const glow = ctx.createRadialGradient(0, 0, 0.1, 0, 0, 1);
+  glow.addColorStop(0, 'rgba(255,244,200,.95)'); glow.addColorStop(0.55, 'rgba(255,226,140,.45)'); glow.addColorStop(1, 'rgba(255,226,140,0)');
+  ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(0, 0, 1, 0, TAU); ctx.fill();
+  if (kind === 'brim') {
+    ell(ctx, 0, 0.05, 0.62, 0.42, 0, '#D8B46A');
+    ell(ctx, 0, 0.05, 0.62, 0.42, 0, '#D8B46A');
+    ell(ctx, 0, -0.02, 0.32, 0.24, 0, '#C79A4E');
+    ctx.beginPath(); ctx.ellipse(0, -0.02, 0.33, 0.25, 0, 0.2, Math.PI - 0.2); stroke(ctx, '#B8433A', 0.08);
+  } else if (kind === 'breeze') {
+    for (let k = 0; k < 3; k++) { ctx.beginPath(); ctx.arc(-0.05 + k * 0.05, 0.05 - k * 0.12, 0.5 - k * 0.12, Math.PI * 1.05, Math.PI * 1.95); stroke(ctx, k === 1 ? '#7FA7B8' : '#9DC0CC', 0.08); }
+    leaf(ctx, -0.6, 0.12, 0.4, 0.12, '#88A55E');
+  } else {
+    ctx.save(); ctx.rotate(-0.6);
+    ctx.beginPath(); ctx.moveTo(0, -0.75); ctx.lineTo(0, 0.75); stroke(ctx, '#B88550', 0.09);
+    ell(ctx, 0, -0.05, 0.3, 0.3, 0, '#B8433A');
+    for (let k = -0.2; k < 0.15; k += 0.1) { ctx.beginPath(); ctx.moveTo(-0.28, k); ctx.lineTo(0.28, k + 0.06); stroke(ctx, '#D86A5E', 0.035); }
+    ell(ctx, 0, 0.42, 0.26, 0.07, 0, '#8C6512');
+    ctx.restore();
+  }
+  // four-point twinkle
+  ctx.beginPath(); ctx.moveTo(0.62, -0.88); ctx.lineTo(0.68, -0.68); ctx.lineTo(0.88, -0.62); ctx.lineTo(0.68, -0.56); ctx.lineTo(0.62, -0.36); ctx.lineTo(0.56, -0.56); ctx.lineTo(0.36, -0.62); ctx.lineTo(0.56, -0.68); ctx.closePath();
+  ctx.fillStyle = '#FFF7DC'; ctx.fill();
   return cv;
 }
