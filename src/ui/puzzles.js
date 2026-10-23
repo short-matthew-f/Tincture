@@ -24,6 +24,9 @@ import { h, raw, button, swatch, iconSvg, safeHex, lockTag } from './kit.js';
 import { stateRng } from '../rng.js';
 import { unlockTag, openUnlockSheet, ensureStyles as ensureWorkshopStyles } from './workshop.js';
 import { deltaEHex } from '../color.js';
+import { gardenCardHtml, gardenCardSig } from './garden-card.js';
+import { liftCardHtml, liftCardSig } from './lift.js';
+import { skeinsCardHtml, skeinsCardSig } from './skeins.js';
 
 // ---------------------------------------------------------------------------
 // Shared constants and small helpers
@@ -553,7 +556,7 @@ ${packAction}
 </div>`;
 
   return h`<div class="screen-head is-left"><div class="titles"><div class="title">Puzzle table</div><div class="subtitle">Short, calm, and always worth it</div></div></div>
-<div class="screen-body pz-body pz-hub">${gradingCard}${purifyCard}${tilesCardHtml(state)}${packingCard}</div>`;
+<div class="screen-body pz-body pz-hub">${gradingCard}${purifyCard}${skeinsCardHtml(C, state)}${liftCardHtml(C, state)}${tilesCardHtml(state)}${gardenCardHtml(C, state)}${packingCard}</div>`;
 }
 
 function sigOf(state) {
@@ -574,6 +577,9 @@ function sigOf(state) {
       const t = state.tiles || {};
       return [u && u.revealed, u && u.affordable, u && u.open, JSON.stringify(C.sim.tiles.summary(state)), t.game && t.game.colors, (t.mosaics || []).length];
     })(),
+    gardenCardSig(C, state),
+    liftCardSig(C, state),
+    skeinsCardSig(C, state),
   ]);
 }
 
@@ -712,6 +718,12 @@ function onClick(e) {
     C.navigate('purify', {});
   } else if (act === 'open-tiles') {
     C.navigate('tiles', {});
+  } else if (act === 'open-garden') {
+    C.navigate('garden', {});
+  } else if (act === 'open-lift') {
+    C.navigate('lift', {});
+  } else if (act === 'open-skeins') {
+    C.navigate('skeins', {});
   } else if (act === 'continue-packing') {
     C.navigate('packing', { from: 'puzzles' });
   } else if (act === 'to-workshop') {

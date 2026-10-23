@@ -1,6 +1,6 @@
 // The Dye Garden: canvas, input, animation and UI. Rules live in rules.js (pure).
 import {
-  PLACES, PLACE_BY_ID, SPECIES, DYES, MODES, GEN, R0, OPENING, TEETER, JAR, GOAT, FIND_KINDS,
+  PLACES, PLACE_BY_ID, SPECIES, DYES, MODES, GEN, R0, OPENING, TEETER, GOAT, FIND_KINDS,
   generate, newVisit, gather, isDone, restoreVisit, basketRadius, fits, over, buildGrid, queryGrid,
   nearestGatherable, tally, placeDyes, jarsLabel, pickFact, unitsOf, mulberry32, harvestSeed,
   levelInfo, comboAdd, comboOpen, comboLabel, newGoat, goatStep, findAt, breezeCatches,
@@ -19,7 +19,7 @@ const HOW = [
   'Sparkles are finds. A wide brim lets bigger things in for a few seconds, a breeze draws little plants to you, and now and then there is a lost spindle to keep.',
   '<b>Wander</b> has no clock. Head home whenever you like, and pick up where you left off next time.',
   '<b>Harvest before dusk</b> lasts about two minutes while the sun crosses the sky; the sun starts when you first move. At dusk the basket heads home, and you see your jars and basket size beside your best. Each place plays the same every time, or turn on Today\'s garden for a new one each day. The neighbor\'s goat nibbles there too, and a big basket makes it hop away.',
-  'Each visit has a small bonus goal at the bottom. Everything you gather comes home as jars of dye.',
+  'Each visit has a small bonus goal, just under the basket bar. Everything you gather comes home as jars of dye.',
 ];
 const theName = (p) => p.name.replace(/^The /, 'the ');
 const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -148,7 +148,7 @@ let found = new Set(), effects = { brim: 0, breeze: 0 };
 let combo = null, comboBest = 0, toastUntil = 0, toastPrio = 0, comboText = '', comboTextAt = 0, comboPop = false;
 let goal = null, goalHave = 0, goalMet = false;
 let lastLevel = 1, growDirty = true, growAt = 0, nextKey = '', levelRing = 0, cntPopAt = 0;
-let nudge = { x: 0, y: 0, t: 0 }, unitsBy = {}, landmarksGot = 0, spindleNew = false, result = null;
+let nudge = { x: 0, y: 0, t: 0 }, landmarksGot = 0, spindleNew = false, result = null;
 const frameDt = [], frameWork = [];
 
 const QUALITY = [1, 0.8, 0.65, 0.5];
@@ -228,11 +228,11 @@ function startVisit(placeId, modeId, seed, resume = null) {
   // a spindle already kept from this very garden stays kept; it does not show again
   g.finds.forEach((f, k) => { if (f.k === 'spindle' && store.spindles.includes(spindleKey())) found.add(k); });
   effects = { brim: 0, breeze: 0 };
-  combo = null; comboBest = 0; toastUntil = 0; toastPrio = 0; comboText = ''; comboPop = false; jarPulseAt = {};
+  combo = null; comboBest = 0; toastUntil = 0; toastPrio = 0; comboText = ''; comboPop = false;
   goal = goalFor(g);
   goalHave = visit.got.filter((i) => g.plants[i].s === goal.s).length; goalMet = goalHave >= goal.need;
-  unitsBy = {}; landmarksGot = 0; spindleNew = false;
-  for (const i of visit.got) { const p = g.plants[i]; const d = SPECIES[p.s].dye; unitsBy[d] = (unitsBy[d] || 0) + unitsOf(p); if (SPECIES[p.s].landmark) landmarksGot++; }
+  landmarksGot = 0; spindleNew = false;
+  for (const i of visit.got) if (SPECIES[g.plants[i].s].landmark) landmarksGot++;
   lastLevel = levelInfo(g, visit.mass).level; growDirty = true; nextKey = ''; levelRing = 0; nudge = { x: 0, y: 0, t: 0 };
   movedOnce = !!resume;
   clearTimeout(endTimer);
@@ -251,7 +251,6 @@ function startVisit(placeId, modeId, seed, resume = null) {
   cam.x = B.x; cam.y = B.y; cam.z = targetZoom();
   buildSprites();
   makeDecor();
-  buildJars();
   updateGrow(true);
   updateGoal(false);
   updateSun(true);
@@ -276,45 +275,6 @@ function persistCur() {
 }
 
 // ---------- HUD ----------
-let jarEls = {};
-function buildJars() {
-  const box = $('#jars');
-  box.innerHTML = '';
-  jarEls = {};
-  for (const d of placeDyes(g.place)) {
-    const e = document.createElement('div');
-    e.className = 'jarbox';
-    e.innerHTML = `<b></b><span class="jar" style="--c:${DYES[d].hex}"><i></i></span>`;
-    box.appendChild(e);
-    jarEls[d] = e;
-  }
-  for (const d of Object.keys(jarEls)) setJar(d, unitsBy[d] || 0, false);
-  jarDirty.clear();
-}
-// jar changes are batched and flushed a few times a second; a jar bobs at most every half second
-let jarDirty = new Set(), jarFlushAt = 0, jarPulseAt = {};
-function flushJars() {
-  for (const d of jarDirty) {
-    const pulse = time - (jarPulseAt[d] || -1) > 0.5;
-    if (pulse) jarPulseAt[d] = time;
-    setJar(d, unitsBy[d] || 0, pulse);
-  }
-  jarDirty.clear();
-}
-function setJar(d, units, pulse) {
-  const e = jarEls[d];
-  if (!e) return;
-  // the first jar fills up; after that the jar stays full and the number counts jars
-  const full = Math.floor(units / JAR), part = Math.min(1, units / JAR);
-  const fill = e.querySelector('i');
-  fill.style.height = '100%';
-  fill.style.transform = `scaleY(${part.toFixed(3)})`;
-  e.querySelector('b').textContent = full ? `${full}` : '';
-  const label = `${DYES[d].name}: ${units ? jarsLabel(units) : 'empty so far'}`;
-  e.setAttribute('aria-label', label); e.title = label;
-  if (pulse && !reduced()) e.animate([{ transform: 'translateY(0)' }, { transform: 'translateY(-3px) scale(1.06)' }, { transform: 'translateY(0)' }], { duration: 380, easing: 'ease-out' });
-}
-
 /** The growth bar: basket level, progress to the next size step, the next plant below it. */
 function updateGrow(force) {
   if (!force && !growDirty) return;
@@ -603,8 +563,8 @@ function step(dt) {
   cam.y += (B.y + B.vy * 0.25 - cam.y) * ce;
   cam.z += (targetZoom() - cam.z) * (1 - Math.exp(-dt * 1.6));
   const hw = vw / 2 / cam.z, hh = vh / 2 / cam.z;
-  // margins in screen pixels, so the field's edges can always come clear of the top bar and the jars
-  const mx = 40 / cam.z, mt = 150 / cam.z, mb = 130 / cam.z;
+  // margins in screen pixels, so the field's edges can always come clear of the top HUD and Head home
+  const mx = 40 / cam.z, mt = 170 / cam.z, mb = 90 / cam.z;
   cam.x = g.W > 2 * hw - 2 * mx ? Math.max(hw - mx, Math.min(g.W - hw + mx, cam.x)) : g.W / 2;
   cam.y = g.H > 2 * hh - mt - mb ? Math.max(hh - mt, Math.min(g.H - hh + mb, cam.y)) : (g.H + mb - mt) / 2;
   nudge.t = Math.max(0, nudge.t - dt);
@@ -627,7 +587,6 @@ function step(dt) {
     hint = quiet && !ended ? nearestGatherable(g, visit, B.x, B.y, taken) : -1;
   }
   if (time > growAt) { growAt = time + 0.12; updateGrow(false); }
-  if (jarDirty.size && time > jarFlushAt) { jarFlushAt = time + 0.15; flushJars(); }
   if (comboText && time > comboTextAt) { comboTextAt = time + 0.15; const t = comboText; comboText = ''; if (showToast(t, false, 1.1) && comboPop) popToast(); comboPop = false; }
   if (time > saveDue && saveDue) { saveDue = 0; persistCur(); }
 }
@@ -659,9 +618,6 @@ function onGather(i, open, how) {
     comboText = comboLabel(combo);
     if (combo.n === 5 || combo.n % 10 === 0) comboPop = true;
   }
-  const d = sp.dye;
-  unitsBy[d] = (unitsBy[d] || 0) + unitsOf(p);
-  jarDirty.add(d);
   if (!goalMet && p.s === goal.s) {
     goalHave++;
     if (goalHave >= goal.need) { goalMet = true; tick(); showToast(`Enough for ${DYES[goal.dye].name.toLowerCase()}!`, true, 2.2); }
@@ -842,7 +798,7 @@ function draw() {
   if (hint >= 0 && !taken[hint]) {
     const p = g.plants[hint];
     const pulse = rm ? 0.6 : 0.5 + 0.5 * Math.sin(time * 4);
-    const onScreen = p.x > x0 && p.x < x1 && p.y > y0 + 110 / z && p.y < y1 - 90 / z;
+    const onScreen = p.x > x0 && p.x < x1 && p.y > y0 + 130 / z && p.y < y1 - 70 / z;
     if (onScreen) {
       ctx.beginPath(); ctx.arc(p.x, p.y, p.r * (1.25 + 0.12 * pulse), 0, Math.PI * 2);
       ctx.lineWidth = 3 / z; ctx.strokeStyle = `rgba(226,176,74,${0.55 + 0.4 * pulse})`; ctx.stroke();
@@ -953,8 +909,8 @@ function drawArrow(p, pulse) {
   const sp = toScreen(p.x, p.y);
   const cx = vw / 2, cy = vh / 2;
   const ang = Math.atan2(sp.y - cy, sp.x - cx);
-  const top = 130, bot = 116, side = 30;
-  // clamp to the visible play area (below the top HUD, above the jars)
+  const top = 150, bot = 84, side = 30;
+  // clamp to the visible play area (below the top HUD, above Head home)
   const tx = Math.cos(ang), ty = Math.sin(ang);
   let t = Infinity;
   if (tx > 0) t = Math.min(t, (vw - side - cx) / tx);
@@ -999,7 +955,6 @@ function finishVisit(reason) {
   return result;
 }
 function showEnd(reason) {
-  flushJars();
   const r = finishVisit(reason);
   const { haul, fact, score, prev, isNew } = r;
   const where = theName(place);

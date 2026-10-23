@@ -84,6 +84,18 @@ function nextRoom(state) {
  * left out: it is optional active play these idle profiles never sit down to,
  * so buying it would only model 5,000 Coins spent on nothing.
  */
+/**
+ * The Next button as these players see it: the Winding Room (Skein Stacks,
+ * 12 colors / 1,500) counts as open, so Next never offers it and they never
+ * stall on it (they never sit down to wind yarn; skipped in savingGoal too).
+ */
+function nextSkipping(state, now) {
+  // The Dye Garden (22 colors / 6,000) is skipped the same way: optional active play.
+  // The Lifting Table (18 colors / 3,500) too: optional active play.
+  if (state.unlocks?.skeins && state.unlocks?.garden && state.unlocks?.lift) return sim.next(state, now);
+  return sim.next({ ...state, unlocks: { ...state.unlocks, skeins: true, garden: true, lift: true } }, now);
+}
+
 function savingGoal(state) {
   const goals = [];
   const rq = unlocks.rebuyQuote(state);
@@ -93,7 +105,7 @@ function savingGoal(state) {
     goals.push({ kind: 'room', id: room.id, cost: room.cost });
   }
   for (const u of unlocks.statusAll(state)) {
-    if (u && !u.open && u.revealed && u.id !== 'tiles') goals.push({ kind: 'unlock', id: u.id, cost: u.cost });
+    if (u && !u.open && u.revealed && u.id !== 'tiles' && u.id !== 'skeins' && u.id !== 'garden' && u.id !== 'lift') goals.push({ kind: 'unlock', id: u.id, cost: u.cost });
   }
   if (goals.length) return goals.sort((a, b) => a.cost - b.cost)[0];
   const disp = APPRENTICES_BY_ID.dispatcher;
@@ -163,8 +175,8 @@ export function buyGreedy(state, now, ctx) {
     if (hireHunters(state, ctx)) { bought++; continue; }
     // 4. The workshop's single Next button (sim.next): unlocks, rooms, the flow
     //    meter's suggestion, then the cheapest affordable upgrade.
-    let nx = sim.next(state, now);
-    if (nx.action.kind === 'assign') { assignRecipes(state, now); nx = sim.next(state, now); }
+    let nx = nextSkipping(state, now);
+    if (nx.action.kind === 'assign') { assignRecipes(state, now); nx = nextSkipping(state, now); }
     const a = nx.action;
     if (a.kind === 'rebuy' && unlocks.batchRebuy(state, {}, now).ok) { bought++; continue; }
     if (a.kind === 'unlock' && unlocks.buy(state, { id: a.id }, now).ok) { bought++; assignRecipes(state, now); continue; }
@@ -738,8 +750,8 @@ export const LATER_SESSION_SCRIPT = Object.freeze([[0, 'order'], [1, 'board'], [
 
 /** One tap of the workshop's Next button, if it buys something. Returns what was bought, or null. */
 function tapNext(state, now) {
-  let nx = sim.next(state, now);
-  if (nx.action.kind === 'assign') { assignRecipes(state, now); nx = sim.next(state, now); }
+  let nx = nextSkipping(state, now);
+  if (nx.action.kind === 'assign') { assignRecipes(state, now); nx = nextSkipping(state, now); }
   const a = nx.action;
   if (!nx.affordable) return null;
   let ok = false;

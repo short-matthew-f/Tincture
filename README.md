@@ -47,7 +47,7 @@ walk go to `$E2E_SHOTS` (default: `<tmpdir>/tincture-e2e-shots`).
 ## Shipping a new version
 
 ```sh
-node tools/bump-version.js 0.3.0
+node tools/bump-version.js 0.4.0
 ```
 
 Run it whenever shipped files change. It rewrites `src/version.js`,
@@ -111,6 +111,12 @@ and its offline cache: https://short-matthew-f.github.io/Tincture/proto/
 
 ## Status
 
+- **0.4.0** (the playtester's three favorites join the game): the Winding
+  Room (Skein Stacks, 12 colors / 1,500 coins), the Lifting Table (27
+  paintings, 18 colors / 3,500) and the Dye Garden (Wander and Harvest
+  before dusk, 22 colors / 6,000, also on the Map; the jar row is gone).
+  Each pays modestly in coins (the table and garden also in stock), has a
+  daily quest type, event points and a keep-it Heritage node.
 - **0.3.3** (Purify): every board is checked by a solver and rated, so each
   tier feels the same from board to board and none is ever a dead end
   (Relaxed 9–13 pours, Steady 16–21, Tricky 24–29, Master 28–34). Tricky and

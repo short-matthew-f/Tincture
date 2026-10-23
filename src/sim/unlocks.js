@@ -20,9 +20,15 @@ const num = (x, d = 0) => (Number.isFinite(x) ? x : d);
 
 export const UNLOCKS = Object.freeze([
   { id: 'shelf', name: 'Merge Shelf', revealColors: 8, cost: 400, object: 'shelf' },
+  // The Winding Room (Skein Stacks, src/sim/skeins.js): between the shelf and the map window.
+  { id: 'skeins', name: 'Winding Room', revealColors: 12, cost: 1500, object: 'swift' },
   { id: 'hunters', name: 'Hue Hunters', revealColors: 15, cost: 2500, object: 'map-window' },
+  // The Lifting Table (src/sim/lift.js): between the map window and the Tile Room.
+  { id: 'lift', name: 'Lifting Table', revealColors: 18, cost: 3500, object: 'easel' },
   // The Tile Room (docs/PLAN-v0.3.md): between the map window and the Gallery on the ladder.
   { id: 'tiles', name: 'Tile Room', revealColors: 20, cost: 5000, object: 'kiln' },
+  // The Dye Garden (src/sim/garden.js): after the Tile Room, before the Gallery.
+  { id: 'garden', name: 'Dye Garden', revealColors: 22, cost: 6000, object: 'garden-basket' },
   { id: 'gallery', name: 'Gallery Wing', revealColors: 25, cost: 8000, room: 'gallery-wing' }, // the room IS the purchase
   { id: 'shipping', name: 'Loading Yard', revealColors: 50, cost: 40000, room: 'loading-yard' }, // the room IS the purchase
   { id: 'commissions', name: 'Commissions', revealColors: 30, cost: 20000, requiresPhase: 3 },

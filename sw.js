@@ -24,7 +24,7 @@
 //                                                     first online load
 //   any other cross-origin request, non-GET           ignored
 
-var CACHE_VERSION = '0.3.3';
+var CACHE_VERSION = '0.4.0';
 var CACHE_NAME = 'tincture-v' + CACHE_VERSION;
 var FONT_CACHE = 'tincture-fonts';
 
@@ -61,11 +61,17 @@ var SHELL = [
   'src/content/stations.js',
   'src/format.js',
   'src/game.js',
+  'src/puzzles/garden.js',
   'src/puzzles/grading.js',
   'src/puzzles/index.js',
+  'src/puzzles/lift-art.js',
+  'src/puzzles/lift-levels.js',
+  'src/puzzles/lift-queues.js',
+  'src/puzzles/lift.js',
   'src/puzzles/matching.js',
   'src/puzzles/packing.js',
   'src/puzzles/purify.js',
+  'src/puzzles/skeins.js',
   'src/puzzles/tiles.js',
   'src/pwa.js',
   'src/rng.js',
@@ -78,10 +84,12 @@ var SHELL = [
   'src/sim/events.js',
   'src/sim/factory.js',
   'src/sim/gallery.js',
+  'src/sim/garden.js',
   'src/sim/howto.js',
   'src/sim/hunters.js',
   'src/sim/index.js',
   'src/sim/ledger.js',
+  'src/sim/lift.js',
   'src/sim/next.js',
   'src/sim/offline.js',
   'src/sim/orders.js',
@@ -91,6 +99,7 @@ var SHELL = [
   'src/sim/settings.js',
   'src/sim/shelf.js',
   'src/sim/shipping.js',
+  'src/sim/skeins.js',
   'src/sim/storage.js',
   'src/sim/tiles.js',
   'src/sim/unlocks.js',
@@ -103,6 +112,10 @@ var SHELL = [
   'src/ui/feel.js',
   'src/ui/fx.js',
   'src/ui/gallery.js',
+  'src/ui/garden-art.js',
+  'src/ui/garden-card.js',
+  'src/ui/garden-sprites.js',
+  'src/ui/garden.js',
   'src/ui/grading.js',
   'src/ui/guide.js',
   'src/ui/haptics.js',
@@ -110,6 +123,7 @@ var SHELL = [
   'src/ui/hunter.js',
   'src/ui/kit.js',
   'src/ui/ledger.js',
+  'src/ui/lift.js',
   'src/ui/map.js',
   'src/ui/matching.js',
   'src/ui/naming.js',
@@ -125,6 +139,7 @@ var SHELL = [
   'src/ui/router.js',
   'src/ui/settings.js',
   'src/ui/shelf.js',
+  'src/ui/skeins.js',
   'src/ui/tiles.js',
   'src/ui/workshop.js',
   'src/version.js'

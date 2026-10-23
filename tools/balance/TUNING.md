@@ -209,6 +209,95 @@ less per active minute than hand orders (docs/PLAN-v0.3.md "Each release").
   `sim-player.savingGoal` skips its unlock (it would model 5,000 Coins spent
   on nothing).
 
+## Lifting Table
+
+`src/sim/lift.js`. Optional, calm active play (27 hand-made paintings); like
+the Tile Room it must pay less per active minute than hand orders.
+
+- **Unlock:** revealed at 18 colors, 3,500 Coins (`src/sim/unlocks.js`
+  `lift`), between the map window (15 / 2,500) and the Tile Room (20 / 5,000).
+  Renovate closes it like the others (Heritage `keep-easel` holds it); the
+  paintings she lifted and the one on the easel stay.
+- **Pay:** a first lift pays `orderBasePay(state, paintMinutes(L))` ×
+  `incomeMultiplier`, with `paintMinutes = max(0.75, RATE × estimated active
+  minutes)`, `RATE = 1`, and the estimate 4 s per move of the stored solution
+  plus 6 s per step with a trap (`lift-queues.js` stats): 0.75 income-minutes
+  for the first painting (40 s), about 15 for the hardest (fox, ~15.5 min).
+  A painting lifted again pays `REPEAT_SHARE = 0.25` (so a fast repeat of the
+  first painting cannot out-earn orders).
+- **Stock:** 0.05 jars per lifted cell of each palette color, to her nearest
+  discovered color (whole jars; 3 to 4 for the first painting, ~40 to 50 for a
+  late one), through `storage.addStock` (capacity respected; overflow sells at
+  once, as Purify's does). Nothing is taken from stock, so `state.keep` is
+  untouched. Its value is tiny next to the coins: at most +0.3
+  income-minutes per active minute, right after a Renovate.
+- **Check** (scripted casual and engaged players, seeds 1 to 3, days 1 to 8,
+  15 to 109 colors): coins plus stock value come to 1.0 to 1.13
+  income-minutes per estimated active minute (1.2 to 1.44 on a state just
+  after a Renovate, when income is low and stock counts more), against 2 to 8
+  for hand orders (2 to 4 income-minutes each, 30 to 60 s). A player twice
+  as fast as the estimate stays at about 2. `test/lift.test.js` checks every
+  painting pays at most 1.2 income-minutes per estimated minute (the 0.75
+  floor puts the first one at 1.13) and a repeat a quarter of that.
+- The balance players never sit down at the table: `sim-player.savingGoal`
+  skips the unlock and `nextSkipping` hides it from their Next button.
+
+## Winding Room (Skein Stacks)
+
+`src/sim/skeins.js`. Optional, calm active play (the 12 playtested levels of
+`proto/skeins/`); it must pay less per active minute than hand orders.
+
+- **Unlock:** revealed at 12 colors, 1,500 Coins (`src/sim/unlocks.js`
+  `skeins`), between the Merge Shelf (8 / 400) and the map window
+  (15 / 2,500): a second-session purchase, after the shelf. Renovate closes
+  it like the others (Heritage `keep-swift` holds it); her finished levels
+  and the level on the table stay.
+- **Pay:** each hank pays `HANK_MINUTES = 0.2` × `orderBasePay(state, 1)`,
+  and a finished level adds `LEVEL_MINUTES = 0.75` × the same base; both ×
+  `incomeMultiplier`. A hank re-tied after an Undo pays nothing (the sim keeps
+  `paidHanks`), so Undo cannot farm coins. Nothing is spent: the yarns are
+  her discovered colors.
+- **Check:** the prototype's greedy bot needs 22 to 28 moves for level 1
+  (6 hanks) and 70 to 99 for level 12 (25 hanks). At a fast 3 s a move
+  (the hops, chains and the twist alone take 1 to 3 s) that is 1.3 to 1.7
+  income-minutes per active minute on average (worst seed 1.95, level 1,
+  where the bonus weighs most), and about 1 at a realistic 4 to 5 s a move,
+  against 2 to 8 for hand orders. A first draft at 0.25 + 1 paid 2.1 on
+  level 1 and was cut. `test/skeins.test.js` plays levels 1, 6 and 12
+  through the sim and checks each stays under 2.5 and their mean under 2.
+- The balance players never wind yarn: `sim-player.savingGoal` skips the
+  unlock and `nextSkipping` hides it from their Next button (the 9-run
+  check, all three profiles over 14 days, is unchanged to the coin).
+
+## Dye Garden
+
+`src/sim/garden.js`. Optional, calm active play (ported from `proto/garden/`);
+it must pay less per active minute than hand orders.
+
+- **Unlock:** revealed at 22 colors, 6,000 Coins (`src/sim/unlocks.js`
+  `garden`), after the Tile Room (20 / 5,000) and before the Gallery Wing
+  (25 / 8,000). Renovate closes it like the others (Heritage `keep-garden`
+  holds it); her dye shelf, bests and spindles stay.
+- **Pay:** a visit banks jars of dye × `JAR_MINUTES = 0.025` ×
+  `orders.orderBasePay(state, 1)` × `incomeMultiplier`, plus `GOAL_MINUTES =
+  0.5` of the same when the visit's bonus goal is met, and a few jars of her
+  nearest discovered colors (`STOCK_PER_JAR = 0.15` per jar of each dye, at
+  least one, `STOCK_MAX = 12` a visit; free storage caps them, her keep
+  reserves are untouched). A whole Wander garden is 60–90 jars: about 2–3
+  order-minutes in all. An ideal autopilot (straight at the nearest plant at
+  full speed) clears a Wander garden in 40–50 s and a harvest field in about
+  70 s, so even it earns 3–4.5 order-minutes per minute, under the quick end of
+  hand orders (6); at a person's pace (a third of the autopilot's, a harvest at
+  its two minutes) it is 1–2, like the Tile Room, against 3–6 for orders.
+  `test/garden.test.js` checks both bounds at two workshop sizes. A first
+  draft at 0.03 a jar with a full order-minute for the goal and 0.25 jars of
+  stock per jar let the autopilot pass 6 and was cut. In the scripted runs she
+  reaches 22 colors at about 40–46K coins a minute of income, where a whole
+  Wander visit is about 100K coins against about 130K for one 3-minute order.
+- The balance players never sit down in the garden: `sim-player.savingGoal`
+  skips its unlock and `nextSkipping` counts it as open, so the scripted runs
+  are unchanged by it.
+
 ## Open
 
 - **First-session spread.** The median first session buys 8 things (change

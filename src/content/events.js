@@ -16,7 +16,7 @@
 export const ROTATION_WEEKS = 8;
 
 /** Event points per themed action (spec: "fed by event points from any themed activity"). */
-export const POINTS_PER = Object.freeze({ order: 10, board: 15, crate: 5, purify: 10, paint: 2, bouquet: 30, mosaic: 30 });
+export const POINTS_PER = Object.freeze({ order: 10, board: 15, crate: 5, purify: 10, paint: 2, bouquet: 30, mosaic: 30, hank: 4, lifted: 25, harvest: 20 });
 
 /**
  * How to earn each kind of event point (the Quests screen's "How to earn event points").
@@ -36,6 +36,9 @@ export const EVENT_POINT_HOW = Object.freeze({
   board: src('Solve an event grading board', 'While the event runs, new grading boards use its colors and frame. Any difficulty counts.', 'puzzles', { puzzle: 'grading' }, 'Open grading boards'),
   purify: src('Purify a batch in the event\'s colors', 'A muddy batch of one of the {families} counts when you sort it clean.', 'puzzles', { puzzle: 'purify' }, 'Open Purify', 'factory'),
   crate: src('Ship a crate with the event\'s colors', 'A shipment that carries jars of the {families} counts.', 'workshop', { panel: 'fleet' }, 'Open Shipping', 'shipping'),
+  hank: src('Wind a hank in the Winding Room', 'A hank of any of the {families} counts.', 'skeins', null, 'Open the Winding Room', 'skeins'),
+  lifted: src('Lift a painting at the Lifting Table', 'A finished painting counts when its jars hold any of the {families}.', 'lift', null, 'Open the Lifting Table', 'lift'),
+  harvest: src('Gather in the Dye Garden', 'A visit counts when your basket brings home dyes of the {families}.', 'garden', null, 'Open the Dye Garden', 'garden'),
   mosaic: src('Finish a Tile Room wall', 'A finished wall glazed with any of the {families} counts.', 'tiles', null, 'Open the Tile Room', 'tiles'),
   paint: src('Paint a Gallery region in the event\'s colors', 'Each region you paint with one of the {families} counts.', 'gallery', null, 'Open the Gallery', 'gallery'),
 });

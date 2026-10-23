@@ -490,7 +490,7 @@ async function workshopWalk(viewport, tag) {
   await page.goto(URL_, { waitUntil: 'load' });
   await boot(page);
   await seed(page);
-  await page.evaluate(() => { window.tincture.game.act((st) => { st.unlocks.shelf = true; st.unlocks.hunters = true; return {}; }, {}); window.tincture.game.save(); });
+  await page.evaluate(() => { window.tincture.game.act((st) => { st.unlocks.shelf = true; st.unlocks.hunters = true; st.unlocks.skeins = true; st.unlocks.lift = true; return {}; }, {}); window.tincture.game.save(); });
   await page.reload({ waitUntil: 'load' });
   await boot(page);
   await page.waitForSelector('#screen-workshop [data-action="next"]', { state: 'visible' });

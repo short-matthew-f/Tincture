@@ -218,7 +218,7 @@ test('heritage: tree is well-formed, formula constants', () => {
     assert.equal(keys.length, 1);
     assert.ok(effectKeys.includes(keys[0]), `${n.id}: ${keys[0]}`);
     if (keys[0] === 'autoApprentice') assert.ok(apprenticeIds.has(n.effect.autoApprentice));
-    if (keys[0] === 'keepUnlock') assert.ok(['shelf', 'hunters', 'gallery', 'tiles'].includes(n.effect.keepUnlock), n.id);
+    if (keys[0] === 'keepUnlock') assert.ok(['shelf', 'hunters', 'gallery', 'tiles', 'skeins', 'lift', 'garden'].includes(n.effect.keepUnlock), n.id);
     for (let i = 1; i < n.cost.length; i++) assert.ok(n.cost[i] >= n.cost[i - 1]);
   }
 });
@@ -278,7 +278,7 @@ test('commissions: steps reference valid families, pigments and wild hues', asyn
 });
 
 test('quests: events come from the fixed allowed set', () => {
-  assert.deepEqual([...QUEST_EVENTS].sort(), ['batchPurified', 'boardSolved', 'colorDiscovered', 'colorNamed', 'crateShipped', 'hunterSent', 'merged', 'orderFilled', 'regionsPainted', 'tilesRound', 'upgradeBought']);
+  assert.deepEqual([...QUEST_EVENTS].sort(), ['batchPurified', 'boardSolved', 'colorDiscovered', 'colorNamed', 'crateShipped', 'hunterSent', 'merged', 'orderFilled', 'regionsPainted', 'tilesRound', 'upgradeBought', 'hankTied', 'paintingLifted', 'gardenVisit'].sort());
   for (const t of QUEST_TYPES) {
     assert.ok(QUEST_EVENTS.includes(t.event), `${t.id}: ${t.event}`);
     assert.ok(t.weight > 0);
@@ -305,7 +305,7 @@ test('quests: events come from the fixed allowed set', () => {
   assert.equal(BANK_MAX_DAYS, 2);
   // Phase-1 player with nothing unlocked can still be dealt at least DAILY_COUNT quest types.
   assert.ok(eligibleQuestTypes({ phase: 1 }).length >= DAILY_COUNT);
-  assert.ok(eligibleQuestTypes({ phase: 2, hunters: true, gallery: true, shelf: true, fleet: true, tiles: true }).length === QUEST_TYPES.length);
+  assert.ok(eligibleQuestTypes({ phase: 2, hunters: true, gallery: true, shelf: true, fleet: true, tiles: true, skeins: true, lift: true, garden: true }).length === QUEST_TYPES.length);
 });
 
 test('events: 8 events, 10-step tracks, 12-color pages, rotation cycles all', () => {
@@ -320,7 +320,7 @@ test('events: 8 events, 10-step tracks, 12-color pages, rotation cycles all', ()
     unique(e.catalogPage, `${e.id} catalogPage`);
     assert.equal(e.canvases.length, 2);
     allCanvases.push(...e.canvases);
-    assert.deepEqual({ ...e.pointsPer }, { order: 10, board: 15, crate: 5, purify: 10, paint: 2, bouquet: 30, mosaic: 30 });
+    assert.deepEqual({ ...e.pointsPer }, { order: 10, board: 15, crate: 5, purify: 10, paint: 2, bouquet: 30, mosaic: 30, hank: 4, lifted: 25, harvest: 20 });
     assert.ok(Object.keys(e.twist.rules).length >= 1 && e.twist.text);
     let prev = 0, seals = 0;
     for (const s of e.track) {

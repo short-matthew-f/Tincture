@@ -259,7 +259,7 @@ test('unlock: 20 colors, 5,000 coins; a wall needs it; Next names it', () => {
   const t = withColors(20);
   t.coins = 5000;
   assert.equal(sim.unlocks.status(t, 'tiles').canBuy, true);
-  t.unlocks.shelf = t.unlocks.hunters = true; // already bought: Next points at the Tile Room
+  t.unlocks.shelf = t.unlocks.hunters = t.unlocks.skeins = t.unlocks.lift = true; // already bought: Next points at the Tile Room
   t.stations.mixers.forEach((m, i) => { m.recipe = ['madder', 'ochre'][i % 2]; });
   assert.match(sim.next(t, NOW).label, /^Open the Tile Room for 5/);
   assert.equal(sim.unlocks.buy(t, { id: 'tiles' }, NOW).ok, true);

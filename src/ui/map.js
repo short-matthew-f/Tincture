@@ -38,6 +38,7 @@ import { h, raw, button, tag, lockTag, swatch, iconSvg, safeHex, lighten, darken
 import { unlockTag, openUnlockSheet, ensureStyles as ensureWorkshopStyles } from './workshop.js';
 import { howThisWorksHtml, markGuideSeen, isSeen } from './guide.js';
 import { dust } from './feel.js';
+import { gardenMapCardHtml } from './garden-card.js';
 
 // ---------------------------------------------------------------------------
 // Shared constants
@@ -1003,7 +1004,7 @@ function build(state) {
   const now = ctx.game.now();
   const trips = ctx.sim.hunters.tripsSummary(state, now);
   const items = backpackItems(state, now);
-  return h`${backpackHtml(state, items)}${sendAllHtml(state, trips)}${mapHtml(state, trips)}${legendHtml(state)}${eventLine(state)}${rosterHtml(state, trips)}${hireHtml(state)}`;
+  return h`${backpackHtml(state, items)}${sendAllHtml(state, trips)}${mapHtml(state, trips)}${legendHtml(state)}${eventLine(state)}${rosterHtml(state, trips)}${hireHtml(state)}${gardenMapCardHtml(ctx, state)}`;
 }
 
 function paint(state, force = false) {
@@ -1098,6 +1099,7 @@ function onClick(e) {
     paint(ctx.game.state, true);
   }
   else if (a === 'open-quests') ctx.navigate('quests');
+  else if (a === 'open-garden') ctx.navigate('garden', {});
   else if (a === 'hire') {
     const id = el.getAttribute('data-hunter-id');
     const res = ctx.game.act(ctx.sim.hunters.hire, { hunterId: id });

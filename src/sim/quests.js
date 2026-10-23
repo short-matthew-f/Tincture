@@ -38,7 +38,7 @@ function ensureQuests(state) {
   return q;
 }
 
-/** unlocksOf(state) -> {phase, hunters, gallery, shelf, fleet, tiles} for quest eligibility. */
+/** unlocksOf(state) -> {phase, hunters, gallery, shelf, fleet, tiles, skeins, lift, garden} for quest eligibility. */
 export function unlocksOf(state) {
   const shelfCells = state.shelf && Array.isArray(state.shelf.cells) ? state.shelf.cells : [];
   return {
@@ -47,6 +47,9 @@ export function unlocksOf(state) {
     gallery: state.unlocks ? !!state.unlocks.gallery : !!(state.gallery && state.gallery.unlocked),
     shelf: !!(state.unlocks && state.unlocks.shelf) || shelfCells.some((c) => c),
     tiles: !!(state.unlocks && state.unlocks.tiles),
+    skeins: !!(state.unlocks && state.unlocks.skeins),
+    lift: !!(state.unlocks && state.unlocks.lift),
+    garden: !!(state.unlocks && state.unlocks.garden),
     // Shipping needs the Loading Yard (the handcart waits in the drawer until then).
     fleet: !!(state.stations && Array.isArray(state.stations.fleet) && state.stations.fleet.length > 0)
       && (!!(state.unlocks && state.unlocks.shipping) || (state.rooms || []).includes('loading-yard')),

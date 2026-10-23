@@ -30,10 +30,10 @@ const coins = (n) => `${formatNumber(Math.ceil(fin(n)))} ${Math.ceil(fin(n)) ===
 /** Screen ids the how-to may send her to (index.html sections). */
 export const GO_SCREENS = Object.freeze([
   'workshop', 'orders', 'puzzles', 'map', 'catalog', 'album', 'quests', 'gallery', 'shelf', 'grading', 'purify',
-  'packing', 'matching', 'bench', 'paint', 'hunter', 'commissions', 'heritage', 'tiles',
+  'packing', 'matching', 'bench', 'paint', 'hunter', 'commissions', 'heritage', 'tiles', 'skeins', 'lift', 'garden',
 ]);
 
-const UNLOCK_OF_NEED = Object.freeze({ shelf: 'shelf', hunters: 'hunters', gallery: 'gallery', shipping: 'shipping', commissions: 'commissions', tiles: 'tiles' });
+const UNLOCK_OF_NEED = Object.freeze({ shelf: 'shelf', hunters: 'hunters', gallery: 'gallery', shipping: 'shipping', commissions: 'commissions', tiles: 'tiles', skeins: 'skeins', lift: 'lift', garden: 'garden' });
 
 /**
  * requirement(state, need) -> null when it is open, else

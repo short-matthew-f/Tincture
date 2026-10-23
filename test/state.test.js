@@ -41,7 +41,7 @@ test('createInitialState shape', () => {
   assert.equal(s.stats.firstBottleAt, 0);
   assert.deepEqual(s.shelf.colors, []);
   assert.equal(s.shelf.waiting, 0);
-  assert.deepEqual(s.unlocks, { shelf: false, hunters: false, gallery: false, shipping: false, commissions: false, tiles: false });
+  assert.deepEqual(s.unlocks, { shelf: false, hunters: false, gallery: false, shipping: false, commissions: false, tiles: false, skeins: false, lift: false, garden: false });
   assert.deepEqual(s.renovateReopen, []);
   assert.deepEqual(s.keep, {});
   assert.equal(s.settings.puzzleTier.purify, 'relaxed');
@@ -160,7 +160,7 @@ test('a real 0.1.3 save loads as v3, grants what it used, plays a tick, and has 
   const s = deserialize(json, T);
   assert.equal(s.v, SAVE_VERSION);
   // Granted: the shelf had containers, a hunter was hired; nothing else.
-  assert.deepEqual(s.unlocks, { shelf: true, hunters: true, gallery: false, shipping: false, commissions: false, tiles: false });
+  assert.deepEqual(s.unlocks, { shelf: true, hunters: true, gallery: false, shipping: false, commissions: false, tiles: false, skeins: false, lift: false, garden: false });
   assert.equal(s.flags.whatsNew, '0.2');
   assert.equal(s.settings.puzzleTier.purify, 'relaxed');
   assert.deepEqual(s.onboarding.seen, {});
@@ -213,7 +213,7 @@ test('v1 -> v2: a one-mixer save gets its second mixer; gallery, yard and Phase 
   const back = deserialize(JSON.stringify(obj), NOW);
   assert.equal(back.stations.mixers.length, 2);
   assert.equal(back.stations.mixers[0].recipe, 'madder');
-  assert.deepEqual(back.unlocks, { shelf: false, hunters: false, gallery: true, shipping: true, commissions: true, tiles: false });
+  assert.deepEqual(back.unlocks, { shelf: false, hunters: false, gallery: true, shipping: true, commissions: true, tiles: false, skeins: false, lift: false, garden: false });
   assert.deepEqual(back.shelf.colors, []);
   assert.equal(back.flags.whatsNew, '0.2');
   for (const k of ['lines', 'lineSkips', 'wrongDrops', 'rejectedDrags', 'coachDismissed']) assert.equal(back.stats[k], 0, k);

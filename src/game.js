@@ -236,6 +236,11 @@ export class Game {
       this._drain({ catchUp: true });
       this.save();
       this.emit('change', s, { resume: true });
+    } else if (this._started) {
+      // One world step now, so the first screen she sees already knows this week's
+      // event, quests and orders (otherwise a banner can pop in a beat later and
+      // shift the page under her finger).
+      this.tick();
     }
     this._startTimer();
     return summary;

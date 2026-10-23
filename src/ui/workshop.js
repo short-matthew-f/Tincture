@@ -55,6 +55,7 @@ import { getPigment } from '../content/pigments.js';
 import { STATION_NOTES } from '../content/explain.js';
 import { getEvent } from '../content/events.js';
 import { getColor } from '../content/catalog.js';
+import { artGardenBasket } from './garden-art.js';
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -606,6 +607,36 @@ const artKiln = (f) => `<g filter="url(#${f})">
 <rect x="105" y="68" width="11" height="11" rx="3" fill="#D9A63A"/>
 </g>`;
 
+/** The Lifting Table's easel (only drawn in the unlock sheet): a painting half lifted from the bottom, jars riding the belt below. */
+const artEasel = (f) => `<g filter="url(#${f})">
+<path d="M44 12 L26 100 M76 12 L94 100 M60 10 V96" stroke="#7B5236" stroke-width="5" stroke-linecap="round" fill="none"/>
+<rect x="26" y="16" width="68" height="50" rx="3" fill="#A47E50"/>
+<rect x="31" y="21" width="58" height="40" fill="#EFE7D6"/>
+<path d="M31 21 H89 V43 H82 V50 H74 V39 H67 V47 H60 V41 H53 V52 H46 V44 H38 V48 H31 Z" fill="#8BABC5"/>
+<circle cx="60" cy="31" r="6" fill="#D39B2A"/>
+<rect x="22" y="64" width="76" height="6" rx="2" fill="#B48A5A"/>
+</g>
+<g filter="url(#${f})">
+<rect x="14" y="84" width="92" height="12" rx="5" fill="#4A3F36"/>
+${[[30, '#8BABC5', 9], [54, '#D39B2A', 5], [78, '#758054', 12]].map(([x, c, hh]) => `<rect x="${x}" y="70" width="13" height="16" rx="3" fill="#FFFDF6"/><rect x="${x}" y="${86 - hh}" width="13" height="${hh}" rx="3" fill="${c}"/><rect x="${x + 3}" y="67" width="7" height="4" rx="1" fill="#9C7A4C"/>`).join('')}
+</g>`;
+
+/** The Winding Room's swift (only drawn in the unlock sheet): a wooden yarn swift with a loop of yarn, two twisted hanks beside it. */
+const SK_HANK = 'M6 20C6 7 25 5 33 15 41 5 60 7 60 20S41 35 33 25C25 35 6 33 6 20Z';
+const artSwift = (f) => `<g filter="url(#${f})">
+<rect x="6" y="92" width="108" height="8" rx="2" fill="#7B5236"/>
+<rect x="44" y="86" width="32" height="7" rx="2" fill="#5E3E28"/>
+<rect x="57" y="22" width="6" height="66" rx="2" fill="#9A6A47"/>
+<path d="M60 26 L26 48 L60 70 L94 48 Z M26 48 H94" stroke="#B98E64" stroke-width="3" fill="none" stroke-linejoin="round"/>
+<ellipse cx="60" cy="48" rx="34" ry="22" fill="none" stroke="#C0573B" stroke-width="6"/>
+<ellipse cx="60" cy="48" rx="34" ry="22" fill="none" stroke="rgba(255,250,235,.35)" stroke-width="1.5" stroke-dasharray="3 3"/>
+<circle cx="60" cy="24" r="5" fill="#7B5236"/>
+</g>
+<g filter="url(#${f})">
+<g transform="translate(2 70) scale(.55)"><path d="${SK_HANK}" fill="#D5AE3C"/><rect x="29.5" y="11" width="7" height="18" rx="2.5" fill="#EFE6D2"/></g>
+<g transform="translate(82 70) scale(.55)"><path d="${SK_HANK}" fill="#4C76A6"/><rect x="29.5" y="11" width="7" height="18" rx="2.5" fill="#EFE6D2"/></g>
+</g>`;
+
 /** What each unlock opens in the scene, what it does, and how the sheet draws it. */
 const UNLOCK_INFO = {
   shelf: {
@@ -627,6 +658,18 @@ const UNLOCK_INFO = {
   tiles: {
     object: 'kiln', short: 'Tile Room', says: 'Glaze tiles in your own colors and set them into a mosaic wall, a few calm turns at a time.',
     vb: '0 0 120 104', art: (f) => artKiln(f),
+  },
+  lift: {
+    object: 'easel', short: 'Lifting Table', says: 'Lift the pigments back out of a painting, jar by jar, along a little belt. Each one cleared pays coins and paint.',
+    vb: '0 0 120 104', art: (f) => artEasel(f),
+  },
+  garden: {
+    object: 'garden-basket', short: 'Dye Garden', says: 'Steer a basket through real dye plants. It grows as it fills, until even the shed fits.',
+    vb: '0 0 120 104', art: (f) => artGardenBasket(f),
+  },
+  skeins: {
+    object: 'swift', short: 'Winding Room', says: 'Stack yarn in your own colors on a table of pegs: ten of one color on top twist into a hank.',
+    vb: '0 0 120 104', art: (f) => artSwift(f),
   },
   commissions: {
     object: 'commissions', short: 'Commissions', says: 'Big projects for the town, delivered a few jars at a time, with trophies for the workshop.',
@@ -1720,6 +1763,9 @@ function pickRow({ action, attrs = {}, lead, title, sub = '', on = false, right 
 const UNLOCK_LABEL = {
   shelf: 'the Merge Shelf', hunters: 'the map window', gallery: 'the Gallery Wing', shipping: 'the Loading Yard', commissions: 'Commissions',
   tiles: 'the Tile Room',
+  garden: 'the Dye Garden',
+  skeins: 'the Winding Room',
+  lift: 'the Lifting Table',
 };
 
 /** sim.unlocks.status for one id (null when the sim has no such unlock). */
@@ -1886,6 +1932,9 @@ export function unlockCeremony(objectId) {
     else if (key === 'gallery-door') glow(316, 312, 60, 70, 500);
     else if (key === 'yard') glow(70, 384, 60, 36, 500);
     else if (key === 'kiln') glow(195, 220, 90, 80, 500);
+    else if (key === 'garden-basket') glow(195, 220, 90, 80, 500);
+    else if (key === 'swift') glow(195, 220, 90, 80, 500);
+    else if (key === 'easel') glow(195, 220, 90, 80, 500);
     else glow(218, 64, 24, 36, 500);
   } else if (key === 'shelf') {
     audio().knock();
@@ -1972,6 +2021,21 @@ export function unlockCeremony(objectId) {
     glow(195, 220, 110, 96, 1200);
     audio().bell();
     setTimeout(() => audio().clink(3), 380);
+  } else if (key === 'garden-basket') {
+    // The Dye Garden has no object in the scene: a sunny glow over the bench, a bell and a little climb.
+    glow(195, 220, 110, 96, 1200);
+    audio().bell();
+    setTimeout(() => { audio().chain(0); audio().chain(2); }, 380);
+  } else if (key === 'swift') {
+    // The Winding Room has no object in the scene either: a soft glow over the bench, a bell and a rising chain.
+    glow(195, 220, 110, 96, 1200);
+    audio().bell();
+    setTimeout(() => audio().chain(1), 380);
+  } else if (key === 'easel') {
+    // The Lifting Table has no object in the scene: a warm glow over the bench, a bell and a jar corked with a pop.
+    glow(195, 220, 110, 96, 1200);
+    audio().bell();
+    setTimeout(() => audio().cork(), 420);
   } else {
     const scroll = svgNode('g', { transform: 'translate(205 40)' });
     scroll.innerHTML = artJobs('ws-cut');

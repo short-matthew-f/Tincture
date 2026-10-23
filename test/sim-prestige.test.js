@@ -64,7 +64,7 @@ test('renovate resets the factory and unlocks; keeps catalog, gallery pieces, es
   assert.deepEqual(s.stations.sources.saffron, { level: 1 });
   assert.equal(s.stations.mixers.length, 2, 'a new run starts with two mixers');
   assert.deepEqual(s.stock, {});
-  assert.deepEqual(s.unlocks, { shelf: false, hunters: false, gallery: false, shipping: false, commissions: false, tiles: false });
+  assert.deepEqual(s.unlocks, { shelf: false, hunters: false, gallery: false, shipping: false, commissions: false, tiles: false, skeins: false, lift: false, garden: false });
   assert.deepEqual(s.renovateReopen, ['shelf', 'hunters', 'gallery', 'commissions']);
   assert.equal(s.raw.madder, 0);
   assert.ok(s.shelf.cells.every((c) => c === null));

@@ -87,7 +87,7 @@ export function createInitialState(now = 0, seed) {
     catalog: { discovered, pinned: [] },
     // Coin-bought systems (src/sim/unlocks.js); colors only reveal the price.
     // Reset on Renovate unless a Heritage keep-* node holds them open.
-    unlocks: { shelf: false, hunters: false, gallery: false, shipping: false, commissions: false, tiles: false },
+    unlocks: { shelf: false, hunters: false, gallery: false, shipping: false, commissions: false, tiles: false, skeins: false, garden: false, lift: false },
     renovateReopen: [],        // unlock ids open before the last Renovate (batch re-buy)
     // Shop reserve: colorId -> jars the shop and the Dispatcher never sell.
     // Missing entries use the default rule (storage.keepOf): 20 jars of a pinned
@@ -131,6 +131,18 @@ export function createInitialState(now = 0, seed) {
     tiles: {
       game: null, pending: false, undo: null, paid: 0, lastGain: null,
       walls: 0, best: 0, settings: { rival: true }, glazes: [], mosaics: [],
+    },
+    // The Dye Garden (src/sim/garden.js owns the shape; ensureGarden repairs it).
+    garden: {
+      visits: 0, bests: {}, daily: { day: '', bests: {} }, spindles: 0, spindleKeys: [], shelf: {},
+      cur: null, settings: { sound: false, today: false }, paid: 0, last: null,
+    },
+    // The Winding Room (src/sim/skeins.js owns the shape; ensureSkeins repairs it).
+    skeins: { li: 0, sess: null, other: {}, finished: {}, notes: {}, glyphs: null, hanks: 0, levels: 0 },
+    // The Lifting Table (src/sim/lift.js owns the shape; ensureLift repairs it).
+    lift: {
+      cur: 'sun', game: null, done: {}, seenIntro: {},
+      settings: { fast: false, sound: true, glyphs: true }, paid: 0, lifted: 0, last: null,
     },
     album: { cards: {}, setsDone: [] },
     quests: {
@@ -298,7 +310,7 @@ function isPlainObject(x) {
 
 /** Top-level sections whose own keys mergeDefaults fills in (one level deep). */
 const DEEP_SECTIONS = ['onboarding', 'lifetime', 'stations', 'catalog', 'apprentices', 'orders', 'shelf',
-  'gallery', 'hunters', 'album', 'quests', 'commissions', 'ledger', 'unlocks', 'tiles'];
+  'gallery', 'hunters', 'album', 'quests', 'commissions', 'ledger', 'unlocks', 'tiles', 'skeins', 'garden', 'lift'];
 
 function fillMissing(target, defaults) {
   for (const [k, d] of Object.entries(defaults)) {
@@ -344,6 +356,9 @@ export function mergeDefaults(state, now = 0) {
   if (!isPlainObject(state.keep)) state.keep = {};
   if (!isPlainObject(state.tiles.settings)) state.tiles.settings = { rival: true };
   if (typeof state.tiles.settings.rival !== 'boolean') state.tiles.settings.rival = true;
+  if (!isPlainObject(state.garden.settings)) state.garden.settings = { sound: false, today: false };
+  if (!isPlainObject(state.garden.daily)) state.garden.daily = { day: '', bests: {} };
+  if (!isPlainObject(state.lift.settings)) state.lift.settings = { fast: false, sound: true, glyphs: true };
   if (!Array.isArray(state.renovateReopen)) state.renovateReopen = [];
   for (const key of ['coins', 'seals', 'heritage', 'runEarned']) {
     if (!Number.isFinite(state[key])) state[key] = key === 'coins' ? 0 : defaults[key];

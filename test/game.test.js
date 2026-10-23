@@ -49,11 +49,12 @@ test('start() runs a 250 ms loop that ticks, emits change and saves', () => {
   let changes = 0;
   game.on('change', () => { changes++; });
   game.start();
+  assert.equal(changes, 1, 'start steps the world once, so the first screen is current');
   assert.equal(timers.intervals.size, 1);
   assert.equal([...timers.intervals.values()][0].ms, 250);
   clock.t += 250;
   timers.runIntervals(1);
-  assert.equal(changes, 1);
+  assert.equal(changes, 2);
   assert.equal(game.state.lastTick, T0 + 250);
   assert.ok(game.state.orders.open.length >= 3, 'tick refreshed the order board');
   assert.ok(storage.getItem(SAVE_KEY), 'first tick saved');
