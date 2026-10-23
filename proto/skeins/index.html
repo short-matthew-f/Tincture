@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#F4EFE4">
+<title>Skein Stacks</title>
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Young+Serif&amp;family=Figtree:wght@400;500;600;700&amp;display=swap">
+<link rel="stylesheet" href="../shared.css">
+<style>
+  :root { --dockH: 190px; --gold-soft: #F3E3B8; --wood: #D8C29C; --wood-dark: #B89A6E; }
+  body { padding: 0 12px calc(var(--dockH) + 24px); overflow-x: hidden; }
+  .wrap { max-width: 460px; margin: 0 auto; }
+  [hidden] { display: none !important; }
+  button { font: inherit; color: inherit; }
+  .topbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  h1 { font: 400 21px var(--font-display); margin: 0; }
+  #levelBtn { min-height: 44px; }
+
+  /* goal */
+  .goal { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 2px 0 6px; }
+  .goal .big { font: 400 26px/1 var(--font-display); font-variant-numeric: tabular-nums; }
+  .goal .big small { font: 500 14px var(--font-ui); color: var(--ink-soft); margin-left: 4px; }
+  .goal .lvl { flex: 1 1 100%; font-size: 12px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--ink-soft); }
+  #slots { display: flex; flex-wrap: wrap; gap: 3px; flex: 1; min-width: 0; }
+  .slot { width: 12px; height: 16px; border-radius: 5px; background: rgba(42,38,34,.08); box-shadow: inset 0 0 0 1px rgba(42,38,34,.1); }
+  .slot.on { background: var(--c); box-shadow: inset 0 -2px 0 rgba(0,0,0,.2), inset 0 0 0 1px rgba(0,0,0,.12); }
+  .slot.pop { animation: slotpop .5s ease-out; }
+  @keyframes slotpop { 0% { transform: scale(1.8); } 100% { transform: scale(1); } }
+  #chips { display: flex; flex-wrap: wrap; gap: 6px; flex: 1 1 100%; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; padding: 3px 9px 3px 4px; border-radius: 999px; background: var(--card); box-shadow: 0 1px 0 var(--line); }
+  .chip.met { background: var(--gold-soft); }
+  .dot { width: 18px; height: 18px; border-radius: 50%; background: var(--c); display: inline-grid; place-items: center; flex: none; }
+  .dot svg { width: 12px; height: 12px; fill: rgba(255,250,235,.95); }
+
+  /* board */
+  #boardWrap { display: flex; justify-content: center; margin: 4px 0 8px; }
+  #board { position: relative; touch-action: manipulation; }
+  .table { position: absolute; inset: -8px -10px; border-radius: 22px; background: linear-gradient(170deg, #EADBBE, #DCC7A0); box-shadow: inset 0 0 0 2px rgba(107,74,50,.18), var(--shadow); }
+  .peg { position: absolute; display: block; padding: 0; border: 0; background: none; cursor: pointer; }
+  .peg .hole { position: absolute; inset: 0; clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%); background: radial-gradient(circle at 50% 42%, #C9AE84, #B79A6C 70%); }
+  .peg .hole::after { content: ''; position: absolute; left: 50%; top: 50%; width: 16%; height: 16%; transform: translate(-50%, -50%); border-radius: 50%; background: #9C7F55; box-shadow: 0 1px 0 rgba(255,255,255,.35); }
+  .peg.knot .hole { background: radial-gradient(circle at 50% 40%, #A98B5F, #8E7048 70%); opacity: .55; }
+  .peg.knot { cursor: default; }
+  .peg.open .hole { box-shadow: none; background: radial-gradient(circle at 50% 42%, #E8D6B0, #CDB284 70%); }
+  .peg.target .hole { background: radial-gradient(circle at 50% 42%, #F9E8B8, #E2B04A 80%); }
+  .peg:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+
+  .stack { position: absolute; left: 0; top: 0; pointer-events: none; }
+  .ly { position: absolute; left: 0; top: 0; width: 100%; height: 100%;
+    clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+    background:
+      repeating-linear-gradient(118deg, rgba(255,250,235,.16) 0 2px, rgba(255,250,235,0) 2px 4.5px, rgba(0,0,0,.1) 4.5px 5.5px, rgba(0,0,0,0) 5.5px 7px),
+      linear-gradient(180deg, var(--c) 0 72%, color-mix(in srgb, var(--c) 70%, #000) 100%); }
+  .ly.top { background:
+      radial-gradient(70% 55% at 35% 25%, rgba(255,255,255,.28), rgba(255,255,255,0) 60%),
+      repeating-linear-gradient(118deg, rgba(255,250,235,.2) 0 2px, rgba(255,250,235,0) 2px 4.5px, rgba(0,0,0,.12) 4.5px 5.5px, rgba(0,0,0,0) 5.5px 7px),
+      linear-gradient(180deg, color-mix(in srgb, var(--c) 92%, #fff) 0 60%, var(--c) 72%, color-mix(in srgb, var(--c) 65%, #000) 100%); }
+  .ly.lit { filter: brightness(1.18) saturate(1.1); }
+  .badge { position: absolute; left: 50%; top: 44%; transform: translate(-50%, -50%); display: inline-flex; align-items: center; gap: 2px; min-width: 22px; height: 20px; padding: 0 5px; border-radius: 10px;
+    background: rgba(251,248,241,.94); color: var(--ink); font: 700 12px/20px var(--font-ui); font-variant-numeric: tabular-nums; box-shadow: 0 1px 2px rgba(42,38,34,.3); justify-content: center; }
+  .badge.near { background: var(--gold-soft); box-shadow: 0 0 0 1.5px var(--gold), 0 1px 2px rgba(42,38,34,.3); }
+  .badge svg { width: 11px; height: 11px; fill: var(--c); }
+  .badge svg .st { fill: none; stroke: var(--c); stroke-width: 3; }
+
+  /* fx inside the board */
+  .hop { position: absolute; pointer-events: none; z-index: 900; }
+  .hank { position: absolute; z-index: 950; pointer-events: none; width: 66px; height: 40px; }
+  .hank svg { width: 100%; height: 100%; overflow: visible; }
+  .label { position: absolute; z-index: 960; pointer-events: none; white-space: nowrap; transform: translate(-50%, 0); padding: 5px 11px; border-radius: 999px;
+    background: var(--card); box-shadow: 0 0 0 1.5px var(--gold), 0 4px 12px rgba(42,38,34,.18); font: 400 15px var(--font-display); color: var(--ink); }
+  .chain { position: absolute; z-index: 960; pointer-events: none; transform: translate(-50%, 0); padding: 3px 10px; border-radius: 999px; background: rgba(251,248,241,.95); box-shadow: 0 2px 8px rgba(42,38,34,.18); font: 400 16px var(--font-display); color: #6A5A1E; white-space: nowrap; }
+
+  /* dock: tray + actions, in thumb reach */
+  .dock { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; padding: 8px max(10px, calc((100vw - 460px) / 2 + 10px)) calc(8px + env(safe-area-inset-bottom));
+    background: rgba(251,248,241,.97); box-shadow: 0 -3px 0 rgba(42,38,34,.08), 0 -8px 24px rgba(42,38,34,.08); }
+  #tray { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .tslot { position: relative; height: 104px; border-radius: 16px; background: rgba(42,38,34,.045); box-shadow: inset 0 0 0 1px var(--line); touch-action: none; cursor: grab; padding: 0; border: 0; display: block; width: 100%; }
+  .tslot.sel { background: var(--gold-soft); box-shadow: 0 0 0 2.5px var(--gold); }
+  .tslot.empty { cursor: default; background: rgba(42,38,34,.025); }
+  .tslot.lifted .stack { opacity: .25; }
+  .tslot .bandlist { position: absolute; left: 4px; right: 4px; bottom: 3px; display: flex; justify-content: center; gap: 4px; font-size: 11px; color: var(--ink-soft); }
+  .tslot .bandlist span { display: inline-flex; align-items: center; gap: 1px; }
+  .tslot .bandlist svg { width: 11px; height: 11px; fill: var(--c); }
+  .tslot .bandlist svg .st { fill: none; stroke: var(--c); stroke-width: 3; }
+  .ghost { position: fixed; z-index: 1000; pointer-events: none; left: 0; top: 0; filter: drop-shadow(0 10px 10px rgba(42,38,34,.3)); }
+  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 8px; min-height: 44px; }
+  .actions .msg { flex: 1 1 140px; font-size: 14px; line-height: 1.3; font-weight: 500; }
+  .actions .btns { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+  .actions.wide .msg { flex-basis: 100%; }
+
+  /* below the board */
+  .foot { display: flex; gap: 8px; margin-top: 4px; flex-wrap: wrap; }
+  details { margin-top: 10px; font-size: 14px; color: var(--ink-soft); }
+  details summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font-weight: 600; color: var(--ink); }
+  details ol { margin: 0; padding-left: 20px; line-height: 1.5; }
+  #notes { font-size: 12px; line-height: 1.5; }
+
+  /* panels: levels and level complete */
+  .sheet { position: fixed; inset: 0; z-index: 80; background: rgba(42,38,34,.35); display: flex; align-items: flex-end; justify-content: center; padding: 12px; }
+  .sheet .card { width: 100%; max-width: 440px; max-height: calc(100vh - 24px); overflow: auto; padding: 16px; }
+  .sheet h2 { font: 400 24px var(--font-display); margin: 0 0 4px; text-align: center; }
+  #levelList { list-style: none; margin: 10px 0; padding: 0; display: grid; gap: 6px; }
+  #levelList button { width: 100%; min-height: 48px; display: flex; align-items: center; gap: 10px; text-align: left; border: 0; border-radius: 12px; background: var(--paper); padding: 6px 10px; cursor: pointer; }
+  #levelList button.cur { box-shadow: 0 0 0 2px var(--gold); }
+  #levelList .n { font: 400 18px var(--font-display); width: 26px; text-align: center; }
+  #levelList .t { flex: 1; }
+  #levelList .t small { display: block; color: var(--ink-soft); font-size: 12px; }
+  #levelList .mark svg { width: 30px; height: 18px; }
+  .shelf { margin: 14px 0 10px; padding: 10px 8px 0; border-radius: 12px; background: linear-gradient(180deg, #F3EAD8, #EADBBE); }
+  .shelf .row { display: flex; justify-content: center; align-items: flex-end; gap: 6px 8px; padding-bottom: 6px; border-bottom: 9px solid var(--wood-dark); box-shadow: 0 2px 0 rgba(42,38,34,.15); margin-bottom: 12px; }
+  .pile { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .pile .sk { display: flex; flex-direction: column-reverse; align-items: center; }
+  .pile .sk svg { width: 52px; height: 30px; margin-top: -10px; }
+  .pile .sk svg:last-child { margin-top: 0; }
+  .pile { flex: 0 1 31%; min-width: 0; }
+  .pile .tag { font-size: 12px; line-height: 1.25; text-align: center; color: var(--ink); background: var(--card); padding: 3px 7px; border-radius: 6px; box-shadow: 0 1px 0 var(--line); }
+  .pile .tag small { display: block; color: var(--ink-soft); font-size: 11px; }
+  .btn.wide { width: 100%; min-height: 52px; font-size: 17px; }
+  .btnrow { display: grid; gap: 8px; }
+
+  @media (prefers-reduced-motion: reduce) { .slot.pop { animation: none; } }
+</style>
+</head>
+<body>
+<div class="wrap" id="app">
+  <div class="topbar">
+    <a class="back" href="../">&#8592; Prototypes</a>
+    <h1>Skein Stacks</h1>
+    <button type="button" class="btn small" id="levelBtn" aria-haspopup="dialog">Level 1</button>
+  </div>
+  <div class="goal" aria-live="polite">
+    <span class="lvl" id="lvlName"></span>
+    <span class="big" id="count">0<small>of 6 hanks</small></span>
+    <div id="slots" aria-hidden="true"></div>
+    <div id="chips"></div>
+  </div>
+  <div id="boardWrap"><div id="board" role="group" aria-label="Pegs"></div></div>
+
+  <div class="foot">
+    <button type="button" class="btn small" id="glyphBtn" aria-pressed="false">Color symbols: off</button>
+    <button type="button" class="btn small" id="restartBtn">Start this level over</button>
+  </div>
+  <details id="how">
+    <summary>How this works</summary>
+    <ol>
+      <li><b>Drag</b> a stack from the tray onto any empty peg, or tap a stack and then a peg.</li>
+      <li>Neighbors with the <b>same top color</b> slide together. What is underneath can slide on, so chains happen.</li>
+      <li>When <b>10 or more</b> of one color sit on top, they twist into a hank. Bundle enough hanks to finish the level. Board full? Undo as much as you like, or take a free nudge.</li>
+    </ol>
+  </details>
+  <details>
+    <summary>Playtest notes</summary>
+    <p id="notes"></p>
+  </details>
+</div>
+
+<div class="dock" id="dock">
+  <div id="tray" role="group" aria-label="Tray"></div>
+  <div class="actions" id="actions"><span class="msg" role="status" id="msg"></span><span class="btns" id="btns"></span></div>
+</div>
+
+<div class="sheet" id="levels" hidden role="dialog" aria-modal="true" aria-labelledby="levelsTitle">
+  <div class="card">
+    <h2 id="levelsTitle">Levels</h2>
+    <p class="hint" style="text-align:center;margin:0">Every level is open for the playtest.</p>
+    <ul id="levelList"></ul>
+    <button type="button" class="btn wide" id="levelsClose">Back to the board</button>
+  </div>
+</div>
+
+<div class="sheet" id="done" hidden role="dialog" aria-modal="true" aria-labelledby="doneTitle">
+  <div class="card">
+    <h2 id="doneTitle">Level finished</h2>
+    <p class="muted" id="doneSub" style="text-align:center;margin:0"></p>
+    <div class="shelf" id="shelf"></div>
+    <div class="btnrow">
+      <button type="button" class="btn primary wide" id="nextBtn">Next level</button>
+      <button type="button" class="btn wide" id="againBtn">Play this level again</button>
+    </div>
+  </div>
+</div>
+<div id="fx" aria-hidden="true"></div>
+<script type="module" src="./app.js"></script>
+</body>
+</html>
