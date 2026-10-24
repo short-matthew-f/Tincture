@@ -1,6 +1,7 @@
-// Authoring tool (not loaded by the page): deals candidate hoops for every
-// level, proves each one solvable with the A* solver (minimum moves), measures
-// how hard it is, and writes hoops.js. Run from the repo root:
+// Authoring tool (not loaded by the page): scrambles candidate hoops for
+// every level from a clean hoop with real moves, proves each one solvable
+// with the A* solver (minimum moves, within a node cap), measures how hard it
+// is, and writes hoops.js. Run from the repo root:
 //   node proto/hoop/gen-levels.mjs                (all levels)
 //   ONLY=twill,heirloom node proto/hoop/gen-levels.mjs   (just these; the rest are kept)
 // Deterministic: the same code and seeds always write the same file.
@@ -8,52 +9,61 @@ import { writeFileSync } from 'node:fs';
 import { LEVEL_DEFS } from './levels.js';
 import { candidate } from './gen.js';
 import {
-  buildLevel, solve, replay, isDone, randomRate, greedyRate, greedyPlayout, mulberry, formatMoves, sparePegs, newState, totalCrossings,
+  buildLevel, solve, replay, isDone, randomRate, greedyPlayout, mulberry, formatMoves, sparePegs, newState, totalCrossings, hookedPairs,
 } from './rules.js';
 
-const SEEDS = +(process.env.SEEDS || 40);
+const SEEDS = +(process.env.SEEDS || 24);
 export const RANDOM_K = 60, RANDOM_SEED = 4242, RANDOM_RUNS = 400, GREEDY_RUNS = 100;
-const CAP = 250000;
+const SCREEN_CAP = 6000;   // a candidate must be solved this fast to be kept
+const CAP = 120000;        // the proof of the kept one
 const r3 = (x) => Math.round(x * 1000) / 1000;
+
+function greedy(L, seed, runs) {
+  const g = mulberry(seed);
+  let ok = 0, moves = 0;
+  for (let r = 0; r < runs; r++) { const m = greedyPlayout(L, g, RANDOM_K); if (m > 0) { ok++; moves += m; } }
+  return { rate: ok / runs, moves: ok ? Math.round((moves / ok) * 10) / 10 : null };
+}
 
 function generateOne(idx) {
   const d = LEVEL_DEFS[idx], k = d.knobs;
   const t0 = Date.now();
   const cands = [];
   let tried = 0, unsolved = 0;
-  for (let seed = 1; seed <= SEEDS; seed++) {
+  for (let seed = 1; seed <= (k.seeds || SEEDS); seed++) {
     const def = candidate(mulberry(seed * 7919 + idx * 131 + 1), k);
     if (!def) continue;
     tried++;
     const L = buildLevel({ id: d.id, name: d.name, ...def });
-    const sol = solve(L, undefined, { cap: CAP });
+    const sol = solve(L, undefined, { cap: k.cap || SCREEN_CAP });
     if (!sol.ok) { unsolved++; continue; }
     const par = sol.path.length;
-    const rate = randomRate(L, RANDOM_K, 99 + seed, 120);
     const off = par < k.par[0] ? k.par[0] - par : par > k.par[1] ? par - k.par[1] : 0;
-    cands.push({ score: Math.abs(rate - k.target) + off * 0.5, seed, def, L, sol, rate });
+    const gq = greedy(L, 99 + seed, 30);
+    cands.push({ score: off + Math.abs(gq.rate - k.target), seed, def, L, sol });
   }
   if (!cands.length) throw new Error(`${d.id}: no solvable candidate (${tried} dealt, ${unsolved} unsolved)`);
-  cands.sort((a, b) => a.score - b.score || a.seed - b.seed);
-  // re-rank the closest few by the rate that gets stored
-  const head = cands.slice(0, 6);
+  cands.sort((a, b) => a.score - b.score || a.sol.nodes - b.sol.nodes || a.seed - b.seed);
+  // re-rank the closest few by the greedy rate that gets stored
+  const head = cands.slice(0, 4);
   for (const x of head) {
     const par = x.sol.path.length;
     const off = par < k.par[0] ? k.par[0] - par : par > k.par[1] ? par - k.par[1] : 0;
-    x.score = Math.abs(randomRate(x.L, RANDOM_K, RANDOM_SEED, RANDOM_RUNS) - k.target) + off * 0.5;
+    x.gq = greedy(x.L, RANDOM_SEED, GREEDY_RUNS);
+    x.score = off + Math.abs(x.gq.rate - k.target);
   }
-  head.sort((a, b) => a.score - b.score || a.seed - b.seed);
+  head.sort((a, b) => a.score - b.score || a.sol.nodes - b.sol.nodes || a.seed - b.seed);
   const x = head[0];
-  if (!isDone(replay(x.L, x.sol.path))) throw new Error(`${d.id}: solution does not replay`);
-  const g = mulberry(RANDOM_SEED);
-  let gOk = 0, gMoves = 0;
-  for (let r = 0; r < GREEDY_RUNS; r++) { const m = greedyPlayout(x.L, g, RANDOM_K); if (m > 0) { gOk++; gMoves += m; } }
+  // the proof: the screened solution is already minimal (A*, consistent bound)
+  const sol = x.sol.optimal ? x.sol : solve(x.L, undefined, { cap: CAP });
+  if (!isDone(replay(x.L, sol.path))) throw new Error(`${d.id}: solution does not replay`);
+  const s0 = newState(x.L);
   return {
-    id: d.id, seed: x.seed, def: x.def, solution: formatMoves(x.sol.path),
+    id: d.id, seed: x.seed, def: x.def, solution: formatMoves(sol.path),
     stats: {
-      pegs: x.L.n, strands: x.L.S, spare: sparePegs(x.L), colors: x.L.colors.length, crossings: totalCrossings(x.L, newState(x.L)),
-      par: x.sol.path.length, optimal: x.sol.optimal, nodes: x.sol.nodes,
-      random: r3(randomRate(x.L, RANDOM_K, RANDOM_SEED, RANDOM_RUNS)), greedy: r3(gOk / GREEDY_RUNS), greedyMoves: gOk ? Math.round((gMoves / gOk) * 10) / 10 : null,
+      pegs: x.L.n, strands: x.L.S, spare: sparePegs(x.L), colors: x.L.colors.length, crossings: totalCrossings(x.L, s0), hooked: hookedPairs(x.L, s0).length,
+      par: sol.path.length, optimal: sol.optimal, nodes: sol.nodes,
+      random: r3(randomRate(x.L, RANDOM_K, RANDOM_SEED, RANDOM_RUNS)), greedy: r3(x.gq.rate), greedyMoves: x.gq.moves,
     },
     ms: Date.now() - t0, tried, unsolved, kept: cands.length,
   };
@@ -69,7 +79,7 @@ LEVEL_DEFS.forEach((d, i) => {
   const res = generateOne(i);
   results.set(i, res);
   const s = res.stats;
-  console.log(`${res.id.padEnd(10)} pegs ${String(s.pegs).padStart(2)} strands ${String(s.strands).padStart(2)} spare ${s.spare} par ${String(s.par).padStart(2)} nodes ${String(s.nodes).padStart(6)} random ${(s.random * 100).toFixed(0).padStart(3)}% greedy ${(s.greedy * 100).toFixed(0).padStart(3)}% (${s.greedyMoves} moves) crossings ${s.crossings}  [${res.kept}/${res.tried} solvable] ${(res.ms / 1000).toFixed(1)} s`);
+  console.log(`${res.id.padEnd(10)} pegs ${String(s.pegs).padStart(2)} strands ${String(s.strands).padStart(2)} spare ${s.spare} par ${String(s.par).padStart(2)} nodes ${String(s.nodes).padStart(6)} random ${(s.random * 100).toFixed(0).padStart(3)}% greedy ${(s.greedy * 100).toFixed(0).padStart(3)}% (${s.greedyMoves} moves) crossings ${s.crossings} hooked ${s.hooked}  [${res.kept}/${res.tried} solvable] ${(res.ms / 1000).toFixed(1)} s`);
 });
 const entries = LEVEL_DEFS.map((d, i) => results.get(i) || (old[d.id] ? { id: d.id, ...old[d.id] } : null)).filter(Boolean);
 const body = entries.map((o) => `  ${o.id}: {
@@ -81,16 +91,19 @@ const body = entries.map((o) => `  ${o.id}: {
 writeFileSync(new URL('./hoops.js', import.meta.url),
 `// Generated by gen-levels.mjs. Do not edit by hand; edit levels.js or the
 // generator and run: node proto/hoop/gen-levels.mjs
-// def: n pegs; reach; strands { c color, a, b pegs } (later strands lie on
-// top); fixed end ids (end 2s is at a, 2s+1 at b); links (shared knots);
-// pegs { peg: color } painted pegs; layering.
+// def: n pegs; reach; strands { c color, a, b pegs at the start }; fixed end
+// ids (end 2s is at a, 2s+1 at b); links (shared knots, the clockwise tail's
+// end first); pegs { peg: color } painted pegs; layering; x crossings
+// [a, b, top, sign] and w words (each strand's crossings from end 2s to
+// 2s+1), made by scrambling a clean hoop with real moves.
 // solution: "end:peg" moves, a minimum-move solution found by A*.
-// stats: spare = empty pegs at the start; par = minimum moves; nodes =
-// positions the solver expanded to prove it; random = how often a player who
-// makes any legal move at random clears the hoop within ${RANDOM_K} moves
-// (seed ${RANDOM_SEED}, ${RANDOM_RUNS} runs); greedy = a player with no lookahead who always
-// leaves the fewest crossings (${GREEDY_RUNS} runs, same limit), greedyMoves = its
-// average moves when it clears; crossings = crossings at the start.
+// stats: spare = empty pegs at the start; crossings and hooked (pairs of
+// strands hooked together) at the start; par = minimum moves; optimal = par
+// proved minimal; nodes = positions the solver expanded to prove it; random =
+// how often a player who makes any legal move at random clears the hoop
+// within ${RANDOM_K} moves (seed ${RANDOM_SEED}, ${RANDOM_RUNS} runs); greedy = a player with no lookahead
+// who always leaves the fewest crossings (${GREEDY_RUNS} runs, same limit), greedyMoves =
+// its average moves when it clears.
 export const HOOPS = {
 ${body}
 };

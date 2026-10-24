@@ -1,25 +1,33 @@
-// The Hoop: UI, rendering and animation. Rules live in rules.js (pure).
+// The Hoop: UI, rendering and animation. Rules live in rules.js (pure); the
+// picture of the words lives in layout.js (pure).
 //
 // One canvas holds the hoop. The wood, the linen and the pegs are painted
-// once per layout into a cached bitmap; the strands and knots are painted on
-// top each frame, but only while something moves (springs, a slide, a glow).
-// Strands are straight chords bent by one radial warp (plus a gentle swirl)
-// shared by every strand, so the picture crosses exactly where the rule says.
-// Each strand's slack is its own (tension relaxes as its crossings drop),
-// kept in a range the tests show never invents a crossing.
+// once per layout into a bitmap; the strands at rest are painted on top of
+// that into a cached bitmap; each frame repaints only what moves (springs,
+// a carried knot, a glow) and the crossings it is part of.
+// Over and under is drawn per crossing, never by stacking whole strands: the
+// strands go down in a base order, and every crossing the base order gets
+// wrong is patched: inside a small disk the linen and every strand near it
+// are repainted in the order that crossing (and any crossing beside it)
+// demands. A clasp, which no stacking can draw, is two patches.
+// A carried end rises above everything only past its nearest crossing: every
+// crossing it already has keeps its over and under, all the way through the
+// retie.
 // The yarn painting (ply grooves, sheen, shade, soft shadow) follows the
 // Tangle Basket's approach.
 import {
-  COLORS, newGame, play, undo, canLift, whyNotTo, targets, endsAt, crossCounts, crossersOf, isDone, remaining, movers,
-  hint, totalCrossings, yarnLine, VERSION, cdist, newState, warp, lamFor, LAM_SLACK, LAM_TAUT,
+  COLORS, newGame, play, undo, canLift, whyNotTo, targets, endsAt, isDone, remaining, movers, hint, totalCrossings, yarnLine, VERSION,
+  cdist, newState, nearestAt, wordsError, hookedPairs,
 } from './rules.js';
+import { layout, plan, distTo, baseOrder, topAt } from './layout.js';
 import { LEVELS, MECHANICS, BANDS, levelById } from './levels.js';
 
 const KEY = 'tincture.proto.hoop';
 const HISTORY_SAVED = 300; // undo is unlimited in a session; the save keeps the last 300 steps
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
-const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+const RM = { t: -1e9, v: false };
+const reduced = () => { const t = performance.now(); if (t - RM.t > 500) { RM.t = t; RM.v = matchMedia('(prefers-reduced-motion: reduce)').matches; } return RM.v; };
 const nap = (ms) => new Promise((r) => setTimeout(r, Math.max(0, ms || 0)));
 const clamp01 = (t) => (t < 0 ? 0 : t > 1 ? 1 : Number.isFinite(t) ? t : 1);
 const ease = (t) => (1 - Math.cos(Math.PI * clamp01(t))) / 2;
@@ -32,7 +40,6 @@ const mixHex = (a, b, t) => { const x = rgbOf(a), y = rgbOf(b); return `rgb(${x.
 const lum = (hex) => { const [r, g, b] = rgbOf(hex).map((v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
 const toneOf = (hex) => ({ base: hex, edge: mixHex(hex, '#24160A', 0.36), light: mixHex(hex, '#FFF6E4', 0.35), ink: lum(hex) > 0.28 ? 'rgba(42,30,20,.85)' : 'rgba(255,250,238,.95)' });
 const TONE = Object.fromEntries(Object.entries(COLORS).map(([k, c]) => [k, toneOf(c.hex)]));
-const cname = (c) => COLORS[c].name;
 const cshort = (c) => COLORS[c].short;
 
 // ---------- glyphs (colorblind help) ----------
@@ -79,7 +86,8 @@ const STAR = (filled) => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M
 
 // ---------- yarn: geometry and paint (after the Tangle Basket) ----------
 const LIGHT = [-0.5, -0.866];
-function yarnGeom(pts, w) {
+// s0: arc length before pts[0] on the whole strand (a slice keeps its ply in step).
+function yarnGeom(pts, w, s0 = 0) {
   const n = pts.length;
   const cum = new Float64Array(n);
   for (let k = 1; k < n; k++) cum[k] = cum[k - 1] + Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]);
@@ -98,7 +106,8 @@ function yarnGeom(pts, w) {
   // ply: a diagonal groove and a highlight every pitch, like a two-ply twist
   const grooves = new Path2D(), shines = new Path2D();
   const pitch = w * 0.55, r = w * 0.36, a = w * 0.34;
-  for (let s = pitch * 0.5; s < len - w * 0.25; s += pitch) {
+  const first = pitch * 0.5 - s0 + Math.ceil((s0 - pitch * 0.5) / pitch) * pitch;
+  for (let s = Math.max(0, first); s < len - (s0 ? 0 : w * 0.25); s += pitch) {
     const [x, y, tx, ty] = at(s);
     const nx = -ty, ny = tx;
     grooves.moveTo(x + nx * r - tx * a * 0.5, y + ny * r - ty * a * 0.5);
@@ -122,7 +131,9 @@ function yarnGeom(pts, w) {
   const mid = at(len * 0.5);
   return { path, grooves, shines, sheen, shade, spots, len, mid: [mid[0], mid[1]] };
 }
-// o: { w, tone, lift, glow, alpha, glyph, halo }
+// o: { w, tone, lift, glow, alpha, glyph, fast }
+// fast (yarn on the move, for a few frames): shadow, edge and body only.
+const pathGeom = (pts) => { const path = new Path2D(); path.moveTo(pts[0][0], pts[0][1]); for (let k = 1; k < pts.length; k++) path.lineTo(pts[k][0], pts[k][1]); return { path }; };
 function paintYarn(ctx, g, o) {
   const w = o.w, lift = o.lift || 0;
   ctx.save();
@@ -130,12 +141,11 @@ function paintYarn(ctx, g, o) {
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   // one soft shadow on the linen and on whatever lies under: it is what
   // makes over and under read at a glance (one wide stroke; raster is the cost)
-  const k = 1 + Math.max(0, lift) * 2.2;
+  const k = 1 + Math.max(0, lift) * 1.6;
   ctx.save();
   ctx.translate(w * 0.16 * k, w * 0.28 * k);
   ctx.strokeStyle = `rgba(60,40,20,${0.24 + 0.04 * lift})`; ctx.lineWidth = w * 1.38; ctx.stroke(g.path);
   ctx.restore();
-  if (lift) ctx.translate(0, -lift * w * 0.22);
   if (o.glow > 0) {
     ctx.strokeStyle = `rgba(242,190,70,${0.55 * o.glow})`; ctx.lineWidth = w * 2.1; ctx.stroke(g.path);
     ctx.strokeStyle = `rgba(255,243,205,${0.85 * o.glow})`; ctx.lineWidth = w * 1.45; ctx.stroke(g.path);
@@ -143,6 +153,7 @@ function paintYarn(ctx, g, o) {
   const t = o.tone;
   ctx.strokeStyle = t.edge; ctx.lineWidth = w; ctx.stroke(g.path);
   ctx.strokeStyle = t.base; ctx.lineWidth = w * 0.8; ctx.stroke(g.path);
+  if (o.fast || !g.shade) { ctx.restore(); return; }
   ctx.strokeStyle = 'rgba(28,16,6,.13)'; ctx.lineWidth = w * 0.22; ctx.stroke(g.shade);
   ctx.strokeStyle = 'rgba(255,250,238,.2)'; ctx.lineWidth = w * 0.2; ctx.stroke(g.sheen);
   ctx.strokeStyle = 'rgba(28,16,6,.3)'; ctx.lineWidth = w * 0.1; ctx.stroke(g.grooves);
@@ -161,7 +172,7 @@ function save() {
 }
 function validState(Lv, s) {
   if (!s || s.v !== VERSION || s.level !== Lv.id || !Array.isArray(s.ends) || s.ends.length !== 2 * Lv.S) return false;
-  if (!Array.isArray(s.out) || s.out.length !== Lv.S || !Array.isArray(s.z) || s.z.length !== Lv.S) return false;
+  if (!Array.isArray(s.out) || s.out.length !== Lv.S) return false;
   if (!Number.isInteger(s.moves) || s.moves < 0) return false;
   const at = new Map();
   for (let e = 0; e < 2 * Lv.S; e++) {
@@ -174,7 +185,7 @@ function validState(Lv, s) {
     at.set(p, e);
   }
   for (let i = 0; i < Lv.S; i++) if (!s.out[i] && cdist(Lv.n, s.ends[2 * i], s.ends[2 * i + 1]) < Lv.reach) return false;
-  return s.z.every((x) => Number.isFinite(x));
+  try { return !wordsError(Lv, s.ends, s.w, s.x) && s.w.every((ws, i) => !s.out[i] || !ws.length); } catch { return false; }
 }
 function load() {
   try {
@@ -195,8 +206,8 @@ function load() {
 // ---------- state ----------
 let L = null, G = null, busy = false, skip = false, note = '', howStep = 0;
 let held = -1;          // the end whose knot is lifted (tap, then tap a peg)
-let drag = null;        // { e, id, x, y, over } while a knot follows a finger
-let view = null;        // what the hoop shows ({ ends, out, z }); G.state outside animations
+let drag = null;        // { e, pt, over, touch } while a knot follows a finger
+let view = null;        // what the hoop shows during a move: { state, carry?, morph? }
 let tangled = false;
 const shelfHold = new Set(); // freed strands whose skein hasn't reached the shelf yet
 const skipWaiters = new Set();
@@ -299,10 +310,11 @@ function sizeHoop() {
   CACHE.cv.width = cv.width; CACHE.cv.height = cv.height;
   CACHE.ctx = CACHE.cv.getContext('2d');
   CACHE.sig = '';
+  PX.clear();
   kick();
 }
 // Strands at rest live in a cached bitmap with the hoop; each frame redraws
-// only what moves (and every strand lying over it, so over and under stay right).
+// only what moves and the crossings it takes part in.
 const CACHE = { cv: null, ctx: null, sig: '' };
 
 function hash(a, b) { let h = (a * 374761393 + b * 668265263) >>> 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; }
@@ -383,48 +395,101 @@ function buildBg() {
 }
 
 // ---------- strand shapes ----------
-// Unit-disk coordinates: the knots sit at radius 1 (HG.Rk). warp() (rules.js)
-// bends every chord the same way, so crossings in the picture are exactly
-// the rule's crossings; each strand's slack follows its own crossings.
-const toUnit = ([x, y]) => [(x - HG.cx) / HG.Rk, (y - HG.cy) / HG.Rk];
+// layout.js places every strand in the unit disk (knots at radius 1); here it
+// is scaled to the hoop. One layout per state, kept while the state lives.
 const toPx = ([x, y]) => [HG.cx + x * HG.Rk, HG.cy + y * HG.Rk];
-function curvePx(A, B, lam, K = 30) {
-  const a = toUnit(A), b = toUnit(B);
-  const pts = [];
-  for (let k = 0; k <= K; k++) {
-    const t = k / K;
-    pts.push(toPx(warp(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, lam)));
+const LAY = new WeakMap();
+function layOf(s) {
+  let r = LAY.get(s);
+  if (!r) { r = layout(L, s); LAY.set(s, r); }
+  return r;
+}
+// The layout in css px (cached per layout and hoop size).
+const PX = new Map();
+function pxOf(s) {
+  const lay = layOf(s);
+  let r = PX.get(lay);
+  if (!r) {
+    const strands = {};
+    for (const [i, pts] of Object.entries(lay.strands)) strands[i] = pts.map(toPx);
+    const crossings = lay.crossings.map((X) => ({ ...X, p: toPx(X.p) }));
+    r = { strands, crossings, geom: {} };
+    if (PX.size > 60) PX.clear();
+    PX.set(lay, r);
+  }
+  return r;
+}
+const pxGeom = (P, i) => P.geom[i] || (P.geom[i] = yarnGeom(P.strands[i], HG.w));
+// Index in strand i's curve of the crossing nearest end e, or the far end.
+function cutAt(P, s, e) {
+  const i = e >> 1, c = nearestAt(s.w, e), pts = P.strands[i];
+  if (c < 0) return e & 1 ? 0 : pts.length - 1;
+  const X = P.crossings.find((Y) => Y.c === c);
+  return X.a === i ? X.ka : X.kb;
+}
+// The strand with the end(s) in `ends` carried to point pt: everything up to
+// its nearest crossing stays put, the rest rises over everything to pt. The
+// point count stays the same, so crossing indices still hold.
+function carried(P, s, i, ends, pt) {
+  let pts = P.strands[i];
+  for (const e of ends) {
+    if ((e >> 1) !== i) continue;
+    const k = cutAt(P, s, e), n = pts.length;
+    const from = e & 1 ? k : 0, to = e & 1 ? n - 1 : k; // indices to replace (inclusive of the end)
+    const anchor = pts[k];
+    const tip = pt;
+    const cnt = to - from;
+    if (cnt < 1) continue;
+    // a soft curve: leave the anchor along the strand, bow a little inward
+    const nb = pts[e & 1 ? Math.max(0, k - 1) : Math.min(n - 1, k + 1)];
+    const dx = anchor[0] - nb[0], dy = anchor[1] - nb[1], dl = Math.hypot(dx, dy) || 1;
+    const span = Math.hypot(tip[0] - anchor[0], tip[1] - anchor[1]);
+    const ctl = [anchor[0] + (dx / dl) * span * 0.35, anchor[1] + (dy / dl) * span * 0.35];
+    const seg = [];
+    for (let j = 0; j <= cnt; j++) {
+      const t = j / cnt, u = 1 - t;
+      seg.push([u * u * anchor[0] + 2 * u * t * ctl[0] + t * t * tip[0], u * u * anchor[1] + 2 * u * t * ctl[1] + t * t * tip[1]]);
+    }
+    const out = pts.slice();
+    if (e & 1) for (let j = 0; j <= cnt; j++) out[k + j] = seg[j];
+    else for (let j = 0; j <= cnt; j++) out[k - j] = seg[j];
+    pts = out;
   }
   return pts;
 }
+// A held (tapped) knot lifts the strand's end a little, up to its nearest crossing.
+function liftedEnd(P, s, i, e, up) {
+  const pts = P.strands[i], k = cutAt(P, s, e), n = pts.length;
+  const out = pts.slice();
+  const [ex, ey] = pts[e & 1 ? n - 1 : 0];
+  const ax = (HG.cx - ex) / HG.Rk, ay = (HG.cy - ey) / HG.Rk; // toward the middle
+  const span = Math.abs((e & 1 ? n - 1 : 0) - k) || 1;
+  for (let j = 0; j <= span; j++) {
+    const idx = e & 1 ? k + j : k - j;
+    const f = (j / span) ** 1.5 * up;
+    out[idx] = [pts[idx][0] + ax * 7 * f, pts[idx][1] + ay * 7 * f - 4 * f];
+  }
+  return out;
+}
+
 // ---------- effects state ----------
 const FX = {
-  active: [],    // strands drawn live this frame (moving, lifted, glowing, fading)
-  lam: [], lamV: [], lift: [], liftV: [], glowUntil: [], glow: [], alpha: [],
+  lift: [], liftV: [], glowUntil: [], glow: [], alpha: [],
   slide: null,   // { movers, pt: [x,y] } the moving knot's position (css px)
   tug: null,     // { e, t0 }
-  leaving: [],   // [{ s, a, b, t0, dur }]
+  leaving: [],   // [{ s, pts, a, b, t0, dur }]
   wig: null,     // { e, t0 } a knot that can't be lifted gives a little shake
   pegShake: null,// { q, t0 }
   hint: null,    // { end, to, t0 }
   heldT0: 0,
 };
 function resetFx() {
-  const S = L.S, v = curView();
-  const c = crossCounts(L, v);
-  FX.lam = Array(S).fill(0); FX.lamV = Array(S).fill(0);
-  for (let i = 0; i < S; i++) FX.lam[i] = targetLam(i, c);
+  const S = L.S;
   FX.lift = Array(S).fill(0); FX.liftV = Array(S).fill(0);
   FX.glowUntil = Array(S).fill(0); FX.glow = Array(S).fill(0); FX.alpha = Array(S).fill(1);
   FX.slide = null; FX.tug = null; FX.leaving = []; FX.wig = null; FX.pegShake = null; FX.hint = null;
 }
-function targetLam(i, c) {
-  const u = L.units[L.unitOf[i]];
-  let sum = 0;
-  for (const m of u) sum += lamFor(c[m]);
-  return sum / u.length;
-}
-const curView = () => view || G.state;
+const curState = () => (view ? view.state : G.state);
 
 // ---------- drawing ----------
 const PERF = { frames: 0, draw: [], rebuilds: 0 };
@@ -439,7 +504,7 @@ function frame(now) {
     lastT = now;
     more = physics(dt, now);
     draw(now);
-    more = more || !!FX.slide || !!FX.tug || FX.leaving.length > 0 || (FX.wig && now - FX.wig.t0 < 520) || (FX.pegShake && now - FX.pegShake.t0 < 420) ||
+    more = more || !!FX.slide || !!FX.tug || !!(view && view.morph) || FX.leaving.length > 0 || (FX.wig && now - FX.wig.t0 < 520) || (FX.pegShake && now - FX.pegShake.t0 < 420) ||
       (FX.hint && now - FX.hint.t0 < HINT_MS + 50) || (held >= 0 && now < heldPulseUntil + 50) || !!drag || FX.glowUntil.some((t) => t > now - 400);
   } catch (e) {
     console.error('The Hoop: a frame was skipped', e);
@@ -450,32 +515,20 @@ function frame(now) {
   if (more) raf = requestAnimationFrame(frame);
 }
 
-// Springs: slack follows crossings, a lifted strand rises, glows fade.
+// Springs: a lifted strand rises, glows fade.
 function physics(dt, now) {
-  const v = curView(), rm = reduced();
-  const c = crossCounts(L, v);
+  const rm = reduced();
   let moving = false;
-  FX.active = Array(L.S).fill(false);
-  const K = 230, C = 2 * 0.64 * Math.sqrt(K); // a soft, slightly bouncy settle
   for (let i = 0; i < L.S; i++) {
-    const lt = targetLam(i, c);
-    if (rm) { FX.lam[i] = lt; FX.lamV[i] = 0; } else if (Math.abs(FX.lam[i] - lt) > 0.002 || Math.abs(FX.lamV[i]) > 0.002) {
-      const a = K * (lt - FX.lam[i]) - C * FX.lamV[i];
-      FX.lamV[i] += a * dt; FX.lam[i] += FX.lamV[i] * dt;
-      FX.lam[i] = Math.max(LAM_TAUT, Math.min(LAM_SLACK, FX.lam[i])); // the tested range
-      moving = true; FX.active[i] = true;
-    } else { FX.lam[i] = lt; FX.lamV[i] = 0; }
-    const lifted = (held >= 0 && (held >> 1) === i) || (drag && (drag.e >> 1) === i) || (FX.slide && FX.slide.movers.some((m) => (m >> 1) === i)) ||
-      (held >= 0 && L.link[held] >= 0 && (L.link[held] >> 1) === i);
+    const lifted = (held >= 0 && movers(L, held).some((m) => (m >> 1) === i)) || (drag && movers(L, drag.e).some((m) => (m >> 1) === i)) || (FX.slide && FX.slide.movers.some((m) => (m >> 1) === i));
     const ft = lifted ? 1 : 0;
     if (rm) { FX.lift[i] = ft; FX.liftV[i] = 0; } else if (Math.abs(FX.lift[i] - ft) > 0.003 || Math.abs(FX.liftV[i]) > 0.003) {
       const a = 320 * (ft - FX.lift[i]) - 2 * 0.7 * Math.sqrt(320) * FX.liftV[i];
       FX.liftV[i] += a * dt; FX.lift[i] += FX.liftV[i] * dt;
-      moving = true; FX.active[i] = true;
+      moving = true;
     } else { FX.lift[i] = ft; FX.liftV[i] = 0; }
     if (FX.glowUntil[i] > now) { FX.glow[i] = Math.min(1, FX.glow[i] + dt * 7); moving = true; } else if (FX.glow[i] > 0) { FX.glow[i] = Math.max(0, FX.glow[i] - dt * 2.4); moving = true; }
     if (FX.alpha[i] < 1) { FX.alpha[i] = rm ? 1 : Math.min(1, FX.alpha[i] + dt * 4); moving = true; }
-    if (FX.glow[i] > 0 || FX.alpha[i] < 1 || FX.lift[i] > 0.002) FX.active[i] = true;
   }
   return moving;
 }
@@ -483,51 +536,126 @@ function physics(dt, now) {
 const HINT_MS = 3 * 2 * Math.PI * 240;
 const pulse = (now, t0, until) => (reduced() || now - t0 > until ? 0.85 : 0.55 + 0.45 * Math.cos((now - t0) / 240));
 
+// The carried end(s) right now: { ends, pt } or null.
+function carrying() {
+  if (FX.slide) return { ends: FX.slide.movers, pt: FX.slide.pt };
+  if (drag && drag.pt) return { ends: movers(L, drag.e), pt: drag.pt };
+  return null;
+}
 // Where a knot is drawn now (css px), and how lifted it is (0..1).
-function knotAt(e, v, now) {
-  const s = e >> 1;
-  if (FX.slide && FX.slide.movers.includes(e)) return { p: FX.slide.pt, up: 1 };
-  if (drag && movers(L, drag.e).includes(e) && drag.pt) return { p: drag.pt, up: 1 };
-  const p = HG.peg[v.ends[e]];
+function knotAt(e, s, now) {
+  const cr = carrying();
+  if (cr && cr.ends.includes(e)) return { p: cr.pt, up: 1 };
+  const p = HG.peg[s.ends[e]];
   const lifted = held >= 0 && movers(L, held).includes(e);
-  const up = lifted ? Math.max(0, FX.lift[s]) : 0;
+  const up = lifted ? Math.max(0, FX.lift[e >> 1]) : 0;
   let x = p[0], y = p[1];
-  if (up) { const a = HG.ang[v.ends[e]]; x -= Math.cos(a) * up * 7; y -= Math.sin(a) * up * 7 + up * 3; }
+  if (up) { const a = HG.ang[s.ends[e]]; x -= Math.cos(a) * up * 7; y -= Math.sin(a) * up * 7 + up * 3; }
   if (FX.wig && FX.wig.e === e) {
     const t = clamp01((now - FX.wig.t0) / 500);
     const amp = 3.2 * Math.sin(t * Math.PI * 6) * (1 - t);
-    const a = HG.ang[v.ends[e]] + Math.PI / 2;
+    const a = HG.ang[s.ends[e]] + Math.PI / 2;
     x += Math.cos(a) * amp; y += Math.sin(a) * amp;
   }
   return { p: [x, y], up };
 }
 
-function liveSet(v, now) {
+// Strands repainted every frame: moving, lifted, glowing, fading or hinted.
+function liveSet(s, now) {
   const D = new Set();
-  const lifted = (i) => FX.lift[i] > 0.002;
+  if (view && view.morph) { for (let i = 0; i < L.S; i++) if (!s.out[i]) D.add(i); return D; }
   for (let i = 0; i < L.S; i++) {
-    if (v.out[i]) continue;
-    if (FX.active[i] || lifted(i) || FX.glowUntil[i] > now || (FX.hint && (FX.hint.end >> 1) === i)) D.add(i);
+    if (s.out[i]) continue;
+    if (FX.lift[i] > 0.002 || FX.glow[i] > 0 || FX.glowUntil[i] > now || FX.alpha[i] < 1 || (FX.hint && (FX.hint.end >> 1) === i)) D.add(i);
   }
   for (const e of [held, drag ? drag.e : -1, ...(FX.slide ? FX.slide.movers : [])]) if (e >= 0) for (const m of movers(L, e)) D.add(m >> 1);
-  // whatever lies over a live strand is live too
-  const stack = [...D];
-  while (stack.length) {
-    const i = stack.pop();
-    for (const j of crossersOf(L, v, i)) if (!D.has(j) && v.z[j] > v.z[i]) { D.add(j); stack.push(j); }
-  }
   return D;
 }
-function strandGeom(i, v, now) {
-  const A = knotAt(2 * i, v, now), B = knotAt(2 * i + 1, v, now);
-  return { A, B, g: yarnGeom(curvePx(A.p, B.p, FX.lam[i]), HG.w) };
+// This frame's curves (css px) and crossings: the layout, with a carried or
+// held end moved, or a morph from the picture before a move to the one after.
+function frameShape(s, D) {
+  if (view && view.morph) return morphShape(view.morph);
+  const P = pxOf(s);
+  const curves = { ...P.strands };
+  const cr = carrying();
+  for (const i of D) {
+    if (cr && cr.ends.some((e) => (e >> 1) === i)) curves[i] = carried(P, s, i, cr.ends, cr.pt);
+    else if (held >= 0 && movers(L, held).some((m) => (m >> 1) === i) && FX.lift[i] > 0.002) curves[i] = liftedEnd(P, s, i, movers(L, held).find((m) => (m >> 1) === i), FX.lift[i]);
+  }
+  return { curves, crossings: P.crossings, P };
 }
-function ensureCache(v, D, now) {
-  let sig = `${data.glyphs ? 'g' : ''}|`;
-  const rest = [];
-  for (let i = 0; i < L.S; i++) if (!v.out[i] && !D.has(i)) rest.push(i);
-  rest.sort((a, b) => v.z[a] - v.z[b]);
-  for (const i of rest) sig += `${i}:${v.ends[2 * i]}-${v.ends[2 * i + 1]}:${FX.lam[i].toFixed(3)},`;
+// Resample a polyline to n points by arc length.
+function resample(pts, n) {
+  const cum = [0];
+  for (let k = 1; k < pts.length; k++) cum.push(cum[k - 1] + Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]));
+  const len = cum[cum.length - 1] || 1e-9, out = [];
+  let j = 0;
+  for (let k = 0; k < n; k++) {
+    const d = (len * k) / (n - 1);
+    while (j < pts.length - 2 && cum[j + 1] < d) j++;
+    const t = clamp01((d - cum[j]) / ((cum[j + 1] - cum[j]) || 1e-9));
+    out.push([pts[j][0] + (pts[j + 1][0] - pts[j][0]) * t, pts[j][1] + (pts[j + 1][1] - pts[j][1]) * t]);
+  }
+  return out;
+}
+const MORPH_N = 48;
+// mo: { from: { i: pts }, to: { i: pts }, xb: [crossings after, each with
+// its fraction along both strands], t }. The crossings of the new picture
+// ride along the morphing yarn at their fractions, so every patch follows
+// its crossing and lands exactly on it (no search per frame).
+function morphShape(mo) {
+  const t = ease(mo.t), curves = {};
+  for (const i of Object.keys(mo.to)) {
+    const A = mo.from[i], B = mo.to[i];
+    curves[i] = A ? A.map((p, k) => [p[0] + (B[k][0] - p[0]) * t, p[1] + (B[k][1] - p[1]) * t]) : B;
+  }
+  const crossings = mo.xb.map((X) => {
+    const ka = Math.round(X.fa * (MORPH_N - 1)), kb = Math.round(X.fb * (MORPH_N - 1));
+    const pa = curves[X.a][ka], pb = curves[X.b][kb];
+    return { ...X, p: [(pa[0] + pb[0]) / 2, (pa[1] + pb[1]) / 2], ka, kb, r: HG.w * 1.6 };
+  });
+  return { curves, crossings, P: null };
+}
+// Where each crossing sits along its two strands, as fractions of arc length.
+function fractions(P) {
+  const frac = (pts, k) => { let a = 0, b = 0; for (let j = 1; j < pts.length; j++) { const d = Math.hypot(pts[j][0] - pts[j - 1][0], pts[j][1] - pts[j - 1][1]); b += d; if (j <= k) a += d; } return b ? a / b : 0; };
+  return P.crossings.map((X) => ({ ...X, fa: frac(P.strands[X.a], X.ka), fb: frac(P.strands[X.b], X.kb) }));
+}
+
+function styleOf(i, now) {
+  const hintGlow = FX.hint && (FX.hint.end >> 1) === i ? pulse(now, FX.hint.t0, HINT_MS) * 0.8 : 0;
+  return { w: HG.w, tone: TONE[L.color[i]], lift: FX.lift[i], glow: Math.max(FX.glow[i], hintGlow), alpha: FX.alpha[i], glyph: data.glyphs ? L.color[i] : null };
+}
+const restStyle = (i) => ({ w: HG.w, tone: TONE[L.color[i]], glyph: data.glyphs ? L.color[i] : null });
+// A patch: the linen and the strands near a crossing, repainted in its order.
+// (each strand only where it comes near the disk: a slice, its ply in step)
+function paintPatch(c, X, ptsOf, style, fast = false) {
+  c.save();
+  c.beginPath(); c.arc(X.p[0], X.p[1], X.r, 0, TAU); c.clip();
+  c.setTransform(1, 0, 0, 1, 0, 0);
+  const d = Math.ceil((X.r + 3) * HG.dpr), cx = X.p[0] * HG.dpr, cy = X.p[1] * HG.dpr;
+  c.drawImage(HG.bg, cx - d, cy - d, 2 * d, 2 * d, cx - d, cy - d, 2 * d, 2 * d);
+  c.setTransform(HG.dpr, 0, 0, HG.dpr, 0, 0);
+  for (const i of X.order) {
+    const g = sliceGeom(ptsOf(i), X.p, X.r + 2.2 * HG.w, fast);
+    if (g) paintYarn(c, g, { ...style(i), glyph: null, fast });
+  }
+  c.restore();
+}
+// The part of a strand within reach of a point, as yarn geometry in step with the whole.
+function sliceGeom(pts, p, reach, fast = false) {
+  let lo = -1, hi = -1, acc = 0, s0 = 0;
+  for (let k = 0; k < pts.length; k++) {
+    if (k) acc += Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]);
+    if (Math.hypot(pts[k][0] - p[0], pts[k][1] - p[1]) <= reach) { if (lo < 0) { lo = k; s0 = acc; } hi = k; }
+  }
+  if (lo < 0) return null;
+  if (lo > 0) { lo--; s0 -= Math.hypot(pts[lo + 1][0] - pts[lo][0], pts[lo + 1][1] - pts[lo][1]); }
+  hi = Math.min(pts.length - 1, hi + 1);
+  return fast ? pathGeom(pts.slice(lo, hi + 1)) : yarnGeom(pts.slice(lo, hi + 1), HG.w, s0);
+}
+function ensureCache(s, D, P, plan0) {
+  const sig = `${data.glyphs ? 'g' : ''}|${stateKeyOf(s)}|${[...D].sort().join(',')}|${HG.css}`;
   if (sig === CACHE.sig) return;
   CACHE.sig = sig;
   const c = CACHE.ctx;
@@ -535,17 +663,35 @@ function ensureCache(v, D, now) {
   c.clearRect(0, 0, CACHE.cv.width, CACHE.cv.height);
   c.drawImage(HG.bg, 0, 0);
   c.setTransform(HG.dpr, 0, 0, HG.dpr, 0, 0);
-  for (const i of rest) paintYarn(c, strandGeom(i, v, now).g, { w: HG.w, tone: TONE[L.color[i]], glyph: data.glyphs ? L.color[i] : null });
+  for (const i of plan0.rest) paintYarn(c, pxGeom(P, i), restStyle(i));
+  for (const X of plan0.restPatches) paintPatch(c, X, (i) => P.strands[i], restStyle);
   PERF.rebuilds++;
 }
+// a cheap identity for a state (the cache's signature)
+const SKEY = new WeakMap();
+let skeyN = 0;
+const stateKeyOf = (s) => { let k = SKEY.get(s); if (!k) { k = ++skeyN; SKEY.set(s, k); } return k; };
+// The rest plan depends only on the state and which strands are live.
+let restPlan = { key: '', plan: null };
 
 function draw(now) {
-  const c = HG.ctx, v = curView();
-  const D = liveSet(v, now);
-  ensureCache(v, D, now);
+  const c = HG.ctx, s = curState();
+  const D = liveSet(s, now);
+  const sh = frameShape(s, D);
+  const morph = !!(view && view.morph);
+  let P0;
+  if (!morph) {
+    const key = `${stateKeyOf(s)}|${[...D].sort().join(',')}|${HG.css}`;
+    if (restPlan.key !== key) {
+      const base = baseOrder(Object.keys(sh.P.strands).map(Number), sh.crossings);
+      restPlan = { key, base, plan: plan(sh.P.strands, sh.crossings, { w: HG.w, live: D, order: base }) };
+    }
+    P0 = restPlan.plan;
+    ensureCache(s, D, sh.P, P0);
+  }
   c.setTransform(1, 0, 0, 1, 0, 0);
   c.clearRect(0, 0, HG.cv.width, HG.cv.height); // the hoop's edges are see-through: never paint over last frame
-  c.drawImage(CACHE.cv, 0, 0);
+  c.drawImage(morph ? HG.bg : CACHE.cv, 0, 0);
   c.setTransform(HG.dpr, 0, 0, HG.dpr, 0, 0);
   // valid pegs for the lifted knot glow softly
   const liftE = drag ? drag.e : held;
@@ -578,35 +724,41 @@ function draw(now) {
       c.beginPath(); c.arc(x + Math.sin(t * 30) * 2 * (1 - t), y, HG.pr + 4, 0, TAU); c.stroke();
     } else FX.pegShake = null;
   }
-  // live strands, bottom to top; lifted ones last
-  const order = [...D].sort((a, b) => (FX.lift[a] > 0.5) - (FX.lift[b] > 0.5) || v.z[a] - v.z[b]);
-  const knots = [];
-  for (let i = 0; i < L.S; i++) if (!v.out[i] && !D.has(i)) knots.push([i, 2 * i, knotAt(2 * i, v, now)], [i, 2 * i + 1, knotAt(2 * i + 1, v, now)]);
-  for (const i of order) {
-    const { A, B, g } = strandGeom(i, v, now);
-    const hintGlow = FX.hint && (FX.hint.end >> 1) === i ? pulse(now, FX.hint.t0, HINT_MS) * 0.8 : 0;
-    paintYarn(c, g, { w: HG.w, tone: TONE[L.color[i]], lift: FX.lift[i], glow: Math.max(FX.glow[i], hintGlow), alpha: FX.alpha[i], glyph: data.glyphs ? L.color[i] : null });
-    knots.push([i, 2 * i, A], [i, 2 * i + 1, B]);
-  }
+  // live strands, then every crossing they take part in that needs a patch
+  const live = morph ? new Set(Object.keys(sh.curves).map(Number)) : D;
+  const LP = morph
+    ? plan(sh.curves, sh.crossings, { w: HG.w, live })
+    : plan(sh.curves, sh.crossings, { w: HG.w, live, order: restPlan.base, liveOnly: true });
+  const geo = {};
+  const geomOf = (i) => geo[i] || (geo[i] = morph ? pathGeom(sh.curves[i]) : sh.curves[i] === sh.P.strands[i] ? pxGeom(sh.P, i) : yarnGeom(sh.curves[i], HG.w));
+  const st = (i) => ({ ...styleOf(i, now), fast: morph });
+  for (const i of LP.live) paintYarn(c, geomOf(i), st(i));
+  for (const X of LP.livePatches) paintPatch(c, X, (i) => sh.curves[i], st, morph);
+  LAST.curves = sh.curves; LAST.plan = LP; LAST.restPlan = P0; LAST.crossings = sh.crossings;
   // strands coming free
   for (const f of FX.leaving) drawLeaving(c, f, now);
   // knots on top of everything, so they are always there to tap
   const doneLink = new Set();
-  for (const [i, e, K] of knots) {
-    if (doneLink.has(e)) continue;
-    const lk = L.link[e];
-    if (lk >= 0) doneLink.add(lk);
-    const hintK = FX.hint && (FX.hint.end === e || FX.hint.end === lk) ? pulse(now, FX.hint.t0, HINT_MS) : 0;
-    let scale = 1 + 0.32 * K.up;
-    if (FX.tug && movers(L, FX.tug.e).includes(e)) {
-      const t = clamp01((now - FX.tug.t0) / 240);
-      scale = t < 0.4 ? 1.32 - (0.5 * t) / 0.4 : 0.82 + 0.18 * easeOut((t - 0.4) / 0.6);
+  for (let i = 0; i < L.S; i++) {
+    if (s.out[i]) continue;
+    for (const e of [2 * i, 2 * i + 1]) {
+      if (doneLink.has(e)) continue;
+      const lk = L.link[e];
+      if (lk >= 0) doneLink.add(lk);
+      const K = knotAt(e, s, now);
+      const hintK = FX.hint && (FX.hint.end === e || FX.hint.end === lk) ? pulse(now, FX.hint.t0, HINT_MS) : 0;
+      let scale = 1 + 0.32 * K.up;
+      if (FX.tug && movers(L, FX.tug.e).includes(e)) {
+        const t = clamp01((now - FX.tug.t0) / 240);
+        scale = t < 0.4 ? 1.32 - (0.5 * t) / 0.4 : 0.82 + 0.18 * easeOut((t - 0.4) / 0.6);
+      }
+      // over and under: knots she can lift now wear a soft cream ring
+      const ready = L.layering && !busy && !K.up && !L.fixed[e] && !canLift(L, G.state, e);
+      drawKnot(c, K.p, e, { scale, up: K.up, tone2: lk >= 0 ? TONE[L.color[lk >> 1]] : null, hint: hintK, alpha: FX.alpha[i], ready });
     }
-    // over and under: knots she can lift now wear a soft cream ring
-    const ready = L.layering && !busy && !K.up && !L.fixed[e] && !canLift(L, G.state, e);
-    drawKnot(c, K.p, e, { scale, up: K.up, tone2: lk >= 0 ? TONE[L.color[lk >> 1]] : null, hint: hintK, alpha: FX.alpha[i], ready });
   }
 }
+const LAST = { curves: null, plan: null, restPlan: null, crossings: null };
 
 // A knot: a round of yarn on the peg with two little tails toward the rim.
 function drawKnot(c, p, e, { scale = 1, up = 0, tone2 = null, hint: hk = 0, alpha = 1, ready = false } = {}) {
@@ -664,10 +816,10 @@ function drawKnot(c, p, e, { scale = 1, up = 0, tone2 = null, hint: hk = 0, alph
 // middle, then a little skein flies to the shelf (DOM).
 function drawLeaving(c, f, now) {
   const t = clamp01((now - f.t0) / f.dur);
-  const A = HG.peg[f.a], B = HG.peg[f.b];
+  const pts = f.pts;
+  const A = pts[0], B = pts[pts.length - 1];
   const glow = Math.min(1, t * 4);
   const slip = clamp01((t - 0.35) / 0.65);
-  const pts = curvePx(A, B, LAM_SLACK);
   let part = pts;
   if (slip > 0) {
     const g0 = yarnGeom(pts, HG.w);
@@ -786,24 +938,17 @@ hoopEl.addEventListener('pointerup', (e) => {
   }
   tapPeg(d.q);
 });
-// The strand whose yarn lies under a point (the topmost), or -1.
+// The strand whose yarn lies under a point (the one on top there), or -1.
 function strandUnder(x, y) {
-  const v = G.state;
-  let best = -1, bz = -Infinity;
+  const P = pxOf(G.state);
   const reach = Math.max(14, HG.w * 1.5);
-  for (let i = 0; i < L.S; i++) {
-    if (v.out[i]) continue;
-    const pts = curvePx(HG.peg[v.ends[2 * i]], HG.peg[v.ends[2 * i + 1]], FX.lam[i], 24);
-    let d = Infinity;
-    for (let k = 1; k < pts.length; k++) {
-      const [ax, ay] = pts[k - 1], [bx, by] = pts[k];
-      const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy || 1;
-      const t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / l2));
-      d = Math.min(d, Math.hypot(x - ax - dx * t, y - ay - dy * t));
-    }
-    if (d <= reach && v.z[i] > bz) { bz = v.z[i]; best = i; }
-  }
-  return best;
+  const near = Object.keys(P.strands).map(Number).filter((i) => distTo(P.strands[i], [x, y]) <= reach);
+  if (near.length <= 1) return near.length ? near[0] : -1;
+  const sub = {};
+  for (const i of near) sub[i] = P.strands[i];
+  const pl = plan(sub, P.crossings.filter((X) => near.includes(X.a) && near.includes(X.b)), { w: HG.w });
+  const top = topAt(sub, pl, [x, y], reach * 2);
+  return top >= 0 ? top : near[0];
 }
 function strandTap(i) {
   const now = performance.now();
@@ -830,6 +975,7 @@ function tapPeg(q) {
     FX.pegShake = { q, t0: performance.now() };
     if (why === 'reach') note = 'Too close to its other end. A strand needs at least two pegs between its ends.';
     else if (why === 'color') note = `That painted peg only takes ${cshort(L.pegColor[q])} yarn.`;
+    else if (why === 'around') note = 'A shared knot can’t go round past either of its own strands’ far knots.';
     sfx('soft');
     render(); kick();
     return;
@@ -851,7 +997,7 @@ function liftAt(q) {
     if (why.reason === 'fixed') note = 'This knot is stitched down with a brass tack. Move the strand’s other end instead.';
     else if (why.reason === 'under') {
       for (const b of why.blockers) FX.glowUntil[b] = now + 1300;
-      note = why.blockers.length === 1 ? 'The glowing strand lies over this one. Move it first.' : `${why.blockers.length} glowing strands lie over this one. Move them first.`;
+      note = why.blockers.length === 1 ? 'The glowing strand lies over this one, near its knot. Move it first.' : `${why.blockers.length} glowing strands lie over this one, near its knot. Move them first.`;
     }
     sfx('soft');
     render(); kick();
@@ -875,9 +1021,10 @@ function liftAt(q) {
   render(); kick();
 }
 
-// ---------- the move: slide over, tug, and maybe come free ----------
+// ---------- the move: carry over, settle into place, maybe come free ----------
 function doMove(e, q, fromPt) {
   const before = G.state;
+  const hooked0 = hookedPairs(L, before).length;
   const res = play(L, G, e, q);
   if (!res.ok) { held = -1; render(); kick(); return; }
   G = res.game;
@@ -889,13 +1036,20 @@ function doMove(e, q, fromPt) {
   const ms = res.movers;
   const start = fromPt || knotAt(e, before, performance.now()).p;
   const end = HG.peg[q];
-  // the view: the old position, with the moved strand on top
-  view = { ends: before.ends.slice(), out: before.out.slice(), z: res.state.z.slice() };
+  // what the hoop shows meanwhile: the old picture, the end carried over it
+  view = { state: before };
   for (const f of res.freed) shelfHold.add(f.s);
+  // the new picture, with the strands about to come free still in place
+  // (the very state object when nothing comes free, so its layout and cache carry on)
+  let after = res.state;
+  if (res.freed.length) {
+    after = { ...res.state, ends: res.state.ends.slice(), out: res.state.out.slice() };
+    for (const f of res.freed) { after.ends[2 * f.s] = f.a; after.ends[2 * f.s + 1] = f.b; after.out[f.s] = 0; }
+  }
   run(async () => {
     FX.slide = { movers: ms, pt: start };
     kick();
-    // slide: over the others, arcing a little toward the middle of the hoop
+    // carry: over the others, arcing a little toward the middle of the hoop
     const dist = Math.hypot(end[0] - start[0], end[1] - start[1]);
     const ctrl = [(start[0] + end[0]) / 2, (start[1] + end[1]) / 2];
     const pull = Math.min(0.35, dist / (HG.Rk * 4));
@@ -905,28 +1059,41 @@ function doMove(e, q, fromPt) {
       const u = ease(t), v1 = 1 - u;
       FX.slide.pt = [v1 * v1 * start[0] + 2 * v1 * u * ctrl[0] + u * u * end[0], v1 * v1 * start[1] + 2 * v1 * u * ctrl[1] + u * u * end[1]];
     });
-    // tie: the end is on its peg; a little tug pulls the knot snug
-    for (const m of ms) view.ends[m] = q;
+    // tie, and the yarn settles into its new lie: every old crossing keeps
+    // its over and under, the new ones land with the carried end on top
+    const P0 = pxOf(before), P1 = pxOf(after);
+    const from = {}, to = {};
+    for (const i of Object.keys(P1.strands)) {
+      const a = P0.strands[i] ? (ms.some((m) => (m >> 1) === +i) ? carried(P0, before, +i, ms, end) : P0.strands[i]) : null;
+      to[i] = resample(P1.strands[i], MORPH_N);
+      from[i] = a ? resample(a, MORPH_N) : to[i];
+    }
+    view = { state: after, morph: { from, to, xb: fractions(P1), t: 0 } };
     FX.slide = null;
-    for (const m of ms) { FX.lam[m >> 1] = LAM_TAUT; FX.lamV[m >> 1] = 0; } // pulled snug
     FX.tug = { e, t0: performance.now() };
     sfx('tie');
     kick();
-    await wait(reduced() ? 60 : 240);
+    await tween(reduced() ? 0 : 300, (t) => { view.morph.t = t; });
+    view = { state: after };
     FX.tug = null;
+    if (res.freed.length) {
+      const P = pxOf(after);
+      await comeFree(res.freed.map((f) => ({ ...f, pts: P.strands[f.s] })));
+    }
     view = null;
-    if (res.freed.length) await comeFree(res.freed);
-    note = afterNote(res, hk);
+    note = afterNote(res, hk, hooked0);
   });
 }
 
-function afterNote(res, hk) {
+function afterNote(res, hk, hooked0) {
   const s = G.state;
   if (isDone(s)) return 'Every strand is free. Lovely work.';
   const left = remaining(s), x = totalCrossings(L, s);
   const togo = `${x} ${x === 1 ? 'crossing' : 'crossings'} left, ${left} ${left === 1 ? 'strand' : 'strands'} to go.`;
   if (res.freed.length === 1) return `The ${cshort(L.color[res.freed[0].s])} strand came free. ${togo}`;
   if (res.freed.length > 1) return `${res.freed.length === 2 ? 'Two' : res.freed.length === 3 ? 'Three' : res.freed.length} strands came free at once! ${togo}`;
+  const hooked = hookedPairs(L, s).length;
+  if (hooked > hooked0) return `Hooked: the end went over a knot and now loops round its strand. Carry it back to let go. ${togo}`;
   return togo;
 }
 
@@ -941,7 +1108,7 @@ async function comeFree(freed) {
   await wait(dur * 0.7 + (freed.length - 1) * 90);
   // a skein for each, off to the shelf
   const flights = freed.map((f, k) => {
-    const g = yarnGeom(curvePx(HG.peg[f.a], HG.peg[f.b], LAM_SLACK), HG.w);
+    const g = yarnGeom(f.pts, HG.w);
     const from = pageOf(g.mid);
     const slot = shelfSlots.find((el) => +el.dataset.s === f.s) || $('#shelf');
     const r = slot.getBoundingClientRect();
@@ -959,6 +1126,8 @@ async function comeFree(freed) {
       { transform: `translate(${to[0] - 22}px, ${to[1] - 14}px) scale(.68)` },
     ], { duration: 620, delay: k * 90, easing: 'cubic-bezier(.4,0,.5,1)', fill: 'forwards' });
   });
+  // the strands are gone from the picture now
+  view = null;
   await wait(dur * 0.3);
   FX.leaving = [];
   await Promise.all(flights);
@@ -981,7 +1150,7 @@ function doUndo() {
   const now = performance.now();
   for (let i = 0; i < L.S; i++) {
     if (was.out[i] && !G.state.out[i]) FX.alpha[i] = reduced() ? 1 : 0;
-    if (was.ends[2 * i] !== G.state.ends[2 * i] || was.ends[2 * i + 1] !== G.state.ends[2 * i + 1]) FX.glowUntil[i] = now + 350;
+    if (was.ends[2 * i] !== G.state.ends[2 * i] || was.ends[2 * i + 1] !== G.state.ends[2 * i + 1] || was.w[i].length !== G.state.w[i].length) FX.glowUntil[i] = now + 350;
   }
   note = 'Undone.';
   save();
@@ -992,7 +1161,7 @@ function doHint() {
   stats.hints++;
   held = -1;
   try {
-    const h = hint(L, G.state);
+    const h = hint(L, G.state, { cap: 300 }); // off the stored path: a short search, then the best-looking move
     if (h.kind === 'move') {
       FX.hint = { end: h.end, to: h.to, t0: performance.now() };
       tangled = false;
@@ -1090,7 +1259,8 @@ function render() {
   $('#undoBtn').classList.toggle('lit', tangled);
   $('#hintBtn').disabled = isDone(s);
   $('#msg').textContent = message(s);
-  hoopEl.setAttribute('aria-label', `An embroidery hoop with ${L.n} pegs and ${remaining(s)} strands of yarn still tied across it, ${totalCrossings(L, s)} crossings.`);
+  const hk = hookedPairs(L, s).length;
+  hoopEl.setAttribute('aria-label', `An embroidery hoop with ${L.n} pegs and ${remaining(s)} strands of yarn still tied across it, ${totalCrossings(L, s)} crossings${hk ? `, ${hk} ${hk === 1 ? 'pair' : 'pairs'} hooked together` : ''}.`);
   renderSr();
 }
 function renderToggles() {
@@ -1180,7 +1350,7 @@ document.addEventListener('keydown', (e) => {
   if (!closed && held >= 0) { held = -1; note = ''; render(); kick(); }
 });
 
-// A little picture of a hoop: the ring and the strands as plain chords.
+// A little picture of a hoop: the ring and the strands as they lie, over and under at each crossing.
 function thumb(Lv, size, st = newState(Lv)) {
   const cv = document.createElement('canvas');
   cv.width = cv.height = size * 2;
@@ -1189,17 +1359,22 @@ function thumb(Lv, size, st = newState(Lv)) {
   const cx = size / 2, cy = size / 2, R = size / 2 - 3;
   c.fillStyle = '#EFE6D2'; c.beginPath(); c.arc(cx, cy, R, 0, TAU); c.fill();
   c.strokeStyle = '#C9A06A'; c.lineWidth = Math.max(2.5, size * 0.06); c.beginPath(); c.arc(cx, cy, R, 0, TAU); c.stroke();
-  const P = (p) => { const a = -Math.PI / 2 + (2 * Math.PI * (p + 0.5)) / Lv.n; return [cx + Math.cos(a) * (R - 1), cy + Math.sin(a) * (R - 1)]; };
-  c.lineCap = 'round';
-  const ord = [...Array(Lv.S).keys()].filter((i) => !st.out[i]).sort((a, b) => st.z[a] - st.z[b]);
-  for (const i of ord) {
-    const a = P(st.ends[2 * i]), b = P(st.ends[2 * i + 1]);
-    const m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-    const ctl = [m[0] + (cx - m[0]) * 0.25, m[1] + (cy - m[1]) * 0.25];
-    c.strokeStyle = 'rgba(240,231,212,.9)'; c.lineWidth = Math.max(2.4, size * 0.055);
-    c.beginPath(); c.moveTo(a[0], a[1]); c.quadraticCurveTo(ctl[0], ctl[1], b[0], b[1]); c.stroke();
-    c.strokeStyle = COLORS[Lv.color[i]].hex; c.lineWidth = Math.max(1.6, size * 0.035);
-    c.beginPath(); c.moveTo(a[0], a[1]); c.quadraticCurveTo(ctl[0], ctl[1], b[0], b[1]); c.stroke();
+  c.lineCap = 'round'; c.lineJoin = 'round';
+  let lay;
+  try { lay = layout(Lv, st, { iters: 1500 }); } catch { return cv; }
+  const T = (p) => [cx + p[0] * (R - 1), cy + p[1] * (R - 1)];
+  const curves = {};
+  for (const [i, pts] of Object.entries(lay.strands)) curves[i] = pts.map(T);
+  const stroke = (i) => {
+    const pts = curves[i];
+    c.beginPath(); c.moveTo(pts[0][0], pts[0][1]); for (const p of pts) c.lineTo(p[0], p[1]);
+    c.strokeStyle = 'rgba(240,231,212,.95)'; c.lineWidth = Math.max(2.4, size * 0.055); c.stroke();
+    c.strokeStyle = COLORS[Lv.color[i]].hex; c.lineWidth = Math.max(1.6, size * 0.035); c.stroke();
+  };
+  for (const i of baseOrder(Object.keys(curves).map(Number), lay.crossings)) stroke(+i);
+  for (const X of lay.crossings) {
+    const p = T(X.p);
+    c.save(); c.beginPath(); c.arc(p[0], p[1], Math.max(3, size * 0.07), 0, TAU); c.clip(); stroke(X.top); c.restore();
   }
   return cv;
 }
@@ -1274,6 +1449,8 @@ function openFinish() {
 const hoopIcon = (inner) => `<svg viewBox="0 0 56 56"><circle cx="28" cy="28" r="23" fill="#EFE6D2"/><circle cx="28" cy="28" r="23" fill="none" stroke="#C9A06A" stroke-width="5"/>${inner}</svg>`;
 const yarnLineSvg = (d, col, w = 4.5) => `<path d="${d}" fill="none" stroke="${mixHex(col, '#24160A', 0.36)}" stroke-width="${w}" stroke-linecap="round"/><path d="${d}" fill="none" stroke="${col}" stroke-width="${w * 0.72}" stroke-linecap="round"/>`;
 const ICON = {
+  // two loops hooked through each other: red goes under blue, then over it
+  clasp: hoopIcon(`${yarnLineSvg('M10 18C20 22 32 22 36 30S30 40 22 34', '#34588E')}${yarnLineSvg('M46 38C36 34 24 34 20 26S26 16 34 22', '#B9473A')}<path d="M27.5 33.6C29.5 35 31.5 35.8 33 35.8" fill="none" stroke="${mixHex('#34588E', '#24160A', 0.36)}" stroke-width="4.5" stroke-linecap="round"/><path d="M27.5 33.6C29.5 35 31.5 35.8 33 35.8" fill="none" stroke="#34588E" stroke-width="3.2" stroke-linecap="round"/>`),
   fixed: hoopIcon(`${yarnLineSvg('M8 22C20 28 34 36 44 44', '#B9473A')}<circle cx="8" cy="22" r="4" fill="#B9473A"/><circle cx="8" cy="22" r="2.2" fill="#D7AE52"/>`),
   pegs: hoopIcon(`<circle cx="28" cy="5" r="4" fill="#34588E" stroke="#FFF8E6" stroke-width="1.2"/><circle cx="51" cy="28" r="4" fill="#B9473A" stroke="#FFF8E6" stroke-width="1.2"/>${yarnLineSvg('M28 6C30 22 40 30 50 28', '#34588E')}`),
   links: hoopIcon(`${yarnLineSvg('M10 16C24 26 30 34 42 46', '#B9473A')}${yarnLineSvg('M10 16C22 18 36 16 48 22', '#34588E')}<circle cx="10" cy="16" r="4.6" fill="#7A3A2C"/><path d="M6 16a4 4 0 0 1 8 0z" fill="#B9473A"/><path d="M6 16a4 4 0 0 0 8 0z" fill="#34588E"/>`),
@@ -1316,8 +1493,8 @@ const ILL = {
   </svg>`,
 };
 const HOW = [
-  { t: 'Lift a knot, retie it', ill: 'lift', p: 'Tap a knot on a peg to lift it, then tap one of the glowing empty pegs to tie it there. Or just drag the knot across. The yarn slides over the others and pulls snug.' },
-  { t: 'Cross nothing, come free', ill: 'free', p: 'Two strands cross when their pegs take turns around the hoop. A strand that crosses nothing at all slips off its pegs and winds onto a skein, and its two pegs are free to use again.' },
+  { t: 'Lift a knot, retie it', ill: 'lift', p: 'Tap a knot on a peg to lift it, then tap one of the glowing empty pegs to tie it there. Or just drag the knot across. The end is carried over the knots it passes, and whatever lay over the strand still does.' },
+  { t: 'Cross nothing, come free', ill: 'free', p: 'Strands cross where one lies over another, and two strands can cross more than once, even hook round each other. A strand that crosses nothing at all slips off its pegs and winds onto a skein, and its two pegs are free to use again.' },
   { t: 'Leave room to lie flat', ill: 'room', p: 'A strand’s two ends stay at least three pegs apart, so the empty pegs are your working space. Undo is free, Hint glows a good next move, and there are no timers and no way to lose.' },
 ];
 function renderHow() {
@@ -1336,7 +1513,7 @@ $('#restartBtn').addEventListener('click', doRestart);
 $('#levelsBtn').addEventListener('click', () => { if (!busy) openLevels(); });
 $('#howBtn').addEventListener('click', () => { if (!busy) openHow(); });
 $('#howBtn2').addEventListener('click', () => { closeSheet($('#levelSheet')); openHow(); });
-$('#glyphBtn').addEventListener('click', () => { data.glyphs = !data.glyphs; save(); buildBg(); render(); kick(); });
+$('#glyphBtn').addEventListener('click', () => { data.glyphs = !data.glyphs; save(); buildBg(); CACHE.sig = ''; render(); kick(); });
 $('#soundBtn').addEventListener('click', () => { data.sound = !data.sound; save(); ensureAudio(); render(); sfx('tie'); });
 $('#howBack').addEventListener('click', () => { if (howStep > 0) { howStep--; renderHow(); } });
 $('#howNext').addEventListener('click', () => {
@@ -1364,10 +1541,18 @@ window.__hoop = {
   // the page point of peg q (its knot)
   pegPoint(q) { return pageOf(HG.peg[q]); },
   get geom() { return { css: HG.css, Rk: HG.Rk, w: HG.w, pr: HG.pr }; },
+  // what was painted last frame: who lies on top at each drawn crossing (css px)
+  drawnTops() {
+    if (!LAST.curves) return [];
+    const full = { rest: LAST.restPlan ? LAST.restPlan.rest : [], restPatches: LAST.restPlan ? LAST.restPlan.restPatches : [], live: LAST.plan.live, livePatches: LAST.plan.livePatches };
+    return LAST.crossings.map((X) => ({ a: X.a, b: X.b, top: X.top, p: X.p, drawn: topAt(LAST.curves, full, X.p, HG.w, [X.a, X.b]) }));
+  },
+  // the page point a fraction t along strand i as drawn now
+  strandPoint(i, t) { const P = pxOf(G.state); const pts = P.strands[i]; return pts ? pageOf(pts[Math.round(t * (pts.length - 1))]) : null; },
   // time the painter: a full rebuild of the resting strands, and an ordinary frame (ms)
   bench(n = 20) {
     const t0 = performance.now();
-    for (let k = 0; k < n; k++) { CACHE.sig = ''; draw(performance.now()); }
+    for (let k = 0; k < n; k++) { CACHE.sig = ''; restPlan.key = ''; draw(performance.now()); }
     const t1 = performance.now();
     for (let k = 0; k < n; k++) draw(performance.now());
     return { rebuild: (t1 - t0) / n, frame: (performance.now() - t1) / n };

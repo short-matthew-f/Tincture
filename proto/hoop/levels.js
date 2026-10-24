@@ -17,45 +17,49 @@ import { buildLevel, mechanicsOf, levelSig, sparePegs, parseMoves } from './rule
 
 // What each new thing is called, and the one line that introduces it.
 export const MECHANICS = {
+  clasp: { name: 'Hooked strands', line: 'Hooked: these two loop around each other. Carry an end back past the knot it hooked, or move the strand on top, to let them go.' },
   fixed: { name: 'Stitched-down knots', line: 'A knot with a brass tack is stitched to the hoop and stays put. Move the strand’s other end instead.' },
   pegs: { name: 'Painted pegs', line: 'A painted peg only takes yarn of its own color.' },
   links: { name: 'Shared knots', line: 'Two strands tied into one knot move together: lift the knot and both ends go.' },
-  layering: { name: 'Over and under', line: 'Now what lies on top matters: you can lift a strand only when nothing lies over it. Knots that are ready wear a cream ring.' },
+  layering: { name: 'Over and under', line: 'Now what lies on top matters: a knot lifts only when its strand lies on top at the crossing nearest that knot. Knots that are ready wear a cream ring.' },
   spare: { name: 'Fewer spare pegs', line: 'Only two empty pegs to start with. Freeing a strand gives you two more.' },
 };
 
-// Generation knobs (see gen-levels.mjs): n pegs; S strands; colors; fixed
-// (stitched-down knots); pegs (painted pegs); links (shared knots);
-// layering; target = wanted random-player clear rate within 60 moves;
-// par = [fewest, most] minimum moves allowed.
+// Generation knobs (see gen.js and gen-levels.mjs): n pegs; S strands;
+// colors; fixed (stitched-down knots); pegs (painted pegs); links (shared
+// knots); layering; scramble = moves made from a clean hoop; clasp = start
+// with hooked strands (true) or without (false); par = [fewest, most]
+// minimum moves allowed; target = wanted greedy-player clear rate; cap and
+// seeds (the biggest hoop only): the solver's node budget for proving a par,
+// and how many candidates to deal.
 export const LEVEL_DEFS = [
   // ---- learning the hoop ----
-  { id: 'first', name: 'First knots', knobs: { n: 12, S: 3, colors: 2, target: 0.95, par: [2, 2] } },
-  { id: 'sampler', name: 'A little sampler', knobs: { n: 12, S: 4, colors: 2, target: 0.8, par: [2, 3] } },
-  { id: 'floss', name: 'Embroidery floss', knobs: { n: 14, S: 5, colors: 3, target: 0.65, par: [3, 4] } },
-  { id: 'workbag', name: 'The workbag', knobs: { n: 16, S: 6, colors: 3, target: 0.5, par: [4, 5] } },
+  { id: 'first', name: 'First knots', knobs: { n: 12, S: 3, colors: 2, scramble: 2, clasp: false, minCross: 2, target: 1, par: [2, 2] } },
+  { id: 'sampler', name: 'A little sampler', knobs: { n: 12, S: 3, colors: 2, scramble: 3, clasp: true, target: 1, par: [2, 3] } },
+  { id: 'floss', name: 'Embroidery floss', knobs: { n: 14, S: 4, colors: 3, scramble: 4, target: 0.9, par: [3, 4] } },
+  { id: 'workbag', name: 'The workbag', knobs: { n: 16, S: 5, colors: 3, scramble: 5, target: 0.8, par: [4, 5] } },
   // ---- stitched-down knots ----
-  { id: 'tacked', name: 'Tacked in place', knobs: { n: 14, S: 5, colors: 3, fixed: 2, target: 0.5, par: [3, 5] } },
-  { id: 'basting', name: 'Basting stitches', knobs: { n: 16, S: 6, colors: 3, fixed: 3, target: 0.35, par: [4, 6] } },
-  { id: 'couching', name: 'Couching', knobs: { n: 18, S: 7, colors: 4, fixed: 3, target: 0.25, par: [5, 7] } },
+  { id: 'tacked', name: 'Tacked in place', knobs: { n: 14, S: 4, colors: 3, fixed: 2, scramble: 5, target: 0.7, par: [3, 5] } },
+  { id: 'basting', name: 'Basting stitches', knobs: { n: 16, S: 5, colors: 3, fixed: 2, scramble: 6, target: 0.6, par: [4, 6] } },
+  { id: 'couching', name: 'Couching', knobs: { n: 18, S: 6, colors: 4, fixed: 3, scramble: 7, target: 0.5, par: [5, 7] } },
   // ---- painted pegs ----
-  { id: 'painted', name: 'Painted pegs', knobs: { n: 16, S: 6, colors: 3, pegs: 3, target: 0.4, par: [4, 6] } },
-  { id: 'colorway', name: 'Colorway', knobs: { n: 18, S: 7, colors: 4, pegs: 4, fixed: 1, target: 0.25, par: [5, 7] } },
-  { id: 'fairisle', name: 'Fair Isle chart', knobs: { n: 18, S: 7, colors: 4, pegs: 5, fixed: 2, target: 0.15, par: [5, 8] } },
+  { id: 'painted', name: 'Painted pegs', knobs: { n: 16, S: 5, colors: 3, pegs: 3, scramble: 6, target: 0.6, par: [4, 6] } },
+  { id: 'colorway', name: 'Colorway', knobs: { n: 18, S: 6, colors: 4, pegs: 4, fixed: 1, scramble: 7, target: 0.5, par: [5, 7] } },
+  { id: 'fairisle', name: 'Fair Isle chart', knobs: { n: 18, S: 6, colors: 4, pegs: 5, fixed: 2, scramble: 8, target: 0.4, par: [5, 8] } },
   // ---- shared knots ----
-  { id: 'joined', name: 'Joined at the knot', knobs: { n: 16, S: 6, colors: 3, links: 1, target: 0.4, par: [3, 6] } },
-  { id: 'fringe', name: 'Tying a fringe', knobs: { n: 18, S: 7, colors: 4, links: 2, target: 0.3, par: [4, 7] } },
-  { id: 'macrame', name: 'Macramé', knobs: { n: 20, S: 8, colors: 4, links: 2, fixed: 1, pegs: 2, target: 0.2, par: [5, 8] } },
+  { id: 'joined', name: 'Joined at the knot', knobs: { n: 16, S: 5, colors: 3, links: 1, scramble: 5, target: 0.6, par: [3, 6] } },
+  { id: 'fringe', name: 'Tying a fringe', knobs: { n: 18, S: 6, colors: 4, links: 2, scramble: 6, target: 0.5, par: [4, 7] } },
+  { id: 'macrame', name: 'Macramé', knobs: { n: 20, S: 7, colors: 4, links: 2, fixed: 1, pegs: 2, scramble: 7, target: 0.4, par: [5, 8] } },
   // ---- over and under ----
-  { id: 'overunder', name: 'Over and under', knobs: { n: 12, S: 4, colors: 2, layering: true, target: 0.35, par: [4, 6] } },
-  { id: 'tabby', name: 'Plain weave', knobs: { n: 14, S: 5, colors: 3, layering: true, target: 0.15, par: [5, 8] } },
-  { id: 'twill', name: 'Twill', knobs: { n: 16, S: 6, colors: 3, layering: true, target: 0.06, par: [7, 10] } },
+  { id: 'overunder', name: 'Over and under', knobs: { n: 12, S: 4, colors: 2, layering: true, scramble: 5, target: 0.6, par: [4, 6] } },
+  { id: 'tabby', name: 'Plain weave', knobs: { n: 14, S: 5, colors: 3, layering: true, scramble: 6, target: 0.4, par: [5, 8] } },
+  { id: 'twill', name: 'Twill', knobs: { n: 16, S: 6, colors: 3, layering: true, scramble: 8, target: 0.3, par: [6, 10] } },
   // ---- fewer spare pegs ----
-  { id: 'snug', name: 'A snug hoop', knobs: { n: 16, S: 7, colors: 4, target: 0.12, par: [5, 7] } },
-  { id: 'crewel', name: 'Crewelwork', knobs: { n: 18, S: 8, colors: 4, fixed: 2, pegs: 2, target: 0.06, par: [6, 9] } },
-  { id: 'bargello', name: 'Bargello', knobs: { n: 19, S: 9, colors: 5, links: 1, fixed: 1, target: 0.04, par: [7, 10] } },
+  { id: 'snug', name: 'A snug hoop', knobs: { n: 14, S: 6, colors: 4, scramble: 6, target: 0.4, par: [5, 7] } },
+  { id: 'crewel', name: 'Crewelwork', knobs: { n: 16, S: 7, colors: 4, fixed: 2, pegs: 2, scramble: 7, target: 0.3, par: [6, 9] } },
+  { id: 'bargello', name: 'Bargello', knobs: { n: 19, S: 9, colors: 5, links: 1, fixed: 1, scramble: 5, maxCross: 22, cap: 25000, seeds: 12, target: 0.2, par: [7, 10] } },
   // ---- the finale ----
-  { id: 'heirloom', name: 'The heirloom sampler', knobs: { n: 18, S: 7, colors: 5, layering: true, fixed: 1, pegs: 2, target: 0.03, par: [8, 12] } },
+  { id: 'heirloom', name: 'The heirloom sampler', knobs: { n: 18, S: 7, colors: 5, layering: true, fixed: 1, pegs: 2, scramble: 9, target: 0.2, par: [8, 12] } },
 ];
 
 export const BANDS = [
@@ -68,7 +72,7 @@ export const BANDS = [
   { name: 'The finale', from: 19 },
 ];
 
-// Ready-to-play levels: pegs + strands + a known solution (verified by the tests).
+// Ready-to-play levels: pegs, strands and words + a known solution (verified by the tests).
 export const LEVELS = LEVEL_DEFS.filter((d) => HOOPS[d.id]).map((d) => {
   const h = HOOPS[d.id];
   const L = buildLevel({ id: d.id, name: d.name, ...h.def });
