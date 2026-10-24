@@ -20,7 +20,7 @@
 // A crossing hooked at a knot pulls toward that peg, so a strand that went
 // over a knot's tail wraps round it: two hooked strands look like two
 // interlocked loops.
-import { pegUnit, otherOf } from './rules.js';
+import { pegUnit, otherOf, pairRest } from './rules.js';
 
 export const SUB = 3;                  // points in each piece of yarn between crossings
 export const W_YARN = 1, W_FACE = 0.16; // pull of yarn edges / face hubs
@@ -167,7 +167,7 @@ export function layout(L, s, { iters = 4000, tol = 1e-9, prev = null, wf = W_FAC
   for (const [i, path] of Object.entries(M.paths)) {
     const pts = path.map((v) => P[v]);
     raw[i] = pts;
-    const { out, idx } = smooth(pts, 5);
+    const { out, idx } = smooth(pts, 4);
     strands[i] = out;
     at[i] = new Map();
     path.forEach((v, k) => { if (V[v].crossing !== undefined) at[i].set(V[v].crossing, idx[k]); });
@@ -294,7 +294,7 @@ export function plan(curves, crossings, { w, live = new Set(), order = null, liv
   const dist = (P, Q) => Math.hypot(P[0] - Q[0], P[1] - Q[1]);
   const mk = (X, pool) => {
     let r = X.r ?? patchRadius(curves[X.a], curves[X.b], X.ka ?? 0, X.kb ?? 0, w);
-    const reach0 = r + 1.7 * w;
+    const reach0 = r + 0.75 * w; // strands whose yarn reaches into the disk (no linen repaint, so shadows needn't count)
     const members = pool.filter((s) => distTo(curves[s], X.p) <= reach0);
     // the crossings nearby, nearest first; one that would close a cycle with
     // nearer ones (the other half of a clasp, say) is left out, and the disk
@@ -352,4 +352,32 @@ export function topAt(curves, P, q, w, among = null) {
   for (const s of P.live) if (cov(s)) top = s;
   for (const X of P.livePatches) if (Math.hypot(q[0] - X.p[0], q[1] - X.p[1]) <= X.r) { top = -1; for (const s of X.order) if (cov(s)) top = s; }
   return top;
+}
+
+// ---------- hooked marks ----------
+
+/**
+ * hookMarks(s, crossings) -> [{ p, a, b, c1, c2 }]: where two strands hook
+ * (a clasp): for every pair whose own reduced crossings (pairRest) hold two
+ * next to each other along strand a with the other strand on top at one and
+ * a on top at the other, a mark halfway between those two crossings.
+ * crossings: the layout's crossings (each { c, p }) in any coordinates.
+ */
+export function hookMarks(s, crossings) {
+  const at = new Map(crossings.map((X) => [X.c, X.p]));
+  const out = [];
+  const S = s.w.length;
+  for (let a = 0; a < S; a++) for (let b = a + 1; b < S; b++) {
+    if (s.out[a] || s.out[b]) continue;
+    const rest = pairRest(s.w, s.x, a, b);
+    for (let k = 0; k + 1 < rest.length; k++) {
+      const c1 = rest[k], c2 = rest[k + 1];
+      if (s.x[c1][2] === s.x[c2][2]) continue;
+      const p1 = at.get(c1), p2 = at.get(c2);
+      if (!p1 || !p2) continue;
+      out.push({ p: [(p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2], a, b, c1, c2 });
+      k++; // a clasp is a pair: the next one starts afresh
+    }
+  }
+  return out;
 }

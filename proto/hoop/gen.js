@@ -11,15 +11,16 @@
 //     a stitched one may be lifted, nothing comes free on the way), never
 //     straight back to the peg a knot just left. Moves made this way make
 //     genuine clasps and strands that cross more than once;
-//   - keep it only if nothing would come free at once (every strand lies
-//     under something: no strand crosses nothing, none lies over everything
-//     it crosses), there are at least `minCross` crossings (and at most
-//     `maxCross`), and hooked strands are present or absent as the knob
-//     `clasp` asks;
+//   - keep it only if every strand crosses something (nothing is free before
+//     she starts), there are at least `minCross` crossings (and at most
+//     `maxCross`), at least `hooked` hooked pairs, and hooked strands are
+//     present or absent as the knob `clasp` asks;
 //   - paint pegs: about half on empty pegs, half under a matching knot.
 // gen-levels.mjs solves many candidates and keeps the one nearest the
-// level's target.
-import { crosses, buildLevel, newState, move, legalMoves, hookedPairs, totalCrossings, movers, pathOf, liftable } from './rules.js';
+// level's target. Each candidate also carries (not stored) the scramble it
+// was made with; `unscramble` plays it backwards, a way out that bounds the
+// par where the solver can't prove one.
+import { crosses, buildLevel, newState, move, legalMoves, hookedPairs, totalCrossings, movers, pathOf } from './rules.js';
 
 // Colors in the order levels bring them in (friendly, high-contrast ones first).
 export const COLOR_ORDER = ['m', 'i', 'w', 'g', 'c', 'n', 'o', 'l'];
@@ -93,24 +94,23 @@ export function candidate(rng, k) {
     if (fixed.length < (k.fixed || 0)) continue;
     fixed.sort((a, b) => a - b);
     const base = {
-      n, layering: !!k.layering,
+      n, layering: !!k.layering, liftoff: !!k.liftoff,
       strands: [...Array(S).keys()].map((s) => ({ c: col[s], a: clean.ends[2 * s], b: clean.ends[2 * s + 1] })),
       fixed, links: clean.links, pegs: {},
     };
     let L;
     try { L = buildLevel({ id: 'clean', name: 'clean', ...base }); } catch { continue; }
     // scramble with real moves
-    // (while some strand lies on top of everything, or crosses nothing, a
-    // move carrying an end over one of its knots is preferred: something has
-    // to lie over every strand, or it would lift right off)
-    const free = { ...L, layering: false };
+    // (a strand that crosses nothing yet is moved first, past at least one knot)
+    const free = { ...L, layering: false, liftoff: false };
     let s = newState(L), last = null;
-    for (let m = 0; m < 4 * k.scramble; m++) {
-      const onTop = s.w.map((ws, i) => ws.every((c) => s.x[c][2] === i));
-      if (m >= k.scramble && !onTop.some(Boolean)) break;
+    const made = [];
+    for (let m = 0; m < 3 * k.scramble; m++) {
+      const bare = s.w.map((ws) => !ws.length);
+      if (m >= k.scramble && !bare.some(Boolean)) break;
       let ms = legalMoves(free, s).filter(([e, q]) => !L.fixed[e] && !(last && last[0] === e && last[1] === q));
-      if (onTop.some(Boolean) && rng() < 0.75) {
-        const pick = ms.filter(([e, q]) => pathOf(L, s.ends, e, q).passed.some((r) => s.ends.some((p, t) => p === r && onTop[t >> 1] && !movers(L, e).some((x) => (x >> 1) === (t >> 1)))));
+      if (bare.some(Boolean) && rng() < 0.7) {
+        const pick = ms.filter(([e, q]) => movers(L, e).some((x) => bare[x >> 1]) && pathOf(L, s.ends, e, q).passed.length);
         if (pick.length) ms = pick;
       }
       if (!ms.length) break;
@@ -120,11 +120,13 @@ export function candidate(rng, k) {
       if (!r.ok) continue;
       s = r.state;
       last = [e, from];
+      made.push([e, from, q]);
     }
-    if (liftable(L, s).length) continue;
+    if (s.w.some((ws) => !ws.length)) continue;
     const X = totalCrossings(L, s);
     if (X < (k.minCross ?? S) || X > (k.maxCross ?? 99)) continue;
-    const hooked = hookedPairs(L, s).length > 0;
+    const nh = hookedPairs(L, s).length, hooked = nh > 0;
+    if (nh < (k.hooked || 0)) continue;
     if (k.clasp === true && !hooked) continue;
     if (k.clasp === false && hooked) continue;
     // painted pegs: about half empty, half under a matching single knot
@@ -142,7 +144,23 @@ export function candidate(rng, k) {
       pegs: pegCol, x: s.x, w: s.w,
     };
     try { buildLevel({ id: 'cand', name: 'cand', ...def }); } catch { continue; }
+    // the scramble, kept out of sight: played backwards it is one way out
+    Object.defineProperty(def, 'scramble', { value: made, enumerable: false });
     return def;
   }
   return null;
+}
+
+/** Play a candidate's scramble backwards on level L: the moves that clear it, or null. */
+export function unscramble(L, def) {
+  let s = newState(L);
+  const path = [];
+  for (const [e, from] of (def.scramble || []).slice().reverse()) {
+    if (s.out[e >> 1]) continue;
+    const r = move(L, s, e, from);
+    if (!r.ok) return null;
+    s = r.state; path.push([e, from]);
+    if (s.out.every(Boolean)) return path;
+  }
+  return s.out.every(Boolean) ? path : null;
 }

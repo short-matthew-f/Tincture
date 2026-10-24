@@ -56,25 +56,28 @@
 //   ends must be (a strand carried next to its own other knot simply has
 //   nothing between its ends).
 //
-// COMING FREE (lift-off)
-// - A strand that lies OVER every strand it crosses lifts right off the hoop:
-//   pull it straight up and nothing holds it (a strand that crosses nothing
-//   is the plain case). It winds onto a skein, its pegs are empty again, and
-//   its crossings vanish from the other strands' words. That can make new
-//   neighbors, so reduction runs again, and that can leave another strand on
-//   top of everything: freeing repeats until nothing more lifts off.
-// - A strand lying UNDER something does not come free, even if it lies under
-//   everything: the linen is right beneath it and the strands over it pin it
-//   to the linen. (Untied, any strand could of course be threaded out by its
-//   end; the hoop's rule is lifting straight up, and a strand underneath
-//   can't be lifted through what lies on it.) A clasped strand is under its
-//   partner somewhere, so it never lifts off.
-// - Strands tied into one shared knot lift off together: once every crossing
-//   either has with any OTHER strand has it on top (their crossings with each
-//   other lift with them).
+// COMING FREE
+// - After every move, each strand that crosses nothing (its word is empty)
+//   slips off its pegs and winds onto a skein, freeing both pegs. Strands
+//   tied into one shared knot come free together, once both words are empty.
+//   Nothing else frees by itself.
+//
+// LIFT IT OFF (a move, from the band that brings it in: `liftoff`)
+// - A strand lying OVER every strand it crosses can be picked straight off
+//   the hoop: pull it up and nothing holds it. It is a move (it counts toward
+//   par), coded "2s:-1" (strand s's first end, peg -1). Its crossings vanish
+//   from the other strands' words, reduction runs on those words, and then
+//   only strands that now cross nothing come free: no cascade of lift-offs.
+// - Not a strand lying UNDER anything, even one under everything: the linen
+//   is beneath it and what lies on it pins it there. So never a hooked
+//   strand: it lies under its partner somewhere. Not a strand with a
+//   stitched-down knot: the tack holds it to the hoop. Strands tied into one
+//   shared knot lift off together, once every crossing either has with any
+//   OTHER strand has it on top (their crossings with each other go too).
 //
 // THE MECHANICS (each introduced on its own level, see levels.js)
 // - Hooked strands (`clasp`): a level that starts with two strands hooked.
+// - Lift it off (`liftoff`): the lift-off move above.
 // - Stitched-down knot (`fixed`): that end never moves.
 // - Painted peg (`pegs`): only yarn of that color may be tied there.
 // - Shared knot (`links`): two strands tied into one knot on one peg. Lifting
@@ -89,7 +92,7 @@
 // longer has a way out is reported by the hint as tangled, never as lost.
 
 export const VERSION = 2;
-export const MODEL = 'words-2-liftoff';
+export const MODEL = 'words-3-handlift';
 
 // Natural-dye colors. Keys are what the save and the level data hold.
 export const COLORS = {
@@ -239,7 +242,7 @@ export function buildLevel(def) {
   const w0 = def.w ? def.w.map((a) => a.slice()) : Array.from({ length: S }, () => []);
   const x0 = (def.x || []).map((X) => X.slice());
   const L = {
-    id: def.id, name: def.name, n, S, color, start, fixed, link, cwSide, pegColor, layering: !!def.layering, unitOf, units,
+    id: def.id, name: def.name, n, S, color, start, fixed, link, cwSide, pegColor, layering: !!def.layering, liftoff: !!def.liftoff, unitOf, units,
     colors: [...new Set(color)],
     def,
   };
@@ -317,6 +320,7 @@ export function mechanicsOf(L) {
   if (L.fixed.some(Boolean)) m.push('fixed');
   if (L.pegColor.some(Boolean)) m.push('pegs');
   if (L.link.some((x) => x >= 0)) m.push('links');
+  if (L.liftoff) m.push('liftoff');
   if (L.layering) m.push('layering');
   return m;
 }
@@ -427,13 +431,43 @@ export function targets(L, s, e) {
   return out;
 }
 
-/** All moves, one per knot (a shared knot is listed once, by its lower end). */
+/**
+ * canLiftOff(L, s, i) -> null if strand i (with its shared-knot partner) can
+ * be picked off now, else { reason: 'band' | 'gone' | 'stitched' | 'under' | 'clear', blockers }
+ * under: blockers lie over it somewhere (a hooked partner among them).
+ */
+export function canLiftOff(L, s, i) {
+  if (!L.liftoff) return { reason: 'band', blockers: [] };
+  if (!(i >= 0 && i < L.S) || s.out[i]) return { reason: 'gone', blockers: [] };
+  const u = L.units[L.unitOf[i]];
+  if (u.some((m) => L.fixed[2 * m] || L.fixed[2 * m + 1])) return { reason: 'stitched', blockers: [] };
+  const blockers = [];
+  let any = false;
+  for (const m of u) for (const c of s.w[m]) {
+    const X = s.x[c], o = otherOf(X, m);
+    if (u.includes(o)) continue;
+    any = true;
+    if (X[2] !== m && !blockers.includes(o)) blockers.push(o);
+  }
+  if (blockers.length) return { reason: 'under', blockers: blockers.sort((a, b) => a - b) };
+  if (!any) return { reason: 'clear', blockers: [] };
+  return null;
+}
+/** The units that could be lifted off now (by their first strand), ignoring the band. */
+export function liftable(L, s) {
+  const out = [];
+  for (const u of L.units) if (!canLiftOff({ ...L, liftoff: true }, s, u[0])) out.push(u.slice());
+  return out;
+}
+
+/** All moves, one per knot (a shared knot is listed once, by its lower end), then the lift-offs. */
 export function legalMoves(L, s) {
   const out = [];
   for (let e = 0; e < 2 * L.S; e++) {
     if (L.link[e] >= 0 && L.link[e] < e) continue;
     for (const q of targets(L, s, e)) out.push([e, q]);
   }
+  if (L.liftoff) for (const u of L.units) if (!canLiftOff(L, s, u[0])) out.push([2 * u[0], -1]);
   return out;
 }
 
@@ -467,50 +501,42 @@ function carry(L, ends, w, x, ms, dir, passed) {
   return made;
 }
 
-// Lift off every unit lying over everything it crosses (outside itself),
-// again and again: each lift-off takes its crossings out of the other words,
-// reduction runs on the words it touched, and that may leave another unit on
-// top of everything. Mutates ends/out/x and w (copying any word it touches
-// that `owned` doesn't hold). Returns [{ s, a, b, round }] in lift-off order.
-function liftOff(L, ends, out, w, x, owned) {
+// Free every unit whose strands all cross nothing. Mutates ends/out;
+// returns [{ s, a, b }] with the pegs each freed strand was tied to.
+function settle(L, ends, out, w) {
   const freed = [];
-  const mine = (t) => { if (!owned.has(t)) { w[t] = w[t].slice(); owned.add(t); } return w[t]; };
-  for (let round = 0; ; round++) {
-    const go = [];
-    for (const u of L.units) {
-      if (u.some((m) => out[m])) continue;
-      let top = true;
-      for (const m of u) for (const c of w[m]) { const X = x[c]; if (!u.includes(otherOf(X, m)) && X[2] !== m) { top = false; break; } }
-      if (top) go.push(u);
-    }
-    if (!go.length) return freed;
-    const touched = new Set();
-    for (const u of go) {
-      for (const m of u) {
-        for (const c of w[m]) {
-          if (!x[c]) continue; // a crossing inside the unit, already gone
-          const o = otherOf(x[c], m);
-          if (!u.includes(o) && !out[o]) { const wo = mine(o); wo.splice(wo.indexOf(c), 1); touched.add(o); }
-          x[c] = null;
-        }
-      }
-      for (const m of u) {
-        freed.push({ s: m, a: ends[2 * m], b: ends[2 * m + 1], round });
-        out[m] = 1; ends[2 * m] = -1; ends[2 * m + 1] = -1; w[m] = []; owned.add(m);
-      }
-    }
-    for (const u of go) for (const m of u) touched.delete(m);
-    reduce(w, x, touched, owned);
-  }
-}
-/** The units that would lift off right now (none, on a level's start). */
-export function liftable(L, s) {
-  const out = [];
   for (const u of L.units) {
-    if (u.some((m) => s.out[m])) continue;
-    if (u.every((m) => s.w[m].every((c) => u.includes(otherOf(s.x[c], m)) || s.x[c][2] === m))) out.push(u.slice());
+    if (u.some((m) => out[m]) || u.some((m) => w[m].length > 0)) continue;
+    for (const m of u) {
+      freed.push({ s: m, a: ends[2 * m], b: ends[2 * m + 1] });
+      out[m] = 1; ends[2 * m] = -1; ends[2 * m + 1] = -1;
+    }
   }
-  return out;
+  return freed;
+}
+
+// Lift unit u off: take its crossings out of the other words, reduce those
+// words, then free whatever crosses nothing. On bare arrays (w is copied
+// where touched; x gets holes).
+function applyLiftOff(L, ends0, w0, x0, out0, u, tidy = true) {
+  const ends = ends0.slice(), out = out0.slice(), w = w0.slice(), x = x0.slice();
+  const owned = new Set(), touched = new Set();
+  const mine = (t) => { if (!owned.has(t)) { w[t] = w[t].slice(); owned.add(t); } return w[t]; };
+  for (const m of u) {
+    for (const c of w[m]) {
+      if (!x[c]) continue; // a crossing inside the unit, already gone
+      const o = otherOf(x[c], m);
+      if (!u.includes(o)) { const wo = mine(o); wo.splice(wo.indexOf(c), 1); touched.add(o); }
+      x[c] = null;
+    }
+  }
+  const lifted = u.map((m) => ({ s: m, a: ends[2 * m], b: ends[2 * m + 1], lifted: true }));
+  for (const m of u) { out[m] = 1; ends[2 * m] = -1; ends[2 * m + 1] = -1; w[m] = []; owned.add(m); }
+  const cancelled = reduce(w, x, touched, owned);
+  let W = w, X = x;
+  if (tidy) { const c = canon(w, x); W = c.w; X = c.x; }
+  const freed = [...lifted, ...settle(L, ends, out, W)];
+  return { ends, out, w: W, x: X, freed, made: 0, cancelled };
 }
 
 // The whole move on bare arrays: carry, reduce, renumber, free.
@@ -527,24 +553,29 @@ function applyMove(L, ends0, w0, x0, out0, e, q, path, free = true, tidy = true)
   for (const s of dirty) w[s] = w[s].slice();
   // the knots passed are judged before the end lands (q is empty)
   const made = carry(L, ends0, w, x, ms, path.dir, path.passed);
-  const owned = new Set(dirty);
-  const cancelled = reduce(w, x, dirty, owned);
-  // the position before anything lifts off (for the picture of the lift-off)
-  const pre = tidy && free ? { ends: ends.slice(), out: out.slice(), ...canon(w, x) } : null;
-  const freed = free ? liftOff(L, ends, out, w, x, owned) : [];
+  const cancelled = reduce(w, x, dirty, new Set(dirty));
   let W = w, X = x;
   if (tidy) { const c = canon(w, x); W = c.w; X = c.x; }
-  return { ends, out, w: W, x: X, freed, made, cancelled, pre };
+  const freed = free ? settle(L, ends, out, W) : [];
+  return { ends, out, w: W, x: X, freed, made, cancelled };
 }
 
 /**
- * move(L, s, e, q, { scramble }) -> { ok, state, pre, from, to, movers, dir, passed, made, cancelled, freed } or
- * (pre: the position just before anything lifted off; freed: what did, in order)
+ * move(L, s, e, q, { scramble }) -> { ok, state, from, to, movers, dir, passed, made, cancelled, freed, liftoff } or
  *   { ok: false, reason, blockers?, state }
+ * q = -1: lift strand e >> 1 off (freed lists it first, { lifted: true }).
  * scramble (the level generator only): any knot but a stitched one may be
  * lifted, and nothing comes free.
  */
 export function move(L, s, e, q, { scramble = false } = {}) {
+  if (q === -1) {
+    const why = canLiftOff(L, s, e >> 1);
+    if (why) return { ok: false, ...why, state: s };
+    const u = L.units[L.unitOf[e >> 1]];
+    const r = applyLiftOff(L, s.ends, s.w, s.x, s.out, u);
+    const t = { v: VERSION, level: s.level, ends: r.ends, out: r.out, w: r.w, x: r.x, moves: s.moves + 1 };
+    return { ok: true, liftoff: true, state: t, from: s.ends[e], to: -1, movers: u.map((m) => 2 * m), dir: 0, passed: [], made: 0, cancelled: r.cancelled, freed: r.freed };
+  }
   const why = scramble ? (L.fixed[e] || s.out[e >> 1] ? { reason: 'fixed', blockers: [] } : null) : canLift(L, s, e);
   if (why) return { ok: false, ...why, state: s };
   const w2 = whyNotTo(L, s, e, q);
@@ -552,8 +583,7 @@ export function move(L, s, e, q, { scramble = false } = {}) {
   const path = pathOf(L, s.ends, e, q);
   const r = applyMove(L, s.ends, s.w, s.x, s.out, e, q, path, !scramble);
   const t = { v: VERSION, level: s.level, ends: r.ends, out: r.out, w: r.w, x: r.x, moves: s.moves + 1 };
-  const pre = r.freed.length ? { v: VERSION, level: s.level, ...r.pre, moves: s.moves + 1 } : t;
-  return { ok: true, state: t, pre, from: s.ends[e], to: q, movers: movers(L, e), dir: path.dir, passed: path.passed, made: r.made, cancelled: r.cancelled, freed: r.freed };
+  return { ok: true, state: t, from: s.ends[e], to: q, movers: movers(L, e), dir: path.dir, passed: path.passed, made: r.made, cancelled: r.cancelled, freed: r.freed };
 }
 
 // ---------- undo: a tiny pure history ----------
@@ -650,64 +680,85 @@ function simMoves(C, ends, w, x) {
       if (ok) out.push(e, q);
     }
   }
+  if (L.liftoff) {
+    const st = { ends, w, x, out: ends.filter((_, k) => !(k & 1)).map((p) => (p < 0 ? 1 : 0)) };
+    for (const u of L.units) if (!canLiftOff(L, st, u[0])) out.push(2 * u[0], -1);
+  }
   return out;
 }
 function simApply(C, st, e, q) {
+  if (q === -1) {
+    const r = applyLiftOff(C.L, st.ends, st.w, st.x, st.out, C.L.units[C.L.unitOf[e >> 1]], false);
+    return { ends: r.ends, out: r.out, w: r.w, x: r.x, freed: r.freed.length };
+  }
   const r = applyMove(C.L, st.ends, st.w, st.x, st.out, e, q, pathOf(C.L, st.ends, e, q), true, false);
   return { ends: r.ends, out: r.out, w: r.w, x: r.x, freed: r.freed.length };
 }
 const simDone = (st) => st.out.every(Boolean);
 const simCross = (st) => st.w.reduce((a, ws) => a + ws.length, 0) / 2;
 
-// Lower bound on moves. Say B -> A when, in A and B's own reduced picture
-// (pairRest: what no cancellation between the two of them can undo), B lies
-// over A somewhere. That arrow changes only when A or B moves. A lift-off
-// takes away only a strand nothing lies over, so it never breaks a cycle of
-// arrows, and no strand on a cycle can lift off. So every cycle needs a move
-// of one of its units: the minimum feedback vertex set over units is
-// admissible (a hooked pair is a cycle of two). It is consistent: a move
-// changes only the arrows at the moved unit, which moves the minimum by at
-// most one. Arrows inside one unit don't count (it lifts off whole). A
-// position that isn't clear needs at least one move.
+// Lower bound on moves. A pair of strands whose crossings can't cancel
+// between themselves (pairLeft > 0) keeps crossing until one of the two moves
+// or is lifted off (a cancellation elsewhere can only remove a pair that is
+// already reducible between them), so some move must touch one of their
+// units: the minimum vertex cover of that graph over units is admissible, and
+// consistent (a move changes only pairs that involve the moved unit). A pair
+// inside one unit forces that unit.
+//
+// Where there is no lift-off, more: a move passes each knot at most once,
+// and each pass changes A and B's own crossings by one (a new one, or one
+// new cancelling two old), so a pair with k crossings that can't cancel
+// between themselves needs ceil(k/2) moves of A or B. Pairs with no unit in
+// common need separate moves: the heaviest such matching (over units) is
+// admissible too, and consistent (a move takes at most one off the one
+// matched pair at its unit). The bound is the larger of the two.
 function vcBound(C, st) {
   const L = C.L, U = L.units.length, w = st.w, x = st.x;
-  const into = new Array(U).fill(0); // into[u]: units with an arrow to u
-  let left = false, any = false;
+  const adj = new Array(U).fill(0);
+  const wt = L.liftoff ? null : Array.from({ length: U }, () => new Int32Array(U));
+  let forced = 0, any = false;
   const cnt = new Int32Array(C.S);
   for (let a = 0; a < C.S; a++) {
-    if (st.out[a]) continue;
-    left = true;
-    if (!w[a].length) continue;
+    if (st.out[a] || !w[a].length) continue;
     cnt.fill(0);
     for (const c of w[a]) cnt[otherOf(x[c], a)]++;
     for (let b = a + 1; b < C.S; b++) {
       if (!cnt[b]) continue;
+      // one crossing (or any odd number) can't cancel; two or more might
+      const k = cnt[b] === 1 ? 1 : pairLeft(w, x, a, b);
+      if (!k) continue;
       const ua = L.unitOf[a], ub = L.unitOf[b];
-      if (ua === ub) continue;
-      for (const c of pairRest(w, x, a, b)) {
-        if (x[c][2] === a) into[ub] |= 1 << ua; else into[ua] |= 1 << ub;
-        any = true;
-      }
+      if (ua === ub) { forced |= 1 << ua; continue; }
+      adj[ua] |= 1 << ub; adj[ub] |= 1 << ua; any = true;
+      if (wt) { const h = (k + 1) >> 1; if (h > wt[ua][ub]) { wt[ua][ub] = h; wt[ub][ua] = h; } }
     }
   }
-  if (!left) return 0;
-  if (!any) return 1;
-  // is there a cycle among the units in `keep`? (peel off units with no arrow in)
-  const cyclic = (keep) => {
-    let k = keep;
-    for (let changed = true; changed;) {
-      changed = false;
-      for (let u = 0; u < U; u++) if (k >> u & 1 && !(into[u] & k)) { k &= ~(1 << u); changed = true; }
-    }
-    return k !== 0;
-  };
-  const all = (1 << U) - 1;
-  if (!cyclic(all)) return 1;
-  // smallest set of units whose removal leaves no cycle
   const pop = (v) => { let c = 0; while (v) { v &= v - 1; c++; } return c; };
-  let best = U;
-  for (let m = 1; m < (1 << U); m++) { const k = pop(m); if (k < best && !cyclic(all & ~m)) best = k; }
-  return best;
+  if (!any) return pop(forced);
+  let best = Infinity;
+  const rec = (alive, k) => {
+    if (k >= best) return;
+    let v = -1, dv = 0;
+    for (let i = 0; i < U; i++) if (alive >> i & 1) { const d = pop(adj[i] & alive); if (d > dv) { dv = d; v = i; } }
+    if (v < 0) { best = k; return; }
+    rec(alive & ~(1 << v), k + 1);
+    const nb = adj[v] & alive;
+    rec(alive & ~nb & ~(1 << v), k + pop(nb));
+  };
+  rec(((1 << U) - 1) & ~forced, pop(forced));
+  if (!wt) return best;
+  // heaviest matching of pair weights (units outside `forced`; a forced unit's move counts once)
+  let mbest = 0;
+  const mrec = (alive, sum) => {
+    let i = 0;
+    while (i < U && !(alive >> i & 1)) i++;
+    if (i >= U) { if (sum > mbest) mbest = sum; return; }
+    const rest = alive & ~(1 << i);
+    mrec(rest, sum);
+    for (let j = i + 1; j < U; j++) if (rest >> j & 1 && wt[i][j]) mrec(rest & ~(1 << j), sum + wt[i][j]);
+  };
+  mrec(((1 << U) - 1) & ~forced, 0);
+  return Math.max(best, mbest + pop(forced));
 }
 export const lowerBound = (L, s) => vcBound(ctxOf(L), s);
 
@@ -764,6 +815,8 @@ export function solve(L, s = newState(L), { cap = 200000, weight = 1 } = {}) {
     const top = open.pop();
     const nd = nodes[top.k];
     if (best.get(nd.key) < nd.g) continue;
+    // only expanded positions keep their state; a child's is made again from its parent's
+    if (!nd.st) nd.st = simApply(C, nodes[nd.parent].st, nd.e, nd.q);
     if (simDone(nd.st)) {
       const path = [];
       for (let k = top.k; nodes[k].parent >= 0; k = nodes[k].parent) path.push([nodes[k].e, nodes[k].q]);
@@ -780,7 +833,7 @@ export function solve(L, s = newState(L), { cap = 200000, weight = 1 } = {}) {
       if (old !== undefined && old <= g) continue;
       best.set(kk, g);
       const h = vcBound(C, st);
-      nodes.push({ st, g, parent: top.k, e: ms[k], q: ms[k + 1], key: kk });
+      nodes.push({ st: null, g, parent: top.k, e: ms[k], q: ms[k + 1], key: kk });
       open.push({ f: g + weight * h, h: h * 256 + simCross(st), id: id++, k: nodes.length - 1 });
     }
   }

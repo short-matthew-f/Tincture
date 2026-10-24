@@ -17,9 +17,9 @@
 // Tangle Basket's approach.
 import {
   COLORS, newGame, play, undo, canLift, whyNotTo, targets, endsAt, isDone, remaining, movers, hint, totalCrossings, yarnLine, VERSION,
-  newState, nearestAt, wordsError, hookedPairs,
+  newState, nearestAt, wordsError, hookedPairs, canLiftOff,
 } from './rules.js';
-import { layout, plan, distTo, baseOrder, topAt } from './layout.js';
+import { layout, plan, distTo, baseOrder, topAt, hookMarks } from './layout.js';
 import { LEVELS, MECHANICS, BANDS, levelById } from './levels.js';
 
 const KEY = 'tincture.proto.hoop';
@@ -142,10 +142,12 @@ function paintYarn(ctx, g, o) {
   // one soft shadow on the linen and on whatever lies under: it is what
   // makes over and under read at a glance (one wide stroke; raster is the cost)
   const k = 1 + Math.max(0, lift) * 1.6;
-  ctx.save();
-  ctx.translate(w * 0.16 * k, w * 0.28 * k);
-  ctx.strokeStyle = `rgba(60,40,20,${0.24 + 0.04 * lift})`; ctx.lineWidth = w * 1.38; ctx.stroke(g.path);
-  ctx.restore();
+  if (!o.noShadow) {
+    ctx.save();
+    ctx.translate(w * 0.16 * k, w * 0.28 * k);
+    ctx.strokeStyle = `rgba(60,40,20,${0.24 + 0.04 * lift})`; ctx.lineWidth = w * 1.38; ctx.stroke(g.path);
+    ctx.restore();
+  }
   if (o.glow > 0) {
     ctx.strokeStyle = `rgba(242,190,70,${0.55 * o.glow})`; ctx.lineWidth = w * 2.1; ctx.stroke(g.path);
     ctx.strokeStyle = `rgba(255,243,205,${0.85 * o.glow})`; ctx.lineWidth = w * 1.45; ctx.stroke(g.path);
@@ -163,7 +165,7 @@ function paintYarn(ctx, g, o) {
 }
 
 // ---------- save ----------
-let data = { v: 1, cur: LEVELS[0].id, done: {}, star: {}, glyphs: false, sound: false, seenHow: false, seenIntro: {}, game: null };
+let data = { v: 1, cur: LEVELS[0].id, done: {}, star: {}, glyphs: false, hooks: true, sound: false, seenHow: false, seenIntro: {}, game: null };
 function save() {
   try {
     const g = G ? { level: L.id, sig: L.sig, state: G.state, past: G.past.slice(-HISTORY_SAVED) } : null;
@@ -193,7 +195,7 @@ function load() {
       const clean = (m) => { const r = {}; if (m && typeof m === 'object') for (const id of Object.keys(m)) if (levelById(id) && m[id]) r[id] = true; return r; };
       data = {
         ...data, cur: typeof o.cur === 'string' ? o.cur : data.cur, done: clean(o.done), star: clean(o.star),
-        glyphs: !!o.glyphs, sound: !!o.sound, seenHow: !!o.seenHow,
+        glyphs: !!o.glyphs, hooks: o.hooks !== false, sound: !!o.sound, seenHow: !!o.seenHow,
         seenIntro: o.seenIntro && typeof o.seenIntro === 'object' ? o.seenIntro : {},
         game: o.game && typeof o.game === 'object' ? o.game : null,
       };
@@ -307,7 +309,15 @@ function sizeHoop() {
   buildBg();
   CACHE.cv = document.createElement('canvas');
   CACHE.cv.width = cv.width; CACHE.cv.height = cv.height;
-  CACHE.ctx = CACHE.cv.getContext('2d');
+  // a plain bitmap (not a recorded list of strokes replayed on every blit)
+  CACHE.ctx = CACHE.cv.getContext('2d', { willReadFrequently: true });
+  // the top layer sits exactly over the hoop and lets taps through
+  const top = $('#hoopTop');
+  TOP.cv = top; TOP.ctx = top.getContext('2d');
+  top.width = cv.width; top.height = cv.height;
+  top.style.width = `${css}px`; top.style.height = `${css}px`;
+  top.style.left = `${cv.offsetLeft}px`; top.style.top = `${cv.offsetTop}px`;
+  TOP.sig = '';
   CACHE.sig = '';
   PX.clear();
   kick();
@@ -315,13 +325,14 @@ function sizeHoop() {
 // Strands at rest live in a cached bitmap with the hoop; each frame redraws
 // only what moves and the crossings it takes part in.
 const CACHE = { cv: null, ctx: null, sig: '' };
+const TOP = { cv: null, ctx: null, sig: '' };
 
 function hash(a, b) { let h = (a * 374761393 + b * 668265263) >>> 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; }
 // The still parts: the linen in the hoop, the wooden ring, the brass screw, the pegs.
 function buildBg() {
   const c = document.createElement('canvas');
   c.width = HG.cv.width; c.height = HG.cv.height;
-  const x = c.getContext('2d');
+  const x = c.getContext('2d', { willReadFrequently: true });
   x.scale(HG.dpr, HG.dpr);
   const { cx, cy, Rout, Rin } = HG;
   // soft shadow of the hoop on the table
@@ -412,7 +423,7 @@ function pxOf(s) {
     const strands = {};
     for (const [i, pts] of Object.entries(lay.strands)) strands[i] = pts.map(toPx);
     const crossings = lay.crossings.map((X) => ({ ...X, p: toPx(X.p) }));
-    r = { strands, crossings, geom: {} };
+    r = { strands, crossings, geom: {}, marks: hookMarks(s, crossings) };
     if (PX.size > 60) PX.clear();
     PX.set(lay, r);
   }
@@ -491,7 +502,8 @@ function resetFx() {
 const curState = () => (view ? view.state : G.state);
 
 // ---------- drawing ----------
-const PERF = { frames: 0, draw: [], rebuilds: 0 };
+const PERF = { frames: 0, draw: [], rebuilds: 0, sec: { shape: 0, plan: 0, cache: 0, blit: 0, pegs: 0, live: 0 } };
+const tick = (k, t0) => { const t = performance.now(); PERF.sec[k] += t - t0; return t; };
 let raf = 0, lastT = 0, heldPulseUntil = 0;
 function kick() { if (!raf && L && HG.ctx) { lastT = performance.now(); raf = requestAnimationFrame(frame); } }
 function frame(now) {
@@ -629,16 +641,15 @@ const restStyle = (i) => ({ w: HG.w, tone: TONE[L.color[i]], glyph: data.glyphs 
 // A patch: the linen and the strands near a crossing, repainted in its order.
 // (each strand only where it comes near the disk: a slice, its ply in step)
 function paintPatch(c, X, ptsOf, style, fast = false) {
+  // (no linen repaint: the bottom strand's own shadow is already on the
+  // linen, so it goes down again without one, and every strand over it
+  // casts its shadow afresh, as a full repaint would)
   c.save();
   c.beginPath(); c.arc(X.p[0], X.p[1], X.r, 0, TAU); c.clip();
-  c.setTransform(1, 0, 0, 1, 0, 0);
-  const d = Math.ceil((X.r + 3) * HG.dpr), cx = X.p[0] * HG.dpr, cy = X.p[1] * HG.dpr;
-  c.drawImage(HG.bg, cx - d, cy - d, 2 * d, 2 * d, cx - d, cy - d, 2 * d, 2 * d);
-  c.setTransform(HG.dpr, 0, 0, HG.dpr, 0, 0);
-  for (const i of X.order) {
+  X.order.forEach((i, k) => {
     const g = sliceGeom(ptsOf(i), X.p, X.r + 2.2 * HG.w, fast);
-    if (g) paintYarn(c, g, { ...style(i), glyph: null, fast });
-  }
+    if (g) paintYarn(c, g, { ...style(i), glyph: null, fast, noShadow: k === 0 });
+  });
   c.restore();
 }
 // The part of a strand within reach of a point, as yarn geometry in step with the whole.
@@ -675,9 +686,11 @@ let restPlan = { key: '', plan: null };
 
 function draw(now) {
   const c = HG.ctx, s = curState();
+  let t = performance.now();
   const D = liveSet(s, now);
   const sh = frameShape(s, D);
   const morph = !!(view && view.morph);
+  t = tick('shape', t);
   let P0;
   if (!morph) {
     const key = `${stateKeyOf(s)}|${[...D].sort().join(',')}|${HG.css}`;
@@ -686,12 +699,15 @@ function draw(now) {
       restPlan = { key, base, plan: plan(sh.P.strands, sh.crossings, { w: HG.w, live: D, order: base }) };
     }
     P0 = restPlan.plan;
+    t = tick('plan', t);
     ensureCache(s, D, sh.P, P0);
+    t = tick('cache', t);
   }
   c.setTransform(1, 0, 0, 1, 0, 0);
   c.clearRect(0, 0, HG.cv.width, HG.cv.height); // the hoop's edges are see-through: never paint over last frame
   c.drawImage(morph ? HG.bg : CACHE.cv, 0, 0);
   c.setTransform(HG.dpr, 0, 0, HG.dpr, 0, 0);
+  t = tick('blit', t);
   // valid pegs for the lifted knot glow softly
   const liftE = drag ? drag.e : held;
   if (liftE >= 0 && !busy) {
@@ -723,6 +739,32 @@ function draw(now) {
       c.beginPath(); c.arc(x + Math.sin(t * 30) * 2 * (1 - t), y, HG.pr + 4, 0, TAU); c.stroke();
     } else FX.pegShake = null;
   }
+  t = tick('pegs', t);
+  // The top layer (a second canvas over this one): live strands, their
+  // patches, hooked marks, strands coming free, and the knots. It is only
+  // repainted when something on it changes (a held knot's pegs pulse on the
+  // layer below for seconds while nothing on top moves).
+  const r2 = (v) => Math.round(v * 100);
+  const cr = carrying();
+  const slot = (t0, ms) => (t0 !== undefined && now - t0 < ms ? Math.round((now - t0) / 12) : '');
+  const sig = [
+    stateKeyOf(s), stateKeyOf(G.state), morph ? `m${view.morph.t.toFixed(3)}` : '', [...D].join(','),
+    [...D].map((i) => `${r2(FX.lift[i])},${r2(FX.glow[i])},${r2(FX.alpha[i])}`).join(';'),
+    FX.hint ? r2(pulse(now, FX.hint.t0, HINT_MS)) : '', cr ? `${cr.pt[0].toFixed(1)},${cr.pt[1].toFixed(1)}` : '',
+    FX.leaving.map((f) => slot(f.t0, f.dur + 50) + (now < f.t0 ? 'w' : '')).join(','), slot(FX.wig && FX.wig.t0, 520), slot(FX.tug && FX.tug.t0, 260),
+    busy ? 1 : 0, held, data.hooks ? 1 : 0, data.glyphs ? 1 : 0, HG.css,
+  ].join('|');
+  if (sig !== TOP.sig) {
+    TOP.sig = sig;
+    const o = TOP.ctx;
+    o.setTransform(1, 0, 0, 1, 0, 0);
+    o.clearRect(0, 0, TOP.cv.width, TOP.cv.height);
+    o.setTransform(HG.dpr, 0, 0, HG.dpr, 0, 0);
+    drawTop(o, now, s, sh, D, morph, P0);
+  }
+  tick('live', t);
+}
+function drawTop(c, now, s, sh, D, morph, P0) {
   // live strands, then every crossing they take part in that needs a patch
   const live = morph ? new Set(Object.keys(sh.curves).map(Number)) : D;
   const LP = morph
@@ -734,6 +776,9 @@ function draw(now) {
   for (const i of LP.live) paintYarn(c, geomOf(i), st(i));
   for (const X of LP.livePatches) paintPatch(c, X, (i) => sh.curves[i], st, morph);
   LAST.curves = sh.curves; LAST.plan = LP; LAST.restPlan = P0; LAST.crossings = sh.crossings;
+  // hooked marks: a small pair of linked rings where two strands hook
+  LAST.marks = !morph && data.hooks ? sh.P.marks : [];
+  for (const m of LAST.marks) drawHookMark(c, m.p);
   // strands coming free
   for (const f of FX.leaving) drawLeaving(c, f, now);
   // knots on top of everything, so they are always there to tap
@@ -757,7 +802,18 @@ function draw(now) {
     }
   }
 }
-const LAST = { curves: null, plan: null, restPlan: null, crossings: null };
+const LAST = { curves: null, plan: null, restPlan: null, crossings: null, marks: [] };
+function drawHookMark(c, p) {
+  const r = Math.max(2.6, HG.w * 0.36), dx = r * 0.62;
+  c.save();
+  c.globalAlpha = 0.92;
+  c.lineWidth = 3; c.strokeStyle = 'rgba(60,40,20,.55)';
+  for (const sx of [-1, 1]) { c.beginPath(); c.arc(p[0] + sx * dx, p[1], r, 0, TAU); c.stroke(); }
+  c.lineWidth = 1.5; c.strokeStyle = '#F6E7B8';
+  c.beginPath(); c.arc(p[0] - dx, p[1], r, 0, TAU); c.stroke();
+  c.beginPath(); c.arc(p[0] + dx, p[1], r, Math.PI * 0.75, Math.PI * 2.25); c.stroke(); // the second ring passes through the first
+  c.restore();
+}
 
 // A knot: a round of yarn on the peg with two little tails toward the rim.
 function drawKnot(c, p, e, { scale = 1, up = 0, tone2 = null, hint: hk = 0, alpha = 1, ready = false } = {}) {
@@ -884,7 +940,14 @@ hoopEl.addEventListener('pointerdown', (e) => {
   if (busy) { skipAll(); return; }
   const [x, y] = canvasXY(e);
   const q = pegAt(x, y);
-  down = { id: e.pointerId, x, y, q, touch: e.pointerType !== 'mouse', moved: false };
+  // a press on yarn, away from the knots: the strand's middle
+  let strand = -1;
+  if (held < 0) {
+    let nearKnot = Infinity;
+    for (const p of G.state.ends) if (p >= 0) nearKnot = Math.min(nearKnot, Math.hypot(HG.peg[p][0] - x, HG.peg[p][1] - y));
+    if (nearKnot > Math.max(30, HG.w * 3)) strand = strandUnder(x, y);
+  }
+  down = { id: e.pointerId, x, y, q, touch: e.pointerType !== 'mouse', moved: false, strand };
   try { hoopEl.setPointerCapture(e.pointerId); } catch { /* fine */ }
 });
 hoopEl.addEventListener('pointermove', (e) => {
@@ -892,6 +955,7 @@ hoopEl.addEventListener('pointermove', (e) => {
   const [x, y] = canvasXY(e);
   if (!drag) {
     if (Math.hypot(x - down.x, y - down.y) < 10) return;
+    if (down.strand >= 0) { down.moved = true; return; } // a strand's middle: picked up on release
     // a drag starts only from a knot that can be lifted
     const st = G.state;
     const es = down.q >= 0 ? endsAt(L, st, down.q) : [];
@@ -935,6 +999,7 @@ hoopEl.addEventListener('pointerup', (e) => {
     render(); kick();
     return;
   }
+  if (d.strand >= 0) { strandTap(d.strand); return; }
   if (d.moved) return;
   // a tap on the yarn itself, away from any knot: show where the handles are
   if (held < 0 && !busy && (d.q < 0 || !endsAt(L, G.state, d.q).length)) {
@@ -955,8 +1020,28 @@ function strandUnder(x, y) {
   const top = topAt(sub, pl, [x, y], reach * 2);
   return top >= 0 ? top : near[0];
 }
+// A tap (or drag) on a strand's middle: before the lift-off band, a reminder
+// that the knots are the handles; from it on, a lift-off if the strand lies
+// on top of everything, or why not.
 function strandTap(i) {
+  if (busy || isDone(G.state)) return;
   const now = performance.now();
+  if (L.liftoff) {
+    const why = canLiftOff(L, G.state, i);
+    if (!why) { doLiftOff(i); return; }
+    if (why.reason === 'under') {
+      for (const b of why.blockers) FX.glowUntil[b] = now + 1300;
+      const hookedTo = why.blockers.filter((b) => hookedPairs(L, G.state).some(([a, c]) => (a === i && c === b) || (a === b && c === i)));
+      note = hookedTo.length
+        ? `Hooked with the glowing strand, so it can’t lift off. Unhook them first.`
+        : `The glowing ${why.blockers.length === 1 ? 'strand lies' : 'strands lie'} over it. Only a strand on top of everything lifts off.`;
+    } else if (why.reason === 'stitched') note = 'A brass tack holds this strand to the hoop, so it can’t lift off. Move its other end instead.';
+    else note = `To move the ${cshort(L.color[i])} strand, tap one of its knots.`;
+    FX.glowUntil[i] = now + 600;
+    sfx('soft');
+    render(); kick();
+    return;
+  }
   FX.glowUntil[i] = now + 900;
   note = `To move the ${cshort(L.color[i])} strand, tap one of its knots, where it’s tied to a peg.`;
   sfx('soft');
@@ -1045,7 +1130,13 @@ function doMove(e, q, fromPt) {
   for (const f of res.freed) shelfHold.add(f.s);
   // the new picture just before anything lifts off (the very state object
   // when nothing does, so its layout and cache carry on)
-  const after = res.pre;
+  // the new picture, with any strand about to come free still in place
+  // (the very state object when nothing does, so its layout and cache carry on)
+  let after = res.state;
+  if (res.freed.length) {
+    after = { ...res.state, ends: res.state.ends.slice(), out: res.state.out.slice() };
+    for (const f of res.freed) { after.ends[2 * f.s] = f.a; after.ends[2 * f.s + 1] = f.b; after.out[f.s] = 0; }
+  }
   run(async () => {
     FX.slide = { movers: ms, pt: start };
     kick();
@@ -1077,22 +1168,40 @@ function doMove(e, q, fromPt) {
     view = { state: after };
     FX.tug = null;
     if (res.freed.length) {
-      // lift-off: the freed strands rise, glow and wind away, round by round
-      // (one lifting off can leave another on top of everything), while the
-      // yarn left behind settles into its new lie
-      const Pa = pxOf(after), Pb = pxOf(res.state);
-      const from2 = {}, to2 = {};
-      for (const i of Object.keys(Pb.strands)) { to2[i] = resample(Pb.strands[i], MORPH_N); from2[i] = Pa.strands[i] ? resample(Pa.strands[i], MORPH_N) : to2[i]; }
-      if (Object.keys(to2).length) view = { state: res.state, morph: { from: from2, to: to2, xb: fractions(Pb), t: 0 } };
-      else view = { state: res.state };
-      const rounds = Math.max(...res.freed.map((f) => f.round));
-      await Promise.all([
-        comeFree(res.freed.map((f) => ({ ...f, pts: Pa.strands[f.s], lifted: after.w[f.s].length > 0 }))),
-        wait(reduced() ? 0 : 260 * rounds + 120).then(() => (view && view.morph ? tween(reduced() ? 0 : 420, (t) => { view.morph.t = t; }) : null)).then(() => { view = { state: res.state }; }),
-      ]);
+      view = { state: res.state };
+      await comeFree(res.freed.map((f) => ({ ...f, pts: pxOf(after).strands[f.s] })));
     }
     view = null;
     note = afterNote(res, hk, hooked0);
+  });
+}
+
+// ---------- lift it off: a strand on top of everything, picked off by its middle ----------
+function doLiftOff(i) {
+  const before = G.state;
+  const res = play(L, G, 2 * i, -1);
+  if (!res.ok) { render(); kick(); return; }
+  G = res.game;
+  stats.moves++; stats.liftoffs = (stats.liftoffs || 0) + 1;
+  held = -1; note = ''; tangled = false;
+  const hk = FX.hint;
+  FX.hint = null;
+  save();
+  for (const f of res.freed) shelfHold.add(f.s);
+  run(async () => {
+    // it rises, glowing, and winds away (a lifted strand first, then any
+    // strand that crosses nothing now); the yarn it lay on settles back
+    const Pa = pxOf(before), Pb = pxOf(res.state);
+    const from = {}, to = {};
+    for (const k of Object.keys(Pb.strands)) { to[k] = resample(Pb.strands[k], MORPH_N); from[k] = Pa.strands[k] ? resample(Pa.strands[k], MORPH_N) : to[k]; }
+    view = Object.keys(to).length ? { state: res.state, morph: { from, to, xb: fractions(Pb), t: 0 } } : { state: res.state };
+    sfx('lift');
+    await Promise.all([
+      comeFree(res.freed.map((f) => ({ ...f, round: f.lifted ? 0 : 1, pts: Pa.strands[f.s] }))),
+      wait(reduced() ? 0 : 240).then(() => (view && view.morph ? tween(reduced() ? 0 : 420, (t) => { view.morph.t = t; }) : null)).then(() => { view = { state: res.state }; }),
+    ]);
+    view = null;
+    note = afterNote(res, hk, hookedPairs(L, before).length);
   });
 }
 
@@ -1101,9 +1210,13 @@ function afterNote(res, hk, hooked0) {
   if (isDone(s)) return 'Every strand is free. Lovely work.';
   const left = remaining(s), x = totalCrossings(L, s);
   const togo = `${x} ${x === 1 ? 'crossing' : 'crossings'} left, ${left} ${left === 1 ? 'strand' : 'strands'} to go.`;
-  const how = res.freed.some((f) => res.pre.w[f.s].length) ? 'lifted right off' : 'came free';
-  if (res.freed.length === 1) return `The ${cshort(L.color[res.freed[0].s])} strand ${how}. ${togo}`;
-  if (res.freed.length > 1) return `${res.freed.length === 2 ? 'Two' : res.freed.length === 3 ? 'Three' : res.freed.length} strands ${how} at once! ${togo}`;
+  if (res.liftoff) {
+    const lifted = res.freed.filter((f) => f.lifted), rest = res.freed.filter((f) => !f.lifted);
+    const what = lifted.length === 1 ? `the ${cshort(L.color[lifted[0].s])} strand` : 'both strands of the shared knot';
+    return `You lifted ${what} right off.${rest.length ? ` ${rest.length === 1 ? `The ${cshort(L.color[rest[0].s])} strand` : `${rest.length} more strands`}, crossing nothing now, came free too.` : ''} ${togo}`;
+  }
+  if (res.freed.length === 1) return `The ${cshort(L.color[res.freed[0].s])} strand came free. ${togo}`;
+  if (res.freed.length > 1) return `${res.freed.length === 2 ? 'Two' : res.freed.length === 3 ? 'Three' : res.freed.length} strands came free at once! ${togo}`;
   const hooked = hookedPairs(L, s).length;
   if (hooked > hooked0) return `Hooked: the end went over a knot and now loops round its strand. Carry it back to let go. ${togo}`;
   return togo;
@@ -1274,6 +1387,9 @@ function render() {
   renderSr();
 }
 function renderToggles() {
+  const hb = $('#hookBtn');
+  hb.setAttribute('aria-pressed', String(!!data.hooks));
+  hb.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="12" r="5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="15" cy="12" r="5" fill="none" stroke="currentColor" stroke-width="2"/></svg>Hooked marks: ${data.hooks ? 'on' : 'off'}`;
   const gb = $('#glyphBtn');
   gb.setAttribute('aria-pressed', String(!!data.glyphs));
   gb.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${GLYPHS.heart.f}" fill="currentColor"/></svg>Color symbols: ${data.glyphs ? 'on' : 'off'}`;
@@ -1315,10 +1431,15 @@ function renderSr() {
       const why = canLift(L, s, e);
       items.push(`<button type="button" data-peg="${s.ends[e]}">Lift the ${what} on peg ${s.ends[e] + 1}${why ? (why.reason === 'fixed' ? ' (stitched down)' : ' (under another strand)') : ''}</button>`);
     }
+    if (L.liftoff) for (let i = 0; i < L.S; i++) if (!s.out[i] && !canLiftOff(L, s, i) && L.units[L.unitOf[i]][0] === i) items.push(`<button type="button" data-strand="${i}">Lift the ${cshort(L.color[i])} strand right off</button>`);
   }
   $('#srList').innerHTML = items.join('');
 }
-$('#srList').addEventListener('click', (e) => { const b = e.target.closest('[data-peg]'); if (b) { ensureAudio(); tapPeg(+b.dataset.peg); } });
+$('#srList').addEventListener('click', (e) => {
+  const st = e.target.closest('[data-strand]');
+  if (st) { ensureAudio(); strandTap(+st.dataset.strand); return; }
+  const b = e.target.closest('[data-peg]'); if (b) { ensureAudio(); tapPeg(+b.dataset.peg); }
+});
 
 // ---------- level setup ----------
 function startLevel(id, { fresh = false } = {}) {
@@ -1444,8 +1565,8 @@ function openFinish() {
   fh.getContext('2d').drawImage(t, 0, 0);
   const star = s.moves <= L.par;
   $('#finPar').innerHTML = star
-    ? `${STAR(true)}<span>Untangled in ${s.moves} moves, the tidiest it can be done.</span>`
-    : `${STAR(false)}<span>Untangled in ${s.moves} moves. Par is ${L.par}; the star is there if you’d like another go.</span>`;
+    ? `${STAR(true)}<span>Untangled in ${s.moves} moves, ${L.stats.optimal ? 'the tidiest it can be done' : 'as tidy as anyone has found'}.</span>`
+    : `${STAR(false)}<span>Untangled in ${s.moves} moves${L.liftoff ? ' (each lift-off counts as one)' : ''}. Par is ${L.par}; the star is there if you’d like another go.</span>`;
   $('#finKnits').textContent = y.line;
   const idx = LEVELS.indexOf(L);
   const next = LEVELS.slice(idx + 1).find((x) => !data.done[x.id]) || LEVELS[(idx + 1) % LEVELS.length];
@@ -1461,6 +1582,7 @@ const yarnLineSvg = (d, col, w = 4.5) => `<path d="${d}" fill="none" stroke="${m
 const ICON = {
   // two loops hooked through each other: red goes under blue, then over it
   clasp: hoopIcon(`${yarnLineSvg('M10 18C20 22 32 22 36 30S30 40 22 34', '#34588E')}${yarnLineSvg('M46 38C36 34 24 34 20 26S26 16 34 22', '#B9473A')}<path d="M27.5 33.6C29.5 35 31.5 35.8 33 35.8" fill="none" stroke="${mixHex('#34588E', '#24160A', 0.36)}" stroke-width="4.5" stroke-linecap="round"/><path d="M27.5 33.6C29.5 35 31.5 35.8 33 35.8" fill="none" stroke="#34588E" stroke-width="3.2" stroke-linecap="round"/>`),
+  liftoff: hoopIcon(`<path d="M10 40C20 34 36 34 46 40" fill="none" stroke="rgba(60,40,20,.25)" stroke-width="7" stroke-linecap="round" transform="translate(2 4)"/>${yarnLineSvg('M10 34C20 28 36 28 46 34', '#B9473A')}${yarnLineSvg('M20 46C24 36 30 24 36 12', '#34588E', 3.6)}<path d="M28 22v-12M23 15l5-5 5 5" fill="none" stroke="#8C6512" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>`),
   fixed: hoopIcon(`${yarnLineSvg('M8 22C20 28 34 36 44 44', '#B9473A')}<circle cx="8" cy="22" r="4" fill="#B9473A"/><circle cx="8" cy="22" r="2.2" fill="#D7AE52"/>`),
   pegs: hoopIcon(`<circle cx="28" cy="5" r="4" fill="#34588E" stroke="#FFF8E6" stroke-width="1.2"/><circle cx="51" cy="28" r="4" fill="#B9473A" stroke="#FFF8E6" stroke-width="1.2"/>${yarnLineSvg('M28 6C30 22 40 30 50 28', '#34588E')}`),
   links: hoopIcon(`${yarnLineSvg('M10 16C24 26 30 34 42 46', '#B9473A')}${yarnLineSvg('M10 16C22 18 36 16 48 22', '#34588E')}<circle cx="10" cy="16" r="4.6" fill="#7A3A2C"/><path d="M6 16a4 4 0 0 1 8 0z" fill="#B9473A"/><path d="M6 16a4 4 0 0 0 8 0z" fill="#34588E"/>`),
@@ -1504,7 +1626,7 @@ const ILL = {
 };
 const HOW = [
   { t: 'Lift a knot, retie it', ill: 'lift', p: 'Tap a knot on a peg to lift it, then tap one of the glowing empty pegs to tie it there. Or just drag the knot across. The end is carried over the knots it passes, and whatever lay over the strand still does.' },
-  { t: 'On top of everything, off it comes', ill: 'free', p: 'A strand lying on top of everything it crosses lifts right off. Strands can cross more than once and even hook round each other; one that lies under anything stays. A freed strand winds onto a skein, and its two pegs are yours to use.' },
+  { t: 'Cross nothing, come free', ill: 'free', p: 'Strands cross where one lies over another, and two can cross more than once, even hook round each other (a small pair of rings marks a hook). A strand that crosses nothing at all slips off its pegs and winds onto a skein, and its two pegs are yours to use.' },
   { t: 'Any empty peg', ill: 'room', p: 'Tie a knot on any empty peg. The end you carry goes the way round that doesn’t pass its own other knot. Undo is free, Hint glows a good next move, and there are no timers and no way to lose.' },
 ];
 function renderHow() {
@@ -1523,7 +1645,8 @@ $('#restartBtn').addEventListener('click', doRestart);
 $('#levelsBtn').addEventListener('click', () => { if (!busy) openLevels(); });
 $('#howBtn').addEventListener('click', () => { if (!busy) openHow(); });
 $('#howBtn2').addEventListener('click', () => { closeSheet($('#levelSheet')); openHow(); });
-$('#glyphBtn').addEventListener('click', () => { data.glyphs = !data.glyphs; save(); buildBg(); CACHE.sig = ''; render(); kick(); });
+$('#glyphBtn').addEventListener('click', () => { data.glyphs = !data.glyphs; save(); buildBg(); CACHE.sig = ''; TOP.sig = ''; render(); kick(); });
+$('#hookBtn').addEventListener('click', () => { data.hooks = !data.hooks; save(); render(); kick(); });
 $('#soundBtn').addEventListener('click', () => { data.sound = !data.sound; save(); ensureAudio(); render(); sfx('tie'); });
 $('#howBack').addEventListener('click', () => { if (howStep > 0) { howStep--; renderHow(); } });
 $('#howNext').addEventListener('click', () => {
@@ -1547,10 +1670,25 @@ else if (isDone(G.state)) openFinish();
 window.__hoop = {
   get level() { return L; }, get state() { return G.state; }, get busy() { return busy; }, get held() { return held; },
   get note() { return note; }, get hint() { return FX.hint && { ...FX.hint }; }, get stats() { return { ...stats }; },
-  get perf() { return { frames: PERF.frames, draw: PERF.draw.slice(), rebuilds: PERF.rebuilds }; },
+  get perf() { return { frames: PERF.frames, draw: PERF.draw.slice(), rebuilds: PERF.rebuilds, sec: { ...PERF.sec } }; },
   // the page point of peg q (its knot)
   pegPoint(q) { return pageOf(HG.peg[q]); },
   get geom() { return { css: HG.css, Rk: HG.Rk, w: HG.w, pr: HG.pr }; },
+  // the hooked marks drawn last frame (page points, with their two strands)
+  get marks() { return LAST.marks.map((m) => ({ a: m.a, b: m.b, p: pageOf(m.p) })); },
+  // a page point on strand i's middle, well clear of knots and other yarn (or null)
+  strandMid(i) {
+    const P = pxOf(G.state), pts = P.strands[i];
+    if (!pts) return null;
+    let best = null, bd = -1;
+    for (let k = Math.floor(pts.length * 0.2); k < pts.length * 0.8; k++) {
+      let d = Infinity;
+      for (const [j, o] of Object.entries(P.strands)) if (+j !== i) d = Math.min(d, distTo(o, pts[k]));
+      for (const p of G.state.ends) if (p >= 0) d = Math.min(d, Math.hypot(HG.peg[p][0] - pts[k][0], HG.peg[p][1] - pts[k][1]) - 30);
+      if (d > bd) { bd = d; best = pts[k]; }
+    }
+    return best ? pageOf(best) : null;
+  },
   // what was painted last frame: who lies on top at each drawn crossing (css px)
   drawnTops() {
     if (!LAST.curves) return [];
@@ -1562,7 +1700,7 @@ window.__hoop = {
   // time the painter: a full rebuild of the resting strands, and an ordinary frame (ms)
   bench(n = 20) {
     const t0 = performance.now();
-    for (let k = 0; k < n; k++) { CACHE.sig = ''; restPlan.key = ''; draw(performance.now()); }
+    for (let k = 0; k < n; k++) { CACHE.sig = ''; TOP.sig = ''; restPlan.key = ''; draw(performance.now()); }
     const t1 = performance.now();
     for (let k = 0; k < n; k++) draw(performance.now());
     return { rebuild: (t1 - t0) / n, frame: (performance.now() - t1) / n };

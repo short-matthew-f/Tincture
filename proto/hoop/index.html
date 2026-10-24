@@ -44,6 +44,7 @@
   .hoopwrap { position: relative; display: flex; justify-content: center; align-items: flex-start; flex: none; margin-top: 4px; }
   .grow { flex: 1 1 0; min-height: 0; }
   #hoop { display: block; touch-action: none; cursor: pointer; -webkit-user-select: none; user-select: none; }
+  #hoopTop { position: absolute; pointer-events: none; }
   .cheer { position: absolute; left: 50%; top: 46%; z-index: 6; pointer-events: none; transform: translate(-50%, -50%); font: 400 23px var(--font-display); color: #4A3A26; background: rgba(251,246,234,.92); padding: 7px 16px; border-radius: 999px; box-shadow: 0 2px 10px rgba(42,38,34,.18); white-space: nowrap; }
   .flying { position: fixed; z-index: 45; pointer-events: none; width: 44px; height: 28px; left: 0; top: 0; }
   .flying svg { width: 100%; height: 100%; overflow: visible; }
@@ -117,6 +118,7 @@
 
   <section class="hoopwrap" id="hoopwrap" aria-label="The hoop">
     <canvas id="hoop" role="img" aria-label="An embroidery hoop with yarn tied across it"></canvas>
+    <canvas id="hoopTop" aria-hidden="true"></canvas>
   </section>
   <div class="sr" id="srList" aria-label="Knots you can move"></div>
 
@@ -137,6 +139,7 @@
     <div class="settings">
       <button type="button" class="btn small" id="howBtn2">How this works</button>
       <button type="button" class="btn small" id="glyphBtn" aria-pressed="false">Color symbols: off</button>
+      <button type="button" class="btn small" id="hookBtn" aria-pressed="true">Hooked marks: on</button>
       <button type="button" class="btn small" id="soundBtn" aria-pressed="false">Soft sounds: off</button>
     </div>
     <div id="lvList"></div>

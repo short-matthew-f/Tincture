@@ -7,13 +7,13 @@
 // Deterministic: the same code and seeds always write the same file.
 import { writeFileSync } from 'node:fs';
 import { LEVEL_DEFS } from './levels.js';
-import { candidate } from './gen.js';
+import { candidate, unscramble } from './gen.js';
 import {
   buildLevel, solve, replay, isDone, randomRate, greedyPlayout, mulberry, formatMoves, sparePegs, newState, totalCrossings, hookedPairs,
 } from './rules.js';
 
 const SEEDS = +(process.env.SEEDS || 60);
-export const RANDOM_K = 60, RANDOM_SEED = 4242, RANDOM_RUNS = 400, GREEDY_RUNS = 100;
+export const RANDOM_K = 60, RANDOM_SEED = 4242, RANDOM_RUNS = 400, GREEDY_RUNS = 40;
 const SCREEN_CAP = 6000;   // a candidate must be solved this fast to be kept
 const CAP = 120000;        // the proof of the kept one
 const r3 = (x) => Math.round(x * 1000) / 1000;
@@ -23,6 +23,21 @@ function greedy(L, seed, runs) {
   let ok = 0, moves = 0;
   for (let r = 0; r < runs; r++) { const m = greedyPlayout(L, g, RANDOM_K); if (m > 0) { ok++; moves += m; } }
   return { rate: ok / runs, moves: ok ? Math.round((moves / ok) * 10) / 10 : null };
+}
+
+// The scramble played backwards, with every move dropped that it can do
+// without; or a weighted search (quick, not minimal): the shorter.
+function bestFound(L, def, k) {
+  let path = unscramble(L, def);
+  if (path) {
+    for (let i = path.length - 1; i >= 0; i--) {
+      const p2 = path.slice(0, i).concat(path.slice(i + 1));
+      try { if (isDone(replay(L, p2))) path = p2; } catch { /* needed */ }
+    }
+  }
+  const w = solve(L, undefined, { cap: Math.round((k.cap || SCREEN_CAP) / 2), weight: 1.6 });
+  if (w.ok && (!path || w.path.length < path.length)) path = w.path;
+  return path ? { ok: true, path, nodes: (k.cap || SCREEN_CAP), optimal: false } : null;
 }
 
 function generateOne(idx) {
@@ -35,28 +50,33 @@ function generateOne(idx) {
     if (!def) continue;
     tried++;
     const L = buildLevel({ id: d.id, name: d.name, ...def });
-    const sol = solve(L, undefined, { cap: k.cap || SCREEN_CAP });
+    let sol = solve(L, undefined, { cap: k.cap || SCREEN_CAP });
+    // not proved within the cap: the best way out found, marked so
+    if (!sol.ok && k.best) sol = bestFound(L, def, k);
+    if (!sol) { unsolved++; continue; }
     if (!sol.ok) { unsolved++; continue; }
     const par = sol.path.length;
-    const off = par < k.par[0] ? k.par[0] - par : par > k.par[1] ? par - k.par[1] : 0;
+    const off = (par < k.par[0] ? k.par[0] - par : par > k.par[1] ? par - k.par[1] : 0) + (sol.optimal ? 0 : 0.3);
     // (the greedy player is only consulted when the par is in range)
-    const gq = off ? null : greedy(L, 99 + seed, 12);
-    cands.push({ score: off ? off + 1 : Math.abs(gq.rate - k.target), seed, def, L, sol });
+    const gq = off >= 1 ? null : greedy(L, 99 + seed, 12);
+    cands.push({ score: off >= 1 ? off + 1 : off + Math.abs(gq.rate - k.target), seed, def, L, sol });
   }
   if (!cands.length) throw new Error(`${d.id}: no solvable candidate (${tried} dealt, ${unsolved} unsolved)`);
   cands.sort((a, b) => a.score - b.score || a.sol.nodes - b.sol.nodes || a.seed - b.seed);
   // re-rank the closest few by the greedy rate that gets stored
-  const head = cands.slice(0, 4);
+  const head = cands.slice(0, 3);
   for (const x of head) {
     const par = x.sol.path.length;
-    const off = par < k.par[0] ? k.par[0] - par : par > k.par[1] ? par - k.par[1] : 0;
+    const off = (par < k.par[0] ? k.par[0] - par : par > k.par[1] ? par - k.par[1] : 0) + (x.sol.optimal ? 0 : 0.3);
     x.gq = greedy(x.L, RANDOM_SEED, GREEDY_RUNS);
     x.score = off + Math.abs(x.gq.rate - k.target);
   }
   head.sort((a, b) => a.score - b.score || a.sol.nodes - b.sol.nodes || a.seed - b.seed);
   const x = head[0];
-  // the proof: the screened solution is already minimal (A*, consistent bound)
-  const sol = x.sol.optimal ? x.sol : solve(x.L, undefined, { cap: CAP });
+  // the proof: a screened solution at weight 1 is already minimal (A*, consistent bound);
+  // otherwise one more try with the full cap, else it stays the best found
+  let sol = x.sol;
+  if (!sol.optimal && !k.best) { const p = solve(x.L, undefined, { cap: CAP }); if (p.ok) sol = p; }
   if (!isDone(replay(x.L, sol.path))) throw new Error(`${d.id}: solution does not replay`);
   const s0 = newState(x.L);
   return {
@@ -97,7 +117,8 @@ writeFileSync(new URL('./hoops.js', import.meta.url),
 // end first); pegs { peg: color } painted pegs; layering; x crossings
 // [a, b, top, sign] and w words (each strand's crossings from end 2s to
 // 2s+1), made by scrambling a clean hoop with real moves.
-// solution: "end:peg" moves, a minimum-move solution found by A*.
+// solution: "end:peg" moves ("2s:-1" lifts strand s off), a minimum-move
+// solution found by A* (or, where stats.optimal is false, the best found).
 // stats: spare = empty pegs at the start; crossings and hooked (pairs of
 // strands hooked together) at the start; par = minimum moves; optimal = par
 // proved minimal; nodes = positions the solver expanded to prove it; random =
