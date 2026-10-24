@@ -11,6 +11,12 @@
 //    reload in the middle that resumes exactly (moves, columns, belt);
 //  - the finish sheet: coins and stock land (state and the reward line);
 //  - the gallery wall opens and lists 27 paintings; Undo and Hint work;
+//  - 0.4.1: Hint always gives visible feedback within about 300 ms on the
+//    biggest painting (the jar glows and one line names it), also when tapped
+//    while the belt is still running and off the stored solution; a dead end
+//    shows "Back to solvable" next to Hint (and Hint says so), which steps back
+//    to a position the rules prove solvable without spending the spare spot;
+//    from the gallery menu on a fine painting it says "You're on track";
 //  - 44 px controls, no horizontal scroll, the lanes inside the viewport,
 //    the tab bar hidden, one painting canvas, no page or console errors.
 // Run: node test/lift.e2e.mjs   (screenshots: $LIFT_SHOTS or the OS temp dir)
@@ -282,6 +288,7 @@ async function walk(viewport, tag) {
   await tap(page, '#lf-hintBtn');
   await page.waitForSelector('#screen-lift .lf-jar.lf-hinted', { state: 'visible', timeout: 4000 }).catch(() => {});
   check(await page.locator('#screen-lift .lf-jar.lf-hinted').count() === 1, `${tag}: Hint points at one jar ("${(await page.locator('#lf-msg').textContent()).trim()}")`);
+  check(/^Try (the|resting the|bringing the) .+ jar/.test((await page.locator('#lf-msg').textContent()).trim()), `${tag}: the hint line names the jar`);
   await shot('09-hint');
 
   // The rest of painting 1 by taps.
@@ -343,6 +350,171 @@ async function walk(viewport, tag) {
   await context.close();
 }
 
+/** Hint feedback on the biggest painting, a dead end and Back to solvable (0.4.1). */
+async function hintWalk(viewport, tag) {
+  const { context, page } = await newPage(viewport);
+  const errors = watchErrors(page);
+  const shot = (name) => page.screenshot({ path: path.join(SHOTS, `${tag}-${name}.png`) });
+  await page.goto(URL_, { waitUntil: 'load' });
+  await boot(page);
+  await seed(page);
+  await page.evaluate(() => {
+    const { game } = window.tincture;
+    game.act((st) => {
+      st.unlocks.lift = true;
+      st.onboarding.seen = { ...(st.onboarding.seen || {}), lift: true };
+      st.lift = st.lift || {};
+      st.lift.seenIntro = { mystery: true, linked: true, mixing: true, cloth: true, key: true, belt3: true, bench2: true };
+      return {};
+    }, {});
+    game.save();
+  });
+  await page.reload({ waitUntil: 'load' });
+  await boot(page);
+
+  /** Tap Hint and time it in the page: from the touch to the glow (or the dead-end line). */
+  const timedHint = async () => {
+    await page.evaluate(() => {
+      window.__t = {};
+      document.querySelector('#lf-hintBtn').addEventListener('pointerdown', () => { window.__t.down = performance.now(); }, { once: true, capture: true });
+      const mo = new MutationObserver(() => {
+        const m = document.querySelector('#lf-msg').textContent;
+        // Only an answer after the touch counts (a dead end's message already says "tangled" before it).
+        if (!window.__t.down || m === 'Looking…') return;
+        if (!window.__t.answer && (document.querySelector('#screen-lift .lf-jar.lf-hinted') || /tangled/.test(m))) { window.__t.answer = performance.now(); mo.disconnect(); }
+      });
+      mo.observe(document.querySelector('#screen-lift'), { subtree: true, childList: true, characterData: true, attributes: true });
+    });
+    await tap(page, '#lf-hintBtn');
+    await page.waitForFunction(() => window.__t && window.__t.answer, null, { timeout: 5000 }).catch(() => {});
+    const t = await page.evaluate(() => window.__t);
+    return { ms: t.answer && t.down ? t.answer - t.down : Infinity, msg: (await page.locator('#lf-msg').textContent()).trim(), glow: await page.locator('#screen-lift .lf-jar.lf-hinted').count() };
+  };
+
+  // --- the biggest painting, mid-game on the stored solution ------------------------------
+  await page.evaluate(() => {
+    const { game, ctx } = window.tincture;
+    game.act(ctx.sim.lift.startPainting, { levelId: 'sampler' });
+    for (const m of ctx.puzzles.liftLevels.levelById('sampler').solution.split(' ').slice(0, 14)) game.act(ctx.sim.lift.move, { move: m });
+  });
+  await page.evaluate(() => window.tincture.ctx.navigate('lift'));
+  await page.waitForSelector('#screen-lift #lf-lanes .lf-front', { state: 'visible' });
+  await idle(page);
+  await page.waitForTimeout(300);
+  let h = await timedHint();
+  check(h.glow === 1 && h.ms < 300, `${tag}: sampler: Hint glows a jar in ${Math.round(h.ms)} ms`);
+  check(/^Try (the|resting the|bringing the) .+ jar/.test(h.msg), `${tag}: and one line names it ("${h.msg}")`);
+  await shot('15-hint-feedback');
+
+  // Right after a move, while the belt still runs: the tap is not swallowed any more.
+  const lane = await page.evaluate(() => {
+    const { ctx, game } = window.tincture;
+    const cur = ctx.sim.lift.current(game.state);
+    const R = ctx.puzzles.lift;
+    const m = R.legalMoves(cur.L, cur.s).find((x) => x.t === 'place' && R.frontUnit(cur.L, cur.s, x.i).some((j) => R.canLift(cur.L, cur.s, j)));
+    return m ? m.i : null;
+  });
+  must(lane !== null, `${tag}: a lane jar that lifts`);
+  await tap(page, `#lf-lanes .lf-front[data-lane="${lane}"]`);
+  await page.waitForTimeout(60);
+  const busyAtTap = await page.evaluate(() => window.__lf.debugLift().busy);
+  await tap(page, '#lf-hintBtn');
+  await page.waitForSelector('#screen-lift .lf-jar.lf-hinted', { state: 'visible', timeout: 4000 }).catch(() => {});
+  h = { glow: await page.locator('#screen-lift .lf-jar.lf-hinted').count(), msg: (await page.locator('#lf-msg').textContent()).trim() };
+  check(h.glow === 1 && /^Try|^To make room/.test(h.msg), `${tag}: Hint tapped while the belt runs (${busyAtTap ? 'busy' : 'settled'}) still answers ("${h.msg}")`);
+  await idle(page);
+
+  // Off the stored solution: still a glowing jar and a line (a solver move or a best guess).
+  await page.evaluate(() => {
+    const { ctx, game } = window.tincture;
+    const R = ctx.puzzles.lift;
+    for (let k = 0; k < 6; k++) {
+      const cur = ctx.sim.lift.current(game.state);
+      const ms = R.legalMoves(cur.L, cur.s).filter((x) => x.t === 'place');
+      if (!ms.length) break;
+      const nxt = R.apply(cur.L, cur.s, ms[ms.length - 1]).state;
+      if (R.isStuck(cur.L, nxt)) break;
+      game.act(ctx.sim.lift.move, { move: R.encodeMove(ms[ms.length - 1]) });
+    }
+  });
+  await page.waitForTimeout(400);
+  await idle(page);
+  h = await timedHint();
+  check((h.glow === 1 || /tangled/.test(h.msg)) && h.ms < 400, `${tag}: off the stored solution: feedback in ${Math.round(h.ms)} ms ("${h.msg}")`);
+
+  // --- a dead end and Back to solvable ------------------------------------------------------
+  const deadMoves = await page.evaluate(() => {
+    const { ctx } = window.tincture;
+    const R = ctx.puzzles.lift;
+    const L = ctx.puzzles.liftLevels.levelById('village');
+    for (let seed = 1; seed < 40; seed++) {
+      let x = seed * 48271;
+      const r = () => { x = (x * 16807) % 2147483647; return x / 2147483647; };
+      let s = R.newState(L);
+      const moves = [];
+      for (let k = 0; k < 160 && !R.isDone(s); k++) {
+        const ms = R.legalMoves(L, s);
+        if (!ms.length) break;
+        const places = ms.filter((m) => m.t === 'place');
+        const pool = places.length && r() < 0.85 ? places : ms;
+        const m = pool[Math.floor(r() * pool.length)];
+        s = R.apply(L, s, m).state;
+        moves.push(R.encodeMove(m));
+        const v = R.verdict(L, s);
+        if (v === 'dead' && !R.isStuck(L, s)) return moves; // dead, but jars can still move: the button sits next to Hint
+        if (v === 'dead') break;
+      }
+    }
+    return null;
+  });
+  must(!!deadMoves, `${tag}: a dead end on the village painting`);
+  await page.evaluate((moves) => {
+    const { game, ctx } = window.tincture;
+    ctx.back();
+    game.act(ctx.sim.lift.startPainting, { levelId: 'village' });
+    for (const m of moves) game.act(ctx.sim.lift.move, { move: m });
+  }, deadMoves);
+  await page.evaluate(() => window.tincture.ctx.navigate('lift'));
+  await page.waitForSelector('#screen-lift #lf-lanes .lf-front', { state: 'visible' });
+  await idle(page);
+  await page.waitForSelector('#lf-backBtn', { state: 'visible', timeout: 4000 }).catch(() => {});
+  check(await page.locator('#lf-backBtn').isVisible(), `${tag}: a proven dead end shows Back to solvable`);
+  check(await page.locator('#lf-hintBtn').isVisible(), `${tag}: next to Hint`);
+  h = await timedHint();
+  check(/tangled/.test(h.msg) && h.glow === 0, `${tag}: Hint says the painting has gotten tangled ("${h.msg.slice(0, 60)}…")`);
+  await geometry(page, `${tag} dead end`);
+  await shot('16-lift-back-offered');
+  const n0 = await page.evaluate(() => window.tincture.game.state.lift.game.moves.length);
+  await tap(page, '#lf-backBtn');
+  await page.waitForTimeout(150);
+  await shot('17-lift-back-stepping');
+  await page.waitForFunction(() => !window.__lf.debugLift().stepping && /Took back/.test(document.querySelector('#lf-msg').textContent), null, { timeout: 15000 }).catch(() => {});
+  const back = await page.evaluate(() => {
+    const { ctx, game } = window.tincture;
+    const cur = ctx.sim.lift.current(game.state);
+    return { n: game.state.lift.game.moves.length, dead: ctx.sim.lift.deadEnd(game.state), nudge: ctx.puzzles.lift.canNudge(cur.s), msg: document.querySelector('#lf-msg').textContent, btn: !document.querySelector('#lf-backBtn').hidden };
+  });
+  check(back.n < n0 && !back.dead, `${tag}: Back to solvable took back ${n0 - back.n} move(s) to a solvable position`);
+  check(back.nudge, `${tag}: the spare bench spot is not spent`);
+  check(/Took back \d+ moves?\./.test(back.msg) && !back.btn, `${tag}: a line says so and the button is gone ("${back.msg}")`);
+  await idle(page);
+  await shot('18-lift-back-done');
+  h = await timedHint();
+  check(h.glow === 1, `${tag}: and Hint points the way from there ("${h.msg}")`);
+
+  // From the gallery menu on a fine painting.
+  await tap(page, '#lf-levelsBtn');
+  await page.waitForSelector('#lf-levelSheet:not([hidden])', { state: 'visible' });
+  const n1 = await page.evaluate(() => window.tincture.game.state.lift.game.moves.length);
+  await tap(page, '#lf-backMenuBtn');
+  await page.waitForFunction(() => /on track/.test(document.querySelector('#lf-msg').textContent), null, { timeout: 8000 }).catch(() => {});
+  check(/You.re on track/.test(await page.locator('#lf-msg').textContent()), `${tag}: from the menu on a fine painting: "You're on track"`);
+  check(await page.evaluate(() => window.tincture.game.state.lift.game.moves.length) === n1, `${tag}: and nothing was taken back`);
+
+  check(errors.length === 0, `${tag}: no page or console errors (${errors.slice(0, 3).join(' | ')})`);
+  await context.close();
+}
+
 /** From the workshop: Next names the Lifting Table, the sheet buys it, the ceremony plays, a two-choice card offers the way in. */
 async function workshopWalk(viewport, tag) {
   const { context, page } = await newPage(viewport);
@@ -388,6 +560,7 @@ try {
   await workshopWalk({ width: 390, height: 844 }, '390');
   await walk({ width: 390, height: 844 }, '390');
   await walk({ width: 360, height: 740 }, '360');
+  await hintWalk({ width: 390, height: 844 }, '390');
 } catch (e) {
   failures++;
   console.error('FAIL', e && e.stack ? e.stack : e);

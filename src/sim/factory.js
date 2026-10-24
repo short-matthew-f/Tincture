@@ -756,6 +756,16 @@ export function purifyBatch(state, args = {}, now = 0) {
   return { ok: true, jars: kept, coins: sold + reward, reward, purity, tier: t, murky };
 }
 
+/**
+ * purifySolved(state, {batchId, tier, puzzle}, now) -> purifyBatch's result for a
+ * solved board. The Murky bonus follows the puzzle's own flag at completion
+ * (puzzle.murky), so a batch whose murk she cleared mid-puzzle (0.4.1,
+ * puzzles/purify.clearMurk) pays the usual amount.
+ */
+export function purifySolved(state, { batchId, tier, puzzle } = {}, now = 0) {
+  return purifyBatch(state, { batchId, tier, murky: !!(puzzle && puzzle.murky) }, now);
+}
+
 /** muddyValue(state, now) -> coins every waiting muddy batch would sell for as is (the "Sell all" confirm line). */
 export function muddyValue(state, now = 0) {
   let coins = 0;

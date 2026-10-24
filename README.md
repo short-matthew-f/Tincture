@@ -111,6 +111,19 @@ and its offline cache: https://short-matthew-f.github.io/Tincture/proto/
 
 ## Status
 
+- **0.4.1** (playtest: stuck in the vial and sand art games): the Lifting
+  Table's Hint answers every time. Tapped while the belt was still running it
+  used to only fast-forward the belt; now it waits for the belt, glows the jar
+  and names it ("Try the Madder Red jar next."). When the solver runs out of
+  budget it gives a sensible best guess, and a proven dead end says so. Both
+  Purify and the Lifting Table get "Back to solvable": after every move the
+  solver checks the position, and on a proven dead end one button quickly
+  takes back just the moves it needs. The Lifting Table's spare bench spot is
+  never spent; on Relaxed, the spare tube is offered when it would help.
+  Purify's Murky chip now clears the cloudy layers in place, keeping every
+  pour. That batch then pays the usual amount; the remembered setting for new
+  batches is its own line under "This batch". The prototype gets the same
+  Lifting Table fixes.
 - **0.4.0** (the playtester's three favorites join the game): the Winding
   Room (Skein Stacks, 12 colors / 1,500 coins), the Lifting Table (27
   paintings, 18 colors / 3,500) and the Dye Garden (Wander and Harvest

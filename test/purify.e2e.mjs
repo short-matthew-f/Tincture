@@ -7,8 +7,13 @@
 //    first-Murky bubble shows once, pours reveal layers for good, undo never
 //    re-hides, a reload keeps the reveal state, colorblind patterns never land
 //    on a cloudy layer, and a solve pays with "the Murky bonus";
-//  - the board's Murky chip turns it off (starts over) and the tier switch opens
-//    a Master board in strongly distinct colors;
+//  - 0.4.1: the board's Murky chip clears the murk in place (tap, "Tap again"):
+//    every layer revealed, every pour kept, undo still works, the remembered
+//    setting is left alone, a gentle one-line note, and the solve pays the usual
+//    amount (no Murky bonus); the "New batches start …" line sets the setting;
+//  - the tier switch ("Start over on") opens a Master board in strongly distinct
+//    colors; a dead end reached by touch shows the stuck note with "Back to
+//    solvable", which steps back to a shelf the solver can finish;
 //  - no horizontal scroll, no page errors.
 // Run: node test/purify.e2e.mjs   (screenshots: $PURIFY_SHOTS or the OS temp dir)
 
@@ -104,6 +109,7 @@ async function seed(page) {
       st.muddyBatches = [
         { id: 'mb1', color: 'blush', jars: 5, value: 50, at: 0, tier: null },
         { id: 'mb2', color: 'blush', jars: 5, value: 50, at: 0, tier: null },
+        { id: 'mb3', color: 'blush', jars: 5, value: 50, at: 0, tier: null },
       ];
       st.activePuzzles = { grading: null, purify: null, packing: null, pendingTints: [] };
       return {};
@@ -263,29 +269,117 @@ async function walk(viewport, tag) {
   check(/Murky bonus/.test(await result.innerText()), `${tag}: the reward line names the Murky bonus`);
   check(await page.evaluate(() => window.tincture.game.state.coins) > coins0, `${tag}: coins landed`);
 
-  // --- the next batch: Murky off on the board, then Master -----------------------------
+  // --- the next batch: Murky off mid-puzzle, in place (0.4.1) ---------------------------
   await tap(page, '#screen-purify [data-action="next-batch"]');
   await page.waitForSelector('#screen-purify [data-shelf] [data-tube]', { state: 'visible' });
   st = await purifyState(page);
   check(st.murky && st.batchId === 'mb2', `${tag}: the next batch keeps Murky on`);
+  moves = await solution(page);
+  for (const [a, b] of moves.slice(0, 2)) await pourByTap(page, a, b);
+  await page.waitForTimeout(500);
+  const pre = await purifyState(page);
+  check(pre.moves === 2 && pre.hidden > 0, `${tag}: two pours, ${pre.hidden} layers still cloudy`);
+  check(/This batch/i.test(await page.locator('#screen-purify [data-tools]').innerText()), `${tag}: the board's switches sit under "This batch"`);
   await tap(page, '#screen-purify [data-action="murky-toggle"]');
-  await page.waitForTimeout(250);
+  await page.waitForTimeout(150);
+  check(/Clear the murk\? Tap again/.test(await page.locator('#screen-purify [data-action="murky-toggle"]').innerText()), `${tag}: the chip asks once before clearing`);
+  check((await purifyState(page)).murky, `${tag}: nothing changes on the first tap`);
+  await tap(page, '#screen-purify [data-action="murky-toggle"]');
+  await page.waitForTimeout(260);
+  await page.locator('#screen-purify [data-shelf]').scrollIntoViewIfNeeded();
+  await shot('06-murky-off-reveal');
   st = await purifyState(page);
-  check(!st.murky && st.hidden === 0, `${tag}: the board's chip turns Murky off (all clear)`);
-  check(await page.evaluate(() => window.tincture.game.state.settings.purifyMurky === false), `${tag}: and remembers it`);
+  check(!st.murky && st.hidden === 0, `${tag}: Murky off: every cloudy layer revealed`);
+  check(st.moves === 2 && st.tubes === pre.tubes && st.batchId === 'mb2', `${tag}: no restart: the same shelf, both pours kept`);
+  check(await page.locator('#screen-purify .pu-clearing').count() > 0, `${tag}: the layers clear with a soft fade`);
+  const noteTxt = (await page.locator('#screen-purify [data-note]').innerText().catch(() => '')).trim();
+  check(/Cleared the murk\. This batch pays the usual amount\./.test(noteTxt), `${tag}: one gentle line says so ("${noteTxt}")`);
+  const noteColor = await page.locator('#screen-purify [data-note]').evaluate((el) => getComputedStyle(el).color).catch(() => '');
+  check(!/rgb\((1[5-9]\d|2\d\d), ?([0-6]?\d), ?([0-6]?\d)\)/.test(noteColor), `${tag}: the note is not red (${noteColor})`);
+  check(await page.evaluate(() => window.tincture.game.state.settings.purifyMurky === true), `${tag}: the remembered setting is left alone`);
+  check(/New batches start Murky/.test(await page.locator('#screen-purify [data-pref]').innerText()), `${tag}: the line for new batches says Murky`);
+  check(!/Murky/.test(await page.locator('#screen-purify [data-subtitle]').innerText()), `${tag}: the subtitle drops Murky`);
+  await page.waitForTimeout(700);
+  dh = await drawnHidden(page);
+  check(dh.count === 0, `${tag}: no cloudy layer left on the shelf`);
+  await tap(page, '#screen-purify [data-action="undo"]');
+  await page.waitForTimeout(200);
+  st = await purifyState(page);
+  check(st.hidden === 0 && !st.murky, `${tag}: undo across the switch works and re-hides nothing`);
+  // Finish it: the usual pay, no Murky bonus.
+  moves = await solution(page);
+  for (const [a, b] of moves) await pourByTap(page, a, b);
+  const res2 = await page.waitForSelector('#screen-purify [data-result]', { state: 'visible', timeout: 8000 }).catch(() => null);
+  must(!!res2, `${tag}: the cleared board solves by touch`);
+  await page.waitForTimeout(900);
+  check(!/Murky bonus/.test(await res2.innerText()), `${tag}: the cleared batch pays the usual amount (no Murky bonus line)`);
+
+  // --- the last batch: Master, a dead end, Back to solvable --------------------------------
+  await tap(page, '#screen-purify [data-action="next-batch"]');
+  await page.waitForSelector('#screen-purify [data-shelf] [data-tube]', { state: 'visible' });
+  st = await purifyState(page);
+  check(st.murky && st.batchId === 'mb3', `${tag}: new batches still start Murky`);
   await tap(page, '#screen-purify [data-action="restart-tier"][data-tier="master"]');
   await page.waitForTimeout(600);
   st = await purifyState(page);
-  must(st.tier === 'master' && !st.murky, `${tag}: the tier switch opens a Master board`);
+  must(st.tier === 'master' && st.murky, `${tag}: "Start over on Master" opens a Master · Murky board`);
   check(st.colors.length === 9, `${tag}: Master sorts 9 colors`);
+  check(/Master · Murky/.test(await page.locator('#screen-purify [data-subtitle]').innerText()), `${tag}: the subtitle says Master · Murky`);
   await shot('04-master-board');
   await noHScroll(page, `${tag} master board`);
-  // Master on Murky too, for the record.
-  await tap(page, '#screen-purify [data-action="murky-toggle"]');
-  await page.waitForTimeout(500);
-  st = await purifyState(page);
-  check(st.murky && st.tier === 'master', `${tag}: Master · Murky combines`);
-  check(/Master · Murky/.test(await page.locator('#screen-purify [data-subtitle]').innerText()), `${tag}: the subtitle says Master · Murky`);
+  check(await page.locator('#screen-purify [data-stuck]').count() === 0, `${tag}: no stuck note on a fresh board`);
+  // A short run of pours into a dead end (found in the page by the rules), made by touch.
+  const deadRun = await page.evaluate(() => {
+    const P = window.tincture.ctx.puzzles.purify;
+    const e = window.tincture.game.state.activePuzzles.purify;
+    let best = null;
+    let x = 12345;
+    const rnd = () => { x = (x * 16807) % 2147483647; return x / 2147483647; };
+    for (let attempt = 0; attempt < 300; attempt++) {
+      const q = { tubes: e.puzzle.tubes.map((t) => t.slice()), capacity: e.puzzle.capacity, history: [], moves: 0 };
+      const run = [];
+      for (let k = 0; k < 14; k++) {
+        const opts = [];
+        for (let a = 0; a < q.tubes.length; a++) for (let b = 0; b < q.tubes.length; b++) if (P.canPour(q, a, b) && !P.isCorked(q, a)) opts.push([a, b]);
+        if (!opts.length || P.isSolved(q)) break;
+        const mv = opts[Math.floor(rnd() * opts.length)];
+        P.pour(q, mv[0], mv[1]);
+        run.push(mv);
+        if (P.verdict(q) === 'dead') { if (!best || run.length < best.length) best = run.slice(); break; }
+      }
+      if (best && best.length <= 6) break;
+    }
+    return best;
+  });
+  must(!!deadRun, `${tag}: a dead end exists within a few pours`);
+  for (const [a, b] of deadRun) await pourByTap(page, a, b);
+  await page.waitForSelector('#screen-purify [data-stuck]', { state: 'visible', timeout: 4000 }).catch(() => {});
+  check(await page.locator('#screen-purify [data-stuck] [data-action="back-solvable"]').count() === 1, `${tag}: the dead end shows the stuck note with Back to solvable (${deadRun.length} pours)`);
+  const stuckTxt = await page.locator('#screen-purify [data-stuck]').innerText().catch(() => '');
+  check(/tangled/.test(stuckTxt), `${tag}: the stuck note explains it gently`);
+  await page.locator('#screen-purify [data-stuck]').scrollIntoViewIfNeeded();
+  await shot('07-back-to-solvable-offered');
+  const hist0 = await page.evaluate(() => window.tincture.game.state.activePuzzles.purify.puzzle.history.length);
+  await tap(page, '#screen-purify [data-action="back-solvable"]');
+  await page.waitForTimeout(120);
+  await shot('08-back-to-solvable-stepping');
+  await page.waitForFunction(() => /Took back/.test((document.querySelector('#screen-purify [data-note]') || {}).textContent || ''), null, { timeout: 6000 }).catch(() => {});
+  const after = await page.evaluate(() => {
+    const P = window.tincture.ctx.puzzles.purify;
+    const e = window.tincture.game.state.activePuzzles.purify;
+    return { hist: e.puzzle.history.length, verdict: P.verdict(e.puzzle, { nodeCap: 20000 }), note: (document.querySelector('#screen-purify [data-note]') || {}).textContent || '' };
+  });
+  check(after.hist < hist0 && after.verdict !== 'dead', `${tag}: Back to solvable stepped back ${hist0 - after.hist} pour(s) to a shelf that can be finished (${after.verdict})`);
+  check(/Took back \d+ pours?\./.test(after.note), `${tag}: a line says how many pours came back ("${after.note}")`);
+  await page.waitForTimeout(300);
+  check(await page.locator('#screen-purify [data-stuck]').count() === 0, `${tag}: the stuck note is gone`);
+  await shot('09-back-to-solvable-done');
+
+  // The line for new batches sets the remembered choice; the chip clears this batch.
+  await tap(page, '#screen-purify [data-action="murky-pref"]');
+  await page.waitForFunction(() => window.tincture.game.state.settings.purifyMurky === false, null, { timeout: 3000 }).catch(() => {});
+  check(await page.evaluate(() => window.tincture.game.state.settings.purifyMurky === false), `${tag}: "Start them clear" sets new batches to clear`);
+  check((await purifyState(page)).murky, `${tag}: and leaves this batch Murky`);
   await page.locator('#screen-purify [data-tools]').scrollIntoViewIfNeeded();
   await shot('05-board-switches');
   await noHScroll(page, `${tag} master murky`);

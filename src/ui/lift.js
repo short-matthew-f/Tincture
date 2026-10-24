@@ -34,8 +34,8 @@ import { LEVELS, PALETTE, MECHANICS, BANDS, levelById } from '../puzzles/lift-le
 import * as R from '../puzzles/lift.js';
 
 const {
-  isLegal, isDone, isStuck, benchCap, canNudge, blockedReason, frontJar, laneLeft, laneOpen, canLift, hint, isCovered,
-  encodeMove,
+  isLegal, isDone, isStuck, benchCap, canNudge, blockedReason, frontJar, laneLeft, laneOpen, canLift, isCovered,
+  encodeMove, bestHint, guessMove, frontUnit,
 } = R;
 
 let C = null;
@@ -203,7 +203,7 @@ const CSS = `
 #lf-belt .lf-jar .lf-num { color: #FFF8E6; }
 .lf-jar.lf-full .lf-cork { opacity: 1; transform: none; }
 .lf-jar.lf-hinted { animation: lf-hintpulse 1.1s ease-in-out infinite; border-radius: 12px; }
-@keyframes lf-hintpulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(226,176,74,0); } 50% { box-shadow: 0 0 0 6px rgba(226,176,74,.6); } }
+@keyframes lf-hintpulse { 0%, 100% { box-shadow: 0 0 0 3px rgba(226,176,74,.85); } 50% { box-shadow: 0 0 0 7px rgba(226,176,74,.55); } }
 .lf-jar.lf-waiting .lf-glass { box-shadow: inset 0 0 0 1.5px rgba(42,38,34,.34), 0 0 0 2px rgba(255,248,225,.35); }
 .lf-jar.lf-mystery .lf-glass { background: repeating-linear-gradient(45deg, #D9C7A6 0 4px, #CDB894 4px 8px); }
 .lf-jar.lf-mystery .lf-tint, .lf-jar.lf-mystery .lf-band, .lf-jar.lf-mystery .lf-gl { display: none !important; }
@@ -213,6 +213,11 @@ const CSS = `
 .lf-msgrow { display: flex; align-items: center; gap: 6px; min-height: 46px; flex: none; }
 #lf-msg { flex: 1; margin: 0; font-size: 13.5px; line-height: 1.3; font-weight: 500; }
 .lf-msgrow .btn { flex: 0 0 auto; white-space: nowrap; }
+/* three buttons (a dead end): the message takes its own line above them */
+.lf-msgrow.lf-wide { flex-wrap: wrap; row-gap: 4px; }
+.lf-msgrow.lf-wide #lf-msg { flex: 1 1 100%; min-height: calc(3 * 1.3em); }
+.lf-msgrow.lf-wide .btn { flex: 1 1 auto; }
+#lf-msg.lf-hintmsg { font-weight: 600; }
 
 /* supply lanes: the worktable */
 .lf-lanes { display: grid; grid-template-columns: repeat(var(--lanes), minmax(0, 1fr)); gap: 6px; padding: 7px 6px 6px; border-radius: 14px; margin-top: auto; flex: none;
@@ -304,6 +309,11 @@ function injectCss() {
 
 // ---------- the screen's own state ----------
 let L = null, G = null, busy = false, skip = false, queued = null, hinted = null, note = '', howStep = 0;
+// 0.4.1: `dead` = the rules prove no order of jars clears the painting from here
+// (checked after every move, cached by position); `pendingHint` = Hint was
+// tapped while the belt ran (it answers once the belt settles); `stepping` =
+// "Back to solvable" is walking back.
+let dead = false, deadTimer = 0, pendingHint = false, stepping = false, laidOut = false;
 let lastOpen = [];
 let visible = false, gen = 0, guideApi = null, built = false, lastSig = '';
 const skipWaiters = new Set();
@@ -356,8 +366,11 @@ async function run(fn) {
       afterMove();
       const q = queued;
       queued = null;
-      if (q && !isDone(G.state)) setTimeout(() => act(q), 0);
-    } else queued = null;
+      if (q && !isDone(G.state)) { pendingHint = false; setTimeout(() => act(q), 0); } else {
+        scheduleDeadCheck();
+        if (pendingHint) { pendingHint = false; if (!isDone(G.state)) setTimeout(doHint, 0); }
+      }
+    } else { queued = null; pendingHint = false; }
   }
 }
 
@@ -720,13 +733,31 @@ function render(s = G && G.state) {
 
   // buttons, message
   const stuck = !busy && isStuck(L, s);
+  const showBack = !busy && !stepping && !isDone(s) && (stuck || dead) && G.past.length > 0;
   const sb2 = $('#lf-stuckBtn');
-  sb2.hidden = !stuck;
-  sb2.textContent = canNudge(s) ? 'Add a bench spot' : 'Start over';
+  // With "Back to solvable" on offer, "Start over" stays in the gallery sheet.
+  sb2.hidden = !stuck || (showBack && !canNudge(s));
+  sb2.textContent = canNudge(s) ? (showBack ? 'Spare spot' : 'Add a bench spot') : 'Start over';
+  sb2.classList.toggle('btn-primary', !showBack);
+  sb2.classList.toggle('btn-paper', showBack);
+  $('#lf-backBtn').hidden = !showBack;
   $('#lf-hintBtn').hidden = stuck;
-  $('#lf-undoBtn').disabled = !G.past.length;
-  $('#lf-hintBtn').disabled = isDone(s);
-  $('#lf-msg').textContent = busy ? 'Lifting…' : message(s);
+  $('#lf-undoBtn').disabled = !G.past.length || stepping;
+  $('#lf-hintBtn').disabled = isDone(s) || stepping;
+  const msgEl = $('#lf-msg');
+  msgEl.textContent = busy ? 'Lifting…' : message(s);
+  msgEl.classList.toggle('lf-hintmsg', !!(hinted && note && !busy));
+  const row = $('.lf-msgrow');
+  const shown = [...row.querySelectorAll('.btn')].filter((b) => !b.hidden).length;
+  const wide = shown >= 3;
+  // Three buttons (a dead end): the message takes its own line above them and
+  // the painting makes room, once, when that layout comes or goes (never for a
+  // message that is merely longer, so the painting does not jump).
+  if (row.classList.contains('lf-wide') !== wide) {
+    row.classList.toggle('lf-wide', wide);
+    if (laidOut && !busy) requestAnimationFrame(() => { if (visible && L && G && !busy) sizePic(); });
+  }
+  laidOut = true;
 
   if (hinted && !busy) {
     const el = targetFor(hinted);
@@ -738,10 +769,12 @@ function message(s) {
   if (note) return note;
   if (isDone(s)) return 'All lifted. Lovely work.';
   if (isStuck(L, s)) {
+    if (!G.past.length) return 'The table is full for now. Start this painting fresh from the gallery wall.';
     return canNudge(s)
-      ? 'The table is full for now. Undo a step, or take one free spare bench spot for this painting.'
-      : 'The table is full for now. Undo a few steps, or start this painting fresh.';
+      ? 'The table is full for now. Back to solvable takes back just the moves it needs, or take one free spare bench spot.'
+      : 'The table is full for now. Back to solvable takes back just the moves it needs.';
   }
+  if (dead) return 'This one has gotten tangled: no order of jars clears it from here. Back to solvable takes back just the moves it needs.';
   const waiting = s.belt.filter((j) => !canLift(L, s, j));
   if (s.belt.length >= L.slots) {
     return s.bench.length < benchCap(L, s)
@@ -915,11 +948,13 @@ function sigOfGame() {
 function act(m) {
   // Lane taps queue up (lane numbers never shift); belt and bench slots can
   // shift while jars leave, so those taps only fast-forward.
-  if (busy) { if (m.t === 'place') queued = m; skipAll(); return; }
+  if (stepping) return;
+  if (busy) { if (m.t === 'place') queued = m; pendingHint = false; skipAll(); return; }
   if (!G) return;
   note = '';
   if (!isLegal(L, G.state, m)) { explainBlocked(m); return; }
   hinted = null;
+  dead = false;
   const res = C.game.act(LS().move, { move: encodeMove(m) });
   if (!res || !res.ok) { syncG(); render(); return; }
   const staged = res.staged;
@@ -956,15 +991,100 @@ function explainBlocked(m) {
 }
 
 function doUndo() {
-  if (busy) { skipAll(); return; }
+  if (stepping) return;
+  if (busy) { pendingHint = false; skipAll(); return; }
   if (!G || !G.past.length) return;
-  note = ''; hinted = null;
+  note = ''; hinted = null; dead = false;
   const before = snapRects();
   C.game.act(LS().undo);
   syncG();
   syncPainter(G.state);
   render();
   flip(before, 200);
+  scheduleDeadCheck();
+}
+
+// ---------- dead ends and "Back to solvable" (0.4.1) ----------
+/** After every move: do the rules prove this painting can't be cleared from here? (small node cap, cached by position) */
+function scheduleDeadCheck() {
+  clearTimeout(deadTimer);
+  deadTimer = setTimeout(() => {
+    deadTimer = 0;
+    if (!visible || !G || busy || stepping || revealing) return;
+    let d = false;
+    try { d = !!LS().deadEnd(S()); } catch (e) { console.error(e); }
+    if (d !== dead) { dead = d; render(); }
+  }, 40);
+}
+
+/**
+ * Back to solvable: walk back through her moves (a few positions per slice, so
+ * the table stays responsive) to the latest one the rules prove solvable, then
+ * take the moves back quickly, one after another. The spare bench spot is not
+ * spent. From the gallery menu on a painting that is fine, it says so.
+ */
+async function doBack() {
+  if (!G || stepping) return;
+  if (busy) { skipAll(); return; }
+  const states = LS().history(S());
+  const myGen = gen;
+  stepping = true;
+  hinted = null;
+  note = 'Finding a good spot to step back to…';
+  render();
+  let idx = states.length - 1;
+  try {
+    const it = R.backToSolvableSteps(L, states);
+    for (;;) {
+      const t0 = performance.now();
+      let r;
+      do { r = it.next(); } while (!r.done && performance.now() - t0 < 14);
+      if (r.done) { idx = r.value; break; }
+      await nap(0);
+      if (myGen !== gen) return;
+    }
+  } catch (e) {
+    console.error(e);
+  } finally {
+    if (myGen !== gen) stepping = false;
+  }
+  const steps = states.length - 1 - idx;
+  if (steps <= 0) {
+    stepping = false;
+    dead = false;
+    note = 'You\u2019re on track. This painting can still be cleared from here.';
+    render();
+    return;
+  }
+  try {
+    if (reduced()) {
+      C.game.act(LS().backToSolvable, { index: idx });
+      syncG();
+      syncPainter(G.state);
+    } else {
+      const gap = Math.max(70, Math.min(160, 1100 / steps));
+      for (let k = 0; k < steps; k++) {
+        if (myGen !== gen) return;
+        const before = snapRects();
+        C.game.act(LS().undo);
+        syncG();
+        syncPainter(G.state);
+        note = `Stepping back… ${k + 1} of ${steps}`;
+        render();
+        flip(before, Math.min(160, gap));
+        sfx('plink', steps - k);
+        await nap(gap);
+      }
+    }
+  } finally {
+    if (myGen === gen) stepping = false;
+  }
+  if (myGen !== gen) return;
+  dead = false;
+  note = `Took back ${plural(steps, 'move', 'moves')}. This painting can be cleared from here.`;
+  render();
+  try { if (C.haptics) C.haptics.light(); } catch { /* fine */ }
+  scheduleDeadCheck();
 }
 
 function restart() {
@@ -973,43 +1093,81 @@ function restart() {
 }
 
 function doStuck() {
-  if (busy || !G) return;
+  if (busy || stepping || !G) return;
   if (canNudge(G.state)) {
     C.game.act(LS().nudge);
     syncG();
     note = 'A spare bench spot, just for this painting.';
     hinted = null;
+    dead = false;
     render();
+    scheduleDeadCheck();
   } else restart();
 }
 
+/** One line that names the jar the hint points at (and why, when it is a best guess). */
+function hintLine(hn) {
+  const m = hn.move;
+  const s = G.state;
+  const guess = hn.kind === 'guess';
+  if (m.t === 'place') {
+    const u = frontUnit(L, s, m.i);
+    const nm = u.length > 1 ? `tied ${jarName(u[0])} and ${jarName(u[1])}` : jarName(u[0]);
+    return guess ? `Try the ${nm} next: its color is close to the bottom edge.` : `Try the ${nm} next.`;
+  }
+  if (m.t === 'park') {
+    const nm = jarName(s.belt[m.i]);
+    return guess ? `To make room, try resting the ${nm} on the bench.` : `Try resting the ${nm} on the bench.`;
+  }
+  return `Try bringing the ${jarName(s.bench[m.i])} back to the belt.`;
+}
+
+/**
+ * Hint (0.4.1). Always visible feedback: "Looking…" at once, then the jar glows
+ * and the line names it. A tap while the belt runs fast-forwards it and answers
+ * as soon as it settles (it used to only fast-forward, so Hint seemed to do
+ * nothing). When the solver can't decide within its budget the hint is a
+ * sensible guess, never nothing; a proven dead end says so and offers "Back to
+ * solvable".
+ */
 function doHint() {
-  if (busy) { skipAll(); return; }
-  if (!G) return;
+  if (!G || stepping) return;
+  if (busy) { pendingHint = true; skipAll(); return; }
+  if (isDone(G.state)) return;
+  hinted = null;
   note = 'Looking…';
   render();
   const myGen = gen;
+  const key = sigOfGame();
   setTimeout(() => {
-    if (myGen !== gen || !G) return;
-    try {
-      const hn = hint(L, G.state, 8000);
-      if (hn.kind === 'solution' || hn.kind === 'lift') {
-        hinted = hn.move;
-        note = hn.move.t === 'park' ? 'Try resting this jar on the bench.' : hn.move.t === 'unpark' ? 'Try bringing this jar back.' : 'Try this jar next.';
-      } else if (hn.kind === 'tangled') {
-        hinted = null;
-        note = canNudge(G.state)
-          ? 'This one has gotten tangled: no order of jars clears it from here. Undo a few steps, or add a spare bench spot.'
-          : 'This one has gotten tangled: no order of jars clears it from here. Undo a few steps, or start fresh.';
-      } else {
-        note = 'Try a jar whose color is showing along the bottom edge.';
-      }
-    } catch (e) {
+    if (myGen !== gen || !G || busy || stepping || key !== sigOfGame()) return;
+    let hn;
+    try { hn = bestHint(L, G.state); } catch (e) {
       console.error(e);
-      note = 'Try a jar whose color is showing along the bottom edge.';
+      try { hn = guessMove(L, G.state); } catch { hn = null; }
     }
+    if (!hn || hn.kind === 'dead') {
+      dead = true;
+      hinted = null;
+      note = canNudge(G.state)
+        ? 'This one has gotten tangled: no order of jars clears it from here. Back to solvable takes back just the moves it needs, or take a spare bench spot.'
+        : 'This one has gotten tangled: no order of jars clears it from here. Back to solvable takes back just the moves it needs.';
+      render();
+      const b = $('#lf-backBtn');
+      if (b && !b.hidden) anim(b, [{ transform: 'scale(1)' }, { transform: 'scale(1.06)' }, { transform: 'none' }], { duration: reduced() ? 0 : 320, easing: 'ease-out' });
+      return;
+    }
+    if (hn.kind === 'none') { note = ''; render(); return; }
+    hinted = hn.move;
+    note = hintLine(hn);
     render();
-  }, 30);
+    const el = targetFor(hinted);
+    if (el) {
+      try { el.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch { /* fine */ }
+      const jar = el.querySelector('.lf-jar');
+      if (jar && !reduced()) anim(jar, [{ transform: 'none' }, { transform: 'translateY(-5px) scale(1.06)' }, { transform: 'none' }], { duration: 360, easing: 'ease-out' });
+    }
+  }, 20);
 }
 
 let revealing = false;
@@ -1052,11 +1210,12 @@ function startLevel(id, { fresh = false } = {}) {
   syncG();
   L = levelById(S().lift.cur) || LEVELS[0];
   if (!G) { C.game.act(LS().startPainting, { levelId: L.id }); syncG(); }
-  hinted = null; note = '';
+  hinted = null; note = ''; dead = false; pendingHint = false; stepping = false; laidOut = false;
   lastOpen = L.lanes.map((_, i) => laneOpen(L, G.state, i));
   render();
   sizePic();
   maybeIntro();
+  scheduleDeadCheck();
 }
 
 // ---------- sheets ----------
@@ -1261,6 +1420,7 @@ function skeleton() {
 <div class="lf-msgrow" data-coach="lift-msg">
 <p id="lf-msg" role="status" aria-live="polite"></p>
 ${btn('lf-stuckBtn', 'Add a bench spot', ' hidden').replace('btn-paper', 'btn-primary')}
+${btn('lf-backBtn', 'Back to solvable', ' hidden').replace('btn-paper', 'btn-primary')}
 ${btn('lf-hintBtn', 'Hint')}
 ${btn('lf-undoBtn', 'Undo')}
 </div>
@@ -1272,7 +1432,7 @@ ${btn('lf-undoBtn', 'Undo')}
 <button type="button" class="lf-iconbtn lf-x" data-tap data-close aria-label="Close">&#10005;</button>
 <h2 id="lf-lvTitle">The gallery wall</h2>
 <p class="hint" style="margin:0">Any painting, in any order.</p>
-<div class="lf-settings">${btn('lf-restartBtn', 'Start this painting over')}${btn('lf-fastBtn', 'Fast belt', ' aria-pressed="false"')}</div>
+<div class="lf-settings">${btn('lf-backMenuBtn', 'Back to solvable')}${btn('lf-restartBtn', 'Start this painting over')}${btn('lf-fastBtn', 'Fast belt', ' aria-pressed="false"')}</div>
 <div class="lf-wall" id="lf-wall"></div>
 </div></div>
 
@@ -1327,6 +1487,8 @@ function onClick(e) {
     case 'lf-undoBtn': doUndo(); return;
     case 'lf-stuckBtn': doStuck(); return;
     case 'lf-hintBtn': doHint(); return;
+    case 'lf-backBtn': doBack(); return;
+    case 'lf-backMenuBtn': closeSheet($('#lf-levelSheet')); doBack(); return;
     case 'lf-levelsBtn': if (!busy) openLevels(); return;
     case 'lf-howBtn': if (!busy) openHow(); return;
     case 'lf-glyphBtn': C.game.act(LS().setSetting, { key: 'glyphs', value: !set().glyphs }); render(); if (G) syncPainter(G.state); return;
@@ -1445,7 +1607,7 @@ export function liftCardSig(ctx, state) {
 /** debugLift() -> {busy, level, visible, painter}: a read for tests (test/lift.e2e.mjs). */
 export function debugLift() {
   return {
-    busy, visible, level: L ? L.id : null, revealing,
+    busy, visible, level: L ? L.id : null, revealing, dead, stepping, pendingHint,
     painter: { h: PT.h.slice(), parts: PT.parts.length, cs: PT.cs, maxParts: MAX_PARTS },
     canvases: ROOT ? ROOT.querySelectorAll('canvas').length : 0,
   };
@@ -1502,7 +1664,8 @@ export default {
     gen += 1;
     if (TL) { TL.skip = true; clearTimeout(TL.guard); }
     TL = null;
-    busy = false; skip = false; queued = null; revealing = false;
+    busy = false; skip = false; queued = null; revealing = false; pendingHint = false; stepping = false;
+    clearTimeout(deadTimer); deadTimer = 0;
     for (const f of [...skipWaiters]) f();
     if (raf) { cancelAnimationFrame(raf); raf = 0; }
     PT.parts.length = 0; PT.carts.length = 0;
@@ -1515,7 +1678,7 @@ export default {
   render(state) {
     if (!ROOT || !visible) return;
     if (!built) { if (unlocked()) this.show(); return; }
-    if (busy || revealing) return;
+    if (busy || revealing || stepping) return;
     // A game changed under the table (an imported save, a reset): pick it up again.
     if (sigOfGame() !== lastSig) startLevel(state.lift.cur);
   },

@@ -24,11 +24,17 @@
 //
 // Murky (a separate mode on any tier): layers below each tube's top start
 // hidden and are revealed for good once they reach the top (p.hidden).
+// clearMurk (0.4.1) turns Murky off mid-puzzle, in place, keeping every pour.
+//
+// Dead ends (0.4.1): verdict / isDeadEnd ask the solver from the current
+// position with a small node cap; backToSolvable steps back through the
+// history (historyTubes) to the latest position that is not proven dead.
 
 import {
   hexToRgb, rgbToHex, oklchToHex, hexToOklch, clampToGamut, deltaEHex, deltaE, rgbToOklab,
 } from '../color.js';
 import { shuffle, pick } from '../rng.js';
+import { lastSolvable } from './backtrack.js';
 
 export const MIN_COLORS = 4;
 export const MAX_COLORS = 9;
@@ -621,6 +627,101 @@ export function undo(p) {
   settle(p, last.from);
   settle(p, last.to);
   return { ok: true, from: last.to, to: last.from, moved: last.n };
+}
+
+/**
+ * clearMurk(p) -> {ok, revealed: [[tube, layer]…]}: Murky off for this puzzle,
+ * in place (0.4.1). Every cloudy layer is revealed for good, every pour so far
+ * is kept (history untouched), and the puzzle is no longer Murky, so a solve
+ * pays the usual amount (the pay reads p.murky at completion). Undo never
+ * re-hides a layer (settle() does nothing on a puzzle that is not Murky).
+ * `p.murkCleared` remembers that she chose this, so the batch is not restarted.
+ */
+export function clearMurk(p) {
+  if (!p || !p.murky) return { ok: false, revealed: [] };
+  const revealed = [];
+  for (let i = 0; i < p.tubes.length; i++) {
+    const n = hiddenCount(p, i);
+    for (let k = 0; k < n; k++) revealed.push([i, k]);
+  }
+  p.murky = false;
+  if (Array.isArray(p.hidden)) p.hidden = p.hidden.map(() => 0);
+  p.murkCleared = true;
+  return { ok: true, revealed };
+}
+
+// ---------------------------------------------------------------------------
+// Dead ends and "Back to solvable" (0.4.1)
+// ---------------------------------------------------------------------------
+//
+// verdict(p) runs solve() from the current position with a small node cap:
+// 'solvable' (a solution found), 'dead' (the search was exhausted: no order of
+// pours finishes this shelf with these tubes) or 'unknown' (the cap was
+// reached). Only 'dead' ever shows the button, so it never lies. Verdicts are
+// cached by the canonical position (tube order does not matter).
+
+/** Node cap for the after-every-pour dead-end check (a few ms on a phone). */
+export const DEAD_NODE_CAP = 1500;
+/** Node cap per position while stepping back through the history. */
+export const BACK_NODE_CAP = 4000;
+
+/** positionKey(p) -> the canonical shelf (tubes sorted, empties included, capacity). */
+export function positionKey(p) {
+  return `${p.capacity}|${p.tubes.map(encTube).sort().join(',')}`;
+}
+
+/**
+ * verdict(p, {nodeCap, cache}) -> 'solvable' | 'dead' | 'unknown'. `cache`
+ * (backtrack.verdictCache()) keeps answers by position; an 'unknown' is only
+ * reused for a cap no bigger than the one that produced it.
+ */
+export function verdict(p, { nodeCap = DEAD_NODE_CAP, cache = null } = {}) {
+  if (isSolved(p)) return 'solvable';
+  const key = positionKey(p);
+  const hit = cache ? cache.get(key) : null;
+  if (hit && (hit.v !== 'unknown' || hit.cap >= nodeCap)) return hit.v;
+  const r = solve({ tubes: p.tubes, capacity: p.capacity }, { nodeCap });
+  const v = r.ok ? 'solvable' : r.reason === 'stuck' ? 'dead' : 'unknown';
+  if (cache) cache.set(key, { v, cap: nodeCap });
+  return v;
+}
+
+/** isDeadEnd(p, opts) -> true only when the solver proves no order of pours finishes from here. */
+export function isDeadEnd(p, opts) {
+  return verdict(p, opts) === 'dead';
+}
+
+/** spareHelps(p, opts) -> true when the board is a dead end now but the free extra tube (not yet added) would rescue it. */
+export function spareHelps(p, opts) {
+  if (!p || p.extraTubeUsed || p.extraTube === false) return false;
+  return verdict({ tubes: [...p.tubes, []], capacity: p.capacity }, opts) === 'solvable';
+}
+
+/** historyTubes(p) -> [tubes after 0 pours, after 1, …, now] rebuilt by undoing the history on a copy. */
+export function historyTubes(p) {
+  const tubes = p.tubes.map((t) => t.slice());
+  const hist = Array.isArray(p.history) ? p.history : [];
+  const out = [tubes.map((t) => t.slice())];
+  for (let i = hist.length - 1; i >= 0; i--) {
+    const { from, to, n } = hist[i];
+    const B = tubes[to];
+    if (!B || !tubes[from]) break;
+    tubes[from].push(...B.splice(B.length - n, n));
+    out.push(tubes.map((t) => t.slice()));
+  }
+  return out.reverse();
+}
+
+/**
+ * backToSolvable(p, {nodeCap, cache}) -> {index, steps}: the latest position in
+ * her history that is not proven dead ('unknown' counts as solvable), and how
+ * many undos reach it (0 when she is fine where she is). Pure; nothing moves.
+ */
+export function backToSolvable(p, { nodeCap = BACK_NODE_CAP, cache = null } = {}) {
+  const states = historyTubes(p);
+  const n = states.length;
+  const index = lastSolvable(n, (i) => verdict({ tubes: states[i], capacity: p.capacity }, { nodeCap, cache }));
+  return { index, steps: n - 1 - index };
 }
 
 /** Add the one free empty tube; only on a board whose tier allows it (Relaxed). */

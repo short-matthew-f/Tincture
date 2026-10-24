@@ -1,5 +1,6 @@
 // puzzles/lift.js — The Lifting Table's rules (pure; ported from proto/lift/rules.js,
-// play rules, solver and hint unchanged). The authoring-time generator and the
+// play rules, solver and hint unchanged; 0.4.1 adds verdict, bestHint,
+// guessMove and backToSolvableIndex to both copies). The authoring-time generator and the
 // difficulty surveys (intendedOrder, generateQueues, casualRate, minParks, ...)
 // stay in proto/lift/ with gen-levels.mjs; they are not shipped.
 // No window/document/Date.now/Math.random. Colors are palette keys (one letter,
@@ -474,6 +475,138 @@ export function hint(L, s, cap = 20000, solution = L.solution) {
     if (ok) return { kind: 'lift', move: m };
   }
   return { kind: 'none' };
+}
+
+// ---------- dead ends, a hint that always answers, back to solvable (0.4.1) ----------
+//
+// verdict(L, s): 'solvable' | 'dead' | 'unknown'. Dead is only ever said when
+// it is proved: the table is stuck, or both the pruned and the unpruned search
+// ran out of positions. 'unknown' = the node cap was reached first.
+// bestHint(L, s): never comes back empty while a move exists: the stored
+// solution, the solver's first move, 'dead', or a sensible guess when the
+// solver can't decide within its budget. backToSolvableIndex(L, states): the
+// latest position in her history the rules can prove solvable.
+
+export const HINT_CAP = 2500; // per search; a hint stays well under 300 ms on a phone
+export const DEAD_CAP = 1200; // the after-every-move check
+export const BACK_CAP = 2500; // per position while stepping back
+export const BACK_BUDGET = 40000; // nodes for one "Back to solvable" walk
+
+// The stored solution's positions, once per painting: stateKey|moves -> its next move.
+const SOLUTION_KEYS = new WeakMap();
+function solutionKeys(L, solution) {
+  let m = SOLUTION_KEYS.get(L);
+  if (m && m.solution === solution) return m.keys;
+  const keys = new Map();
+  if (solution) {
+    let t = newState(L);
+    for (const str of solution.split(/\s+/).filter(Boolean)) {
+      keys.set(`${t.moves}|${stateKey(t)}`, str);
+      t = apply(L, t, decodeMove(str)).state;
+    }
+  }
+  SOLUTION_KEYS.set(L, { solution, keys });
+  return keys;
+}
+// The next move of the stored solution when s lies on it (a memoized solutionStep).
+export function onSolution(L, s, solution = L.solution) {
+  const str = solutionKeys(L, solution).get(`${s.moves}|${stateKey(s)}`);
+  return str ? decodeMove(str) : null;
+}
+
+export function verdict(L, s, { cap = DEAD_CAP, solution = L.solution } = {}) {
+  if (isDone(s)) return 'solvable';
+  if (isStuck(L, s)) return 'dead';
+  if (onSolution(L, s, solution)) return 'solvable';
+  const r = solve(L, s, { cap });
+  if (r.ok) return 'solvable';
+  if (!r.exhausted) return 'unknown';
+  const u = solve(L, s, { cap, prune: false });
+  return u.ok ? 'solvable' : u.exhausted ? 'dead' : 'unknown';
+}
+
+// How many cells sit below color k's lowest reachable cell, over the best column
+// (0 = it shows on the bottom edge now; Infinity = not in the picture any more).
+function depthOf(L, s, k) {
+  let best = Infinity;
+  for (let col = 0; col < L.W; col++) {
+    for (let r = s.h[col] - 1, d = 0; r >= 0 && d < best; r--, d++) {
+      if (L.cells[r][col] === k) { best = d + (isCovered(L, s, col) ? 0.5 : 0); break; }
+    }
+  }
+  return best;
+}
+const jarDepth = (L, s, j) => Math.min(...jarColors(j).filter((k) => jarWants({ n: 0, n2: 0, ...j }, k)).map((k) => depthOf(L, s, k)), Infinity);
+
+// A sensible next move when the solver can't decide: a jar that lifts now, else
+// make room by resting the belt jar whose color is deepest, else the lane or
+// bench jar whose color is nearest the bottom edge.
+export function guessMove(L, s) {
+  const moves = legalMoves(L, s);
+  if (!moves.length) return null;
+  for (const m of moves) {
+    const ok = m.t === 'place' ? frontUnit(L, s, m.i).some((j) => canLift(L, s, j)) : m.t === 'unpark' ? canLift(L, s, s.bench[m.i]) : false;
+    if (ok) return { kind: 'lift', move: m };
+  }
+  const brings = moves.filter((m) => m.t !== 'park');
+  const score = (m) => (m.t === 'place' ? Math.min(...frontUnit(L, s, m.i).map((j) => jarDepth(L, s, j))) : jarDepth(L, s, s.bench[m.i]));
+  if (brings.length) {
+    let best = brings[0], bs = score(best);
+    for (const m of brings.slice(1)) { const v = score(m); if (v < bs) { best = m; bs = v; } }
+    if (bs < Infinity) return { kind: 'guess', move: best };
+  }
+  const parks = moves.filter((m) => m.t === 'park');
+  if (parks.length) {
+    let best = parks[0], bs = jarDepth(L, s, s.belt[best.i]);
+    for (const m of parks.slice(1)) { const v = jarDepth(L, s, s.belt[m.i]); if (v > bs) { best = m; bs = v; } }
+    return { kind: 'guess', move: best };
+  }
+  return { kind: 'guess', move: brings[0] || moves[0] };
+}
+
+// The hint the table shows: { kind: 'solution' | 'lift' | 'guess', move } | { kind: 'dead' } | { kind: 'none' } (done).
+export function bestHint(L, s, { cap = HINT_CAP, solution = L.solution } = {}) {
+  if (isDone(s)) return { kind: 'none' };
+  const known = onSolution(L, s, solution);
+  if (known) return { kind: 'solution', move: known };
+  if (isStuck(L, s)) return { kind: 'dead' };
+  const r = solve(L, s, { cap });
+  if (r.ok && r.path.length) return { kind: 'solution', move: decodeMove(r.path[0]), length: r.path.length };
+  if (r.exhausted) {
+    const u = solve(L, s, { cap, prune: false });
+    if (u.ok && u.path.length) return { kind: 'solution', move: decodeMove(u.path[0]), length: u.path.length };
+    if (u.exhausted) return { kind: 'dead' };
+  }
+  return guessMove(L, s) || { kind: 'dead' };
+}
+
+// states[0..n-1] (states[0] the fresh painting) -> the largest index whose
+// position is proved solvable: done, on the stored solution, or solved by the
+// search. A spent node budget falls back to the latest position on the stored
+// solution (the fresh painting at worst), so the answer is always true.
+export function backToSolvableIndex(L, states, opts) {
+  const it = backToSolvableSteps(L, states, opts);
+  for (;;) { const r = it.next(); if (r.done) return r.value; }
+}
+// The same walk as a generator: it yields after each searched position (so a
+// screen can spread the work over frames) and returns the index.
+export function* backToSolvableSteps(L, states, { cap = BACK_CAP, budget = BACK_BUDGET, solution = L.solution } = {}) {
+  let spent = 0;
+  const fallback = () => {
+    for (let i = states.length - 1; i > 0; i--) if (isDone(states[i]) || onSolution(L, states[i], solution)) return i;
+    return 0;
+  };
+  for (let i = states.length - 1; i >= 0; i--) {
+    const s = states[i];
+    if (isDone(s) || onSolution(L, s, solution)) return i;
+    if (isStuck(L, s)) continue;
+    if (spent >= budget) return fallback();
+    const r = solve(L, s, { cap });
+    spent += r.nodes;
+    if (r.ok) return i;
+    yield i;
+  }
+  return fallback();
 }
 
 // A short fingerprint of everything that shapes play, so a save made on an

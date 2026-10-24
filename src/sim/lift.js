@@ -285,6 +285,56 @@ export function undo(state) {
   return { ok: true, state: states[states.length - 1] };
 }
 
+// ---------------------------------------------------------------------------
+// Dead ends and "Back to solvable" (0.4.1)
+// ---------------------------------------------------------------------------
+
+const VERDICTS = new Map(); // `${level}|${extra}|${moves}|${stateKey}` -> verdict (bounded)
+const verdictKey = (L, s) => `${L.id}|${s.extra}|${s.moves}|${R.stateKey(s)}`;
+
+/** verdictOf(L, s) -> 'solvable' | 'dead' | 'unknown' (puzzles/lift.verdict, cached by position). */
+export function verdictOf(L, s) {
+  const k = verdictKey(L, s);
+  if (VERDICTS.has(k)) return VERDICTS.get(k);
+  const v = R.verdict(L, s);
+  VERDICTS.set(k, v);
+  if (VERDICTS.size > 500) VERDICTS.delete(VERDICTS.keys().next().value);
+  return v;
+}
+
+/** deadEnd(state) -> true only when the rules prove no order of jars clears the painting from here (read-only). */
+export function deadEnd(state) {
+  const cur = current(state);
+  if (!cur || cur.done) return false;
+  return verdictOf(cur.L, cur.s) === 'dead';
+}
+
+/** history(state) -> [rules states] from the fresh painting to now (read-only; for a stepped walk on screen). */
+export function history(state) {
+  const cur = current(state);
+  return cur ? [...cur.past, cur.s] : [];
+}
+
+/**
+ * backToSolvable(state, {index?}) -> {ok, steps, index}: takes back moves to the
+ * latest position the rules prove solvable (puzzles/lift.backToSolvableIndex),
+ * or to `index` when a screen already walked there. Moves are simply undone,
+ * so the once-per-painting spare bench spot is never spent by it (undoing past
+ * an 'N' gives the spot back). steps 0 = she is on track already.
+ */
+export function backToSolvable(state, { index } = {}) {
+  const t = ensureLift(state);
+  const cur = current(state);
+  if (!cur) return { ok: false, reason: 'none', steps: 0 };
+  const states = [...cur.past, cur.s];
+  const idx = Number.isInteger(index) && index >= 0 && index < states.length ? index : R.backToSolvableIndex(cur.L, states);
+  const steps = states.length - 1 - idx;
+  if (steps <= 0) return { ok: true, steps: 0, index: states.length - 1 };
+  t.game.moves.splice(idx);
+  remember(t.game, cur.L, states.slice(0, idx + 1));
+  return { ok: true, steps, index: idx };
+}
+
 /** setSetting(state, {key, value}) -> {ok}: 'fast' (fast belt) | 'sound' | 'glyphs' (color symbols). */
 export function setSetting(state, { key, value } = {}) {
   const t = ensureLift(state);

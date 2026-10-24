@@ -5,7 +5,8 @@
 // column's lowest cell is exposed").
 import {
   newGame, play, playNudge, undo, stage, isLegal, isDone, isStuck, benchCap, canNudge, blockedReason,
-  frontJar, laneLeft, laneOpen, canLift, hint, isCovered, jarColors, VERSION,
+  frontJar, laneLeft, laneOpen, canLift, isCovered, jarColors, VERSION,
+  bestHint, guessMove, frontUnit, verdict, backToSolvableSteps, stateKey,
 } from './rules.js';
 import { LEVELS, PALETTE, MECHANICS, BANDS, levelById } from './levels.js';
 
@@ -121,6 +122,10 @@ function load() {
 
 // ---------- state ----------
 let L = null, G = null, busy = false, skip = false, queued = null, hinted = null, note = '', howStep = 0;
+// dead: the rules prove no order of jars clears it from here; pendingHint: Hint
+// tapped while the belt ran (answers once it settles); stepping: Back to solvable.
+let dead = false, deadTimer = 0, pendingHint = false, stepping = false;
+const VERDICTS = new Map();
 let lastOpen = [];
 const skipWaiters = new Set();
 
@@ -165,7 +170,10 @@ async function run(fn) {
     afterMove();
     const q = queued;
     queued = null;
-    if (q && !isDone(G.state)) setTimeout(() => act(q), 0);
+    if (q && !isDone(G.state)) { pendingHint = false; setTimeout(() => act(q), 0); } else {
+      scheduleDeadCheck();
+      if (pendingHint) { pendingHint = false; if (!isDone(G.state)) setTimeout(doHint, 0); }
+    }
   }
 }
 
@@ -520,13 +528,18 @@ function render(s = G.state) {
 
   // buttons, message
   const stuck = !busy && isStuck(L, s);
+  const showBack = !busy && !stepping && !isDone(s) && (stuck || dead) && G.past.length > 0;
   const sb2 = $('#stuckBtn');
-  sb2.hidden = !stuck;
-  sb2.textContent = canNudge(s) ? 'Add a bench spot' : 'Start over';
+  sb2.hidden = !stuck || (showBack && !canNudge(s));
+  sb2.textContent = canNudge(s) ? (showBack ? 'Spare spot' : 'Add a bench spot') : 'Start over';
+  sb2.classList.toggle('primary', !showBack);
+  $('#backBtn').hidden = !showBack;
   $('#hintBtn').hidden = stuck;
-  $('#undoBtn').disabled = !G.past.length;
-  $('#hintBtn').disabled = isDone(s);
+  $('#undoBtn').disabled = !G.past.length || stepping;
+  $('#hintBtn').disabled = isDone(s) || stepping;
   $('#msg').textContent = busy ? 'Lifting…' : message(s);
+  const row = $('.msgrow');
+  row.classList.toggle('wide', [...row.querySelectorAll('.btn')].filter((b) => !b.hidden).length >= 3);
 
   if (hinted && !busy) {
     const el = targetFor(hinted);
@@ -538,10 +551,12 @@ function message(s) {
   if (note) return note;
   if (isDone(s)) return 'All lifted. Lovely work.';
   if (isStuck(L, s)) {
+    if (!G.past.length) return 'The table is full for now. Start this painting fresh from the gallery wall.';
     return canNudge(s)
-      ? 'The table is full for now. Undo a step, or take one free spare bench spot for this painting.'
-      : 'The table is full for now. Undo a few steps, or start this painting fresh.';
+      ? 'The table is full for now. Back to solvable takes back just the moves it needs, or take one free spare bench spot.'
+      : 'The table is full for now. Back to solvable takes back just the moves it needs.';
   }
+  if (dead) return 'This one has gotten tangled: no order of jars clears it from here. Back to solvable takes back just the moves it needs.';
   const waiting = s.belt.filter((j) => !canLift(L, s, j));
   if (s.belt.length >= L.slots) {
     return s.bench.length < benchCap(L, s)
@@ -704,10 +719,12 @@ function showCombo(n) {
 function act(m) {
   // Lane taps queue up (lane numbers never shift); belt and bench slots can
   // shift while jars leave, so those taps only fast-forward.
-  if (busy) { if (m.t === 'place') queued = m; skipAll(); return; }
+  if (stepping) return;
+  if (busy) { if (m.t === 'place') queued = m; pendingHint = false; skipAll(); return; }
   note = '';
   if (!isLegal(L, G.state, m)) { explainBlocked(m); return; }
   hinted = null;
+  dead = false;
   ensureAudio();
   const staged = stage(L, G.state, m);
   const res = play(L, G, m);
@@ -746,15 +763,82 @@ function explainBlocked(m) {
 }
 
 function doUndo() {
-  if (busy) { skipAll(); return; }
+  if (stepping) return;
+  if (busy) { pendingHint = false; skipAll(); return; }
   if (!G.past.length) return;
-  note = ''; hinted = null;
+  note = ''; hinted = null; dead = false;
   const before = snapRects();
   G = undo(G);
   save();
   syncPainter(G.state);
   render();
   flip(before, 200);
+  scheduleDeadCheck();
+}
+
+// ---------- dead ends and "Back to solvable" ----------
+function verdictOf(s) {
+  const k = `${L.id}|${s.extra}|${s.moves}|${stateKey(s)}`;
+  if (!VERDICTS.has(k)) {
+    VERDICTS.set(k, verdict(L, s));
+    if (VERDICTS.size > 500) VERDICTS.delete(VERDICTS.keys().next().value);
+  }
+  return VERDICTS.get(k);
+}
+function scheduleDeadCheck() {
+  clearTimeout(deadTimer);
+  deadTimer = setTimeout(() => {
+    deadTimer = 0;
+    if (!G || busy || stepping || revealing || isDone(G.state)) return;
+    let d = false;
+    try { d = verdictOf(G.state) === 'dead'; } catch (e) { console.error(e); }
+    if (d !== dead) { dead = d; render(); }
+  }, 40);
+}
+// Walk back (in slices) to the latest position the rules prove solvable, then
+// take the moves back quickly, one after another. The spare spot is not spent.
+async function doBack() {
+  if (!G || stepping) return;
+  if (busy) { skipAll(); return; }
+  const states = [...G.past, G.state];
+  stepping = true;
+  hinted = null;
+  note = 'Finding a good spot to step back to…';
+  render();
+  let idx = states.length - 1;
+  try {
+    const it = backToSolvableSteps(L, states);
+    for (;;) {
+      const t0 = performance.now();
+      let r;
+      do { r = it.next(); } while (!r.done && performance.now() - t0 < 14);
+      if (r.done) { idx = r.value; break; }
+      await nap(0);
+    }
+  } catch (e) { console.error(e); }
+  const steps = states.length - 1 - idx;
+  if (steps <= 0) {
+    stepping = false; dead = false;
+    note = 'You\u2019re on track. This painting can still be cleared from here.';
+    render();
+    return;
+  }
+  const gap = reduced() ? 0 : Math.max(70, Math.min(160, 1100 / steps));
+  try {
+    for (let k = 0; k < steps; k++) {
+      const before = snapRects();
+      G = undo(G);
+      syncPainter(G.state);
+      note = `Stepping back… ${k + 1} of ${steps}`;
+      render();
+      if (gap) { flip(before, Math.min(160, gap)); await nap(gap); }
+    }
+  } finally { stepping = false; }
+  save();
+  dead = false;
+  note = `Took back ${steps} ${steps === 1 ? 'move' : 'moves'}. This painting can be cleared from here.`;
+  render();
+  scheduleDeadCheck();
 }
 
 function restart() {
@@ -763,40 +847,58 @@ function restart() {
 }
 
 function doStuck() {
-  if (busy) return;
+  if (busy || stepping) return;
   if (canNudge(G.state)) {
     G = playNudge(G);
     note = 'A spare bench spot, just for this painting.';
     hinted = null;
+    dead = false;
     save();
     render();
+    scheduleDeadCheck();
   } else restart();
 }
 
+// One line that names the jar the hint points at.
+function hintLine(hn) {
+  const m = hn.move, s = G.state, guess = hn.kind === 'guess';
+  if (m.t === 'place') {
+    const u = frontUnit(L, s, m.i);
+    const nm = u.length > 1 ? `tied ${jarName(u[0])} and ${jarName(u[1])}` : jarName(u[0]);
+    return guess ? `Try the ${nm} next: its color is close to the bottom edge.` : `Try the ${nm} next.`;
+  }
+  if (m.t === 'park') return `${guess ? 'To make room, try' : 'Try'} resting the ${jarName(s.belt[m.i])} on the bench.`;
+  return `Try bringing the ${jarName(s.bench[m.i])} back to the belt.`;
+}
+
+// Always visible feedback: a tap while the belt runs fast-forwards it and then
+// answers; a budget the solver can't settle gives a sensible guess; a proven
+// dead end says so and offers Back to solvable.
 function doHint() {
-  if (busy) { skipAll(); return; }
+  if (!G || stepping) return;
+  if (busy) { pendingHint = true; skipAll(); return; }
+  if (isDone(G.state)) return;
+  hinted = null;
   note = 'Looking…';
   render();
+  const at = G.state;
   setTimeout(() => {
-    try {
-      const h = hint(L, G.state, 8000);
-      if (h.kind === 'solution' || h.kind === 'lift') {
-        hinted = h.move;
-        note = h.move.t === 'park' ? 'Try resting this jar on the bench.' : h.move.t === 'unpark' ? 'Try bringing this jar back.' : 'Try this jar next.';
-      } else if (h.kind === 'tangled') {
-        hinted = null;
-        note = canNudge(G.state)
-          ? 'This one has gotten tangled: no order of jars clears it from here. Undo a few steps, or add a spare bench spot.'
-          : 'This one has gotten tangled: no order of jars clears it from here. Undo a few steps, or start fresh.';
-      } else {
-        note = 'Try a jar whose color is showing along the bottom edge.';
-      }
-    } catch (e) {
-      console.error(e);
-      note = 'Try a jar whose color is showing along the bottom edge.';
+    if (!G || busy || stepping || G.state !== at) return;
+    let hn;
+    try { hn = bestHint(L, G.state); } catch (e) { console.error(e); try { hn = guessMove(L, G.state); } catch { hn = null; } }
+    if (!hn || hn.kind === 'dead') {
+      dead = true; hinted = null;
+      note = 'This one has gotten tangled: no order of jars clears it from here. Back to solvable takes back just the moves it needs' + (canNudge(G.state) ? ', or take a spare bench spot.' : '.');
+      render();
+      return;
     }
+    if (hn.kind === 'none') { note = ''; render(); return; }
+    hinted = hn.move;
+    note = hintLine(hn);
     render();
-  }, 30);
+    const el = targetFor(hinted);
+    if (el) { try { el.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch { /* fine */ } }
+  }, 20);
 }
 
 let revealing = false;
@@ -858,12 +960,13 @@ function startLevel(id, { fresh = false } = {}) {
   } else {
     G = newGame(L);
   }
-  hinted = null; note = '';
+  hinted = null; note = ''; dead = false; pendingHint = false; stepping = false;
   lastOpen = L.lanes.map((_, i) => laneOpen(L, G.state, i));
   render();
   sizePic();
   save();
   maybeIntro();
+  scheduleDeadCheck();
 }
 
 // ---------- sheets ----------
@@ -1030,6 +1133,8 @@ $('#easel').addEventListener('click', () => { if (busy) skipAll(); });
 $('#undoBtn').addEventListener('click', doUndo);
 $('#stuckBtn').addEventListener('click', doStuck);
 $('#hintBtn').addEventListener('click', doHint);
+$('#backBtn').addEventListener('click', doBack);
+$('#backMenuBtn').addEventListener('click', () => { $('#levelSheet').hidden = true; doBack(); });
 $('#levelsBtn').addEventListener('click', () => { if (!busy) openLevels(); });
 $('#howBtn').addEventListener('click', () => { if (!busy) openHow(); });
 $('#glyphBtn').addEventListener('click', () => { data.glyphs = !data.glyphs; save(); render(); syncPainter(G.state); });

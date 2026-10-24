@@ -425,7 +425,7 @@ ${lockedNext ? h`<div class="pz-tiertag" data-tier-tag>${lockTag(`${TIER_LABEL[l
     return h`<div class="batch-row" data-batch-row="${b.id}">${swatch(hex, 36, { label: name })}<div class="grow"><div class="semi pz-name">${name}</div><div class="hint">${jars} ${jars === 1 ? 'jar' : 'jars'}${going ? ', a pour is under way' : ''}</div></div>${button('Sell as is', { small: true, cls: 'quiet', attrs: { 'data-action': 'sell-muddy', 'data-batch': b.id } })}</div>`;
   });
   const underway = pur && batches.some((b) => b.id === pur.batchId) ? pur : null;
-  const keepGoing = !!(underway && (underway.puzzle.moves > 0 || (underway.tier === tier && !!underway.puzzle.murky === murky)));
+  const keepGoing = !!(underway && (underway.puzzle.moves > 0 || underway.puzzle.murkCleared || (underway.tier === tier && !!underway.puzzle.murky === murky)));
   const sortLabel = keepGoing ? 'Continue sorting' : 'Sort one';
   let sellAll = '';
   if (confirmSell && batches.length) {
@@ -688,7 +688,7 @@ function onClick(e) {
     const murky = purifyMurky(C, st);
     let batchId = t.dataset.batch || (cur && batches.some((b) => b.id === cur.batchId) ? cur.batchId : (batches[0] && batches[0].id));
     if (!batchId) { draw(st, true); return; }
-    const keep = cur && cur.batchId === batchId && (cur.puzzle.moves > 0 || (cur.tier === tier && !!cur.puzzle.murky === murky));
+    const keep = cur && cur.batchId === batchId && (cur.puzzle.moves > 0 || cur.puzzle.murkCleared || (cur.tier === tier && !!cur.puzzle.murky === murky));
     if (!keep) {
       const made = C.game.act((s, a, now) => createPurifyPuzzle(C, s, a, now), { batchId, tier });
       if (!made) { C.toast('That batch is already taken care of.'); draw(C.game.state, true); return; }

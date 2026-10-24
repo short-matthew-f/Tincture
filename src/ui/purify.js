@@ -21,8 +21,18 @@
  * Murky (puzzle.murky): every layer below a tube's top is drawn as cloudy
  * glass with a small "?" (never its color, never its colorblind pattern) until
  * it reaches the top; then the cloud clears off it (a short fade). The board's
- * chip turns Murky on or off for this batch (it starts over, "Tap again" once
- * she has poured) and remembers the choice (settings.purifyMurky).
+ * chip is for this batch only (0.4.1): Murky off clears every cloudy layer in
+ * place (a soft clearing fade, every pour kept, the batch pays the usual
+ * amount: sim.factory.purifySolved reads puzzle.murky at completion); Murky on
+ * starts the batch over ("Tap again" once she has poured). Her choice for new
+ * batches (settings.purifyMurky) is its own line under "This batch".
+ *
+ * Back to solvable (0.4.1): after every pour the solver checks the shelf from
+ * where it stands (puzzles/purify.verdict, a small node cap, cached by
+ * position; running out of budget counts as solvable). A proven dead end shows
+ * a note in the status card with "Back to solvable", which undoes quickly, in
+ * sequence, to the latest shelf that is not proven dead (and "Add a tube" when
+ * the free extra tube on Relaxed would sort it out).
  *
  * Back keeps the puzzle: it lives in state.activePuzzles.purify
  * ({batchId, color, puzzle, tier, startedAt}) until it is solved or the batch
@@ -36,8 +46,9 @@ import { h, raw, backButton, button, swatch, iconSvg, safeHex } from './kit.js';
 import { markGuideSeen } from './guide.js';
 import {
   injectStyle, PZ_CSS, ensureActive, activeOf, createPurifyPuzzle, patternFill, ensureDefs, lightnessOf, coinsText,
-  TIER_IDS, TIER_LABEL, murkyUnlocked, murkyChip, MURKY_LINE,
+  TIER_IDS, TIER_LABEL, murkyUnlocked, murkyChip, purifyMurky,
 } from './puzzles.js';
+import { verdictCache } from '../puzzles/backtrack.js';
 
 const CSS = `
 .pu-shelf { flex: 0 0 auto; position: relative; background: var(--walnut); border-radius: 18px; padding: 14px 10px 0; box-shadow: 0 4px 0 rgba(42,38,34,.3); display: flex; flex-direction: column; gap: 4px; overflow: hidden; }
@@ -73,7 +84,19 @@ const CSS = `
 .pu-tierswitch-wrap { display: flex; flex-direction: column; gap: 10px; }
 .pu-tierswitch-wrap:empty { display: none; }
 .pu-murkyrow { flex: 1 1 100%; }
-@media (prefers-reduced-motion: reduce) { .pu-tube svg { transition: none; } .pu-clearing { animation-duration: 1ms; } }
+.pu-murkyrow .chip.pz-murky[disabled] { opacity: .75; cursor: default; }
+.pu-batch { flex: 1 1 100%; display: flex; flex-direction: column; gap: 10px; }
+.pu-batch > .cap, .pu-tierswitch .cap { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-soft); }
+.pu-pref { display: flex; align-items: center; gap: 10px; justify-content: space-between; border-top: 1px solid rgba(42,38,34,.1); padding-top: 8px; }
+.pu-pref .hint { font-size: 12.5px; }
+.pu-pref .btn { flex: 0 0 auto; min-height: 44px; }
+.pz-status .pu-note { font-size: 14px; font-weight: 600; color: var(--ink); }
+.pu-stuck { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; padding: 10px 12px; border-radius: var(--radius-sm, 10px); background: var(--glow, #F3E3B8); box-shadow: 0 0 0 1.5px var(--glow-ring, rgba(226,176,74,.6)); }
+.pu-stuck .semi { font-weight: 600; }
+.pu-stuck .row { display: flex; gap: 8px; flex-wrap: wrap; }
+.pu-stuck .btn { min-height: 44px; flex: 1 1 auto; }
+@media (prefers-reduced-motion: reduce) { .pu-tube svg { transition: none; } .pu-clearing { animation-duration: 120ms; animation-delay: 0ms !important; } }
+html[data-motion="reduced"] .pu-clearing { animation-duration: 120ms; animation-delay: 0ms !important; }
 `;
 
 let C = null;
@@ -82,7 +105,13 @@ const P = {
   visible: false, entry: null, sel: null, busy: false, celebrating: false, result: null,
   timers: [], cb: false, sig: '', el: {}, name: '', hex: '#B7BDB3', reward: null,
   lay: { per: 6, col: 51, tw: 44, L: 40, rows: 1 }, armed: null, guide: null, murkyGuide: null, tier: 'relaxed',
+  // 0.4.1: a one-line note in the status card, the dead-end check (P.dead: the solver proves no
+  // order of pours finishes from here; P.spare: the free extra tube would rescue it), and the
+  // "Back to solvable" steps playing.
+  note: '', dead: false, spare: false, stepping: false, checkTimer: 0,
 };
+let VCACHE = verdictCache(600);
+let VFOR = '';
 let uid = 0;
 
 const later = (fn, ms) => { const id = setTimeout(fn, ms); P.timers.push(id); return id; };
@@ -137,7 +166,8 @@ function pourAct(s, args, now) {
     const batch = (s.muddyBatches || []).find((b) => b.id === e.batchId);
     const colorId = e.color;
     const tier = entryTier(e);
-    const done = sim.factory.purifyBatch(s, { batchId: e.batchId, tier, murky: !!e.puzzle.murky }, now);
+    // The Murky bonus follows the puzzle's own flag at completion (cleared murk pays the usual amount).
+    const done = sim.factory.purifySolved(s, { batchId: e.batchId, tier, puzzle: e.puzzle }, now);
     sim.events.eventPoints(s, 'purify', 1, { colorId });
     if (s.lifetime) s.lifetime.puzzles = (Number.isFinite(s.lifetime.puzzles) ? s.lifetime.puzzles : 0) + 1;
     if (!s.stats || typeof s.stats !== 'object') s.stats = {};
@@ -154,6 +184,12 @@ function pourAct(s, args, now) {
 const undoAct = (s) => {
   const e = s.activePuzzles && s.activePuzzles.purify;
   return e ? C.puzzles.purify.undo(e.puzzle) : { ok: false };
+};
+
+/** Murky off for this batch, in place: every cloudy layer revealed, every pour kept (puzzles/purify.clearMurk). */
+const clearMurkAct = (s) => {
+  const e = s.activePuzzles && s.activePuzzles.purify;
+  return e ? C.puzzles.purify.clearMurk(e.puzzle) : { ok: false, revealed: [] };
 };
 
 const addTubeAct = (s) => {
@@ -182,7 +218,7 @@ function murkLayer(y, L, cls = '') {
 }
 
 /** One tube as an inline SVG. `newN` = layers that just landed; `corkNew` animates the cork in; `cleared` = layers whose cloud just lifted. */
-function tubeSvg(puz, i, { newN = 0, corkNew = false, cleared = [] } = {}) {
+function tubeSvg(puz, i, { newN = 0, corkNew = false, cleared = [], clearDelay = 0 } = {}) {
   const tube = puz.tubes[i];
   const cap = puz.capacity;
   const L = P.lay.L;
@@ -201,7 +237,7 @@ function tubeSvg(puz, i, { newN = 0, corkNew = false, cleared = [] } = {}) {
     const cls = fresh ? ' class="pu-layer-new"' : '';
     const dly = fresh ? ` style="--d:${150 + (k - (tube.length - newN)) * 60}ms"` : '';
     const rect = `<rect x="5" y="${y}" width="34" height="${L}" fill="${hex}"/>${C.game.state.settings && C.game.state.settings.colorblind ? `<rect x="5" y="${y}" width="34" height="${L}" fill="${patternFill(c)}"/>` : ''}`;
-    const clearing = cleared.includes(k) ? murkLayer(y, L, ' pu-clearing') : '';
+    const clearing = cleared.includes(k) ? murkLayer(y, L, ' pu-clearing').replace('<g class="pu-murk pu-clearing"', `<g class="pu-murk pu-clearing" style="animation-delay:${120 + clearDelay + k * 70}ms"`) : '';
     return `<g${cls}${dly}>${rect}${clearing}<rect x="5" y="${y}" width="34" height="1.5" fill="#2A2622" fill-opacity=".18"/></g>`;
   }).join('');
   const corked = isDone(puz, tube);
@@ -275,7 +311,11 @@ function statusHtml(puz) {
     : 'Pour each color into its own tube';
   const cloudy = C.puzzles.purify.hiddenTotal(puz);
   const murk = puz.murky ? (cloudy ? ` ${cloudy} cloudy ${cloudy === 1 ? 'layer clears' : 'layers clear'} as you pour.` : ' Every layer is clear now.') : '';
-  return h`<div class="hl">${hl}</div><div class="dt"><span class="pu-goal" style="background:${safeHex(P.hex)}"></span>Your ${P.name} is in here with colors that got mixed in. Tap a tube, then tap where to pour: onto the same color or into an empty tube.${murk}</div>`;
+  const note = P.note ? h`<div class="pu-note" data-note role="status">${P.note}</div>` : '';
+  const stuck = P.dead
+    ? h`<div class="pu-stuck" data-stuck><div class="semi">This shelf has gotten tangled.</div><div class="hint">${P.spare ? 'The spare tube would sort it out, or step back to the last shelf that can still be sorted.' : 'No order of pours finishes it from here. Back to solvable takes back just the pours it needs.'}</div><div class="row">${button('Back to solvable', { variant: 'primary', small: true, attrs: { 'data-action': 'back-solvable' } })}${P.spare ? button('Add a tube', { small: true, cls: 'is-quiet', attrs: { 'data-action': 'add-tube' } }) : ''}</div></div>`
+    : '';
+  return h`${note}<div class="hl">${hl}</div><div class="dt"><span class="pu-goal" style="background:${safeHex(P.hex)}"></span>Your ${P.name} is in here with colors that got mixed in. Tap a tube, then tap where to pour: onto the same color or into an empty tube.${murk}</div>${stuck}`;
 }
 
 function updateStatus() {
@@ -288,28 +328,61 @@ function otherTiers() {
   return TIER_IDS.filter((t) => t !== cur && tierRevealed(t));
 }
 
-/** The Murky chip on the board: on/off for this batch (starts over), with its one line. */
+/**
+ * The Murky chip on the board, for this batch only (0.4.1):
+ * - Murky with cloudy layers left: tap (then "Tap again") clears the murk in
+ *   place; every pour stays and the batch pays the usual amount.
+ * - Murky with nothing cloudy left: nothing to clear, the bonus is hers.
+ * - Clear: tap starts this batch over Murky ("Tap again" once she has poured).
+ * Her choice for new batches is the separate line below (settings.purifyMurky).
+ */
 function murkyHtml() {
   if (!P.entry || !murkyUnlocked(C, C.game.state)) return '';
+  const puz = P.entry.puzzle;
   const on = isMurky(P.entry);
   const armed = P.armed === 'murky';
-  const label = armed ? `Start over ${on ? 'clear' : 'Murky'}? Tap again` : '';
-  return h`<div class="pz-murkyrow pu-murkyrow">${murkyChip(on, { action: 'murky-toggle', label })}<span class="hint">${MURKY_LINE}</span></div>`;
+  const cloudy = on ? C.puzzles.purify.hiddenTotal(puz) : 0;
+  let label = '';
+  let line;
+  let attrs = '';
+  if (on && cloudy) {
+    label = armed ? 'Clear the murk? Tap again' : '';
+    line = 'Tap to clear the cloudy layers now. Your pours stay; this batch then pays the usual amount.';
+  } else if (on) {
+    line = 'Every layer is clear now. The Murky bonus is yours.';
+    attrs = ' disabled';
+  } else {
+    label = armed ? 'Start over Murky? Tap again' : '';
+    line = puz.murkCleared
+      ? 'Murk cleared for this batch, so it pays the usual amount. Tap to start it over Murky.'
+      : 'Start this batch over with cloudy lower layers. Pays 25% more.';
+  }
+  const chip = String(murkyChip(on, { action: 'murky-toggle', label }));
+  return h`<div class="pz-murkyrow pu-murkyrow">${raw(attrs ? chip.replace('<button ', '<button disabled ') : chip)}<span class="hint">${line}</span></div>`;
+}
+
+/** Her remembered choice for new batches (settings.purifyMurky), set apart from this batch. */
+function prefHtml() {
+  if (!murkyUnlocked(C, C.game.state)) return '';
+  const on = purifyMurky(C, C.game.state);
+  return h`<div class="pu-pref" data-pref><span class="hint">New batches start ${on ? 'Murky' : 'clear'}.</span>${button(on ? 'Start them clear' : 'Start them Murky', { small: true, cls: 'is-quiet', attrs: { 'data-action': 'murky-pref' } })}</div>`;
 }
 
 function switchHtml() {
-  return `${murkyHtml()}${tierSwitchHtml()}`;
+  const inner = `${murkyHtml()}${tierSwitchHtml()}`;
+  if (!inner) return '';
+  return `<div class="pu-batch"><div class="cap">This batch</div>${inner}${prefHtml()}</div>`;
 }
 
 function tierSwitchHtml() {
   const others = otherTiers();
   if (!others.length) return '';
   const armed = P.armed;
-  const lbl = (t) => (armed === t ? `Start over on ${TIER_LABEL[t]}? Tap again` : `Start this batch on ${TIER_LABEL[t]}`);
+  const lbl = (t) => (armed === t ? `Start over on ${TIER_LABEL[t]}? Tap again` : `Start over on ${TIER_LABEL[t]}`);
   if (others.length === 1) {
     return h`<div class="pu-tierswitch">${button(lbl(others[0]), { cls: 'is-quiet', attrs: { 'data-action': 'restart-tier', 'data-tier': others[0] } })}</div>`;
   }
-  return h`<div class="pu-tierswitch"><div class="cap">Start this batch on</div><div class="seg-control" role="group" aria-label="Start this batch on">${others.map((t) => h`<button type="button" data-action="restart-tier" data-tier="${t}" data-tap aria-pressed="${armed === t ? 'true' : 'false'}">${armed === t ? 'Tap again' : TIER_LABEL[t]}</button>`)}</div></div>`;
+  return h`<div class="pu-tierswitch"><div class="cap">Start over on</div><div class="seg-control" role="group" aria-label="Start this batch over on">${others.map((t) => h`<button type="button" data-action="restart-tier" data-tier="${t}" data-tap aria-pressed="${armed === t ? 'true' : 'false'}">${armed === t ? 'Tap again' : TIER_LABEL[t]}</button>`)}</div></div>`;
 }
 
 function updateTools() {
@@ -317,7 +390,7 @@ function updateTools() {
   if (!e) return;
   const undo = ROOT.querySelector('[data-action="undo"]');
   if (undo) undo.disabled = !e.puzzle.history.length;
-  const add = ROOT.querySelector('[data-action="add-tube"]');
+  const add = ROOT.querySelector('[data-tools] [data-action="add-tube"]');
   if (add) {
     add.disabled = !!e.puzzle.extraTubeUsed;
     add.textContent = e.puzzle.extraTubeUsed ? 'Extra tube added' : 'Add a tube';
@@ -365,6 +438,114 @@ ${C.guide.howThisWorksHtml('purify')}
   P.el.shelf.innerHTML = shelfHtml(puz);
   markCoach();
   updateStatus();
+  scheduleCheck();
+}
+
+// ---------------------------------------------------------------------------
+// Dead ends and "Back to solvable" (0.4.1)
+// ---------------------------------------------------------------------------
+
+/** The verdict cache belongs to one puzzle (batch + start time). */
+function cacheFor(e) {
+  const id = e ? `${e.batchId}|${e.startedAt}|${e.puzzle.tubes.length}` : '';
+  if (id !== VFOR) { VCACHE = verdictCache(600); VFOR = id; }
+  return VCACHE;
+}
+
+/** After every pour, undo or new tube: ask the solver (small node cap, cached by position) whether this shelf is a dead end. */
+function scheduleCheck() {
+  clearTimeout(P.checkTimer);
+  P.checkTimer = setTimeout(checkDead, 0); // after the pour is drawn
+}
+
+function checkDead() {
+  P.checkTimer = 0;
+  const e = P.entry;
+  if (!e || !P.visible || P.result || P.celebrating || P.stepping) return;
+  const pz = C.puzzles.purify;
+  const puz = e.puzzle;
+  const cache = cacheFor(e);
+  const dead = !pz.isSolved(puz) && pz.verdict(puz, { cache }) === 'dead';
+  const spare = dead && canExtra(e) && pz.spareHelps(puz, { cache });
+  if (dead !== P.dead || spare !== P.spare) {
+    P.dead = dead;
+    P.spare = spare;
+    updateStatus();
+  }
+}
+
+const pause = (ms) => new Promise((res) => { if (ms <= 0) res(); else later(res, ms); });
+
+/** Undo, step by step (quick, in sequence), back to the latest shelf the solver does not prove dead. */
+async function backToSolvable() {
+  const e = P.entry;
+  if (!e || P.result || P.celebrating || P.stepping) return;
+  const pz = C.puzzles.purify;
+  const r = pz.backToSolvable(e.puzzle, { cache: cacheFor(e) });
+  if (!r.steps) {
+    P.dead = false;
+    P.spare = false;
+    P.note = 'You\u2019re on track. Every color can still be corked from here.';
+    updateStatus();
+    return;
+  }
+  P.stepping = true;
+  P.armed = null;
+  setSel(null);
+  const gap = reduced() ? 0 : Math.max(90, Math.min(170, 900 / r.steps));
+  let taken = 0;
+  try {
+    for (let k = 0; k < r.steps; k++) {
+      if (P.entry !== e || !P.visible) break;
+      const u = C.game.act(undoAct);
+      if (!u || !u.ok) break;
+      taken++;
+      redrawTube(u.from);
+      const back = redrawTube(u.to, { newN: reduced() ? 0 : u.moved });
+      if (!reduced()) safe(() => landLayers(back));
+      safe(() => C.audio.tick('deselect'));
+      P.sig = sigOf(e);
+      await pause(gap);
+    }
+  } finally {
+    P.stepping = false;
+  }
+  if (P.entry !== e) return;
+  safe(() => C.haptics.light());
+  markCoach();
+  P.sig = sigOf(e);
+  P.dead = false;
+  P.spare = false;
+  P.note = `Took back ${taken} ${taken === 1 ? 'pour' : 'pours'}. Every color can be corked from here.`;
+  updateStatus();
+  updateTools();
+  scheduleCheck();
+}
+
+/** Clear the murk on this batch, in place: the clouds lift off every hidden layer, every pour stays. */
+function clearMurkNow() {
+  const e = P.entry;
+  const res = C.game.act(clearMurkAct);
+  if (!res || !res.ok) return;
+  P.armed = null;
+  setSel(null);
+  const byTube = new Map();
+  for (const [i, k] of res.revealed) byTube.set(i, [...(byTube.get(i) || []), k]);
+  let n = 0;
+  for (const [i, ks] of byTube) redrawTube(i, { cleared: ks, clearDelay: reduced() ? 0 : (n++) * 45 });
+  safe(() => C.audio.arpeggio(e.puzzle.colors.slice(0, 4).map((hx) => lightnessOf(C, hx))));
+  safe(() => C.haptics.light());
+  if (P.murkyGuide) { P.murkyGuide.stop(); P.murkyGuide = null; }
+  const keepsMurky = purifyMurky(C, C.game.state);
+  P.note = `Cleared the murk. This batch pays the usual amount.${keepsMurky ? ' New batches still start Murky.' : ''}`;
+  const sub = ROOT.querySelector('[data-subtitle]');
+  if (sub) sub.textContent = `${TIER_LABEL[P.tier]} · ${P.name}`;
+  P.sig = sigOf(e);
+  markCoach();
+  updateStatus();
+  updateTools();
+  const chip = ROOT.querySelector('[data-action="murky-toggle"]');
+  if (chip) safe(() => C.fx.squash(chip));
 }
 
 function sigOf(e) {
@@ -568,9 +749,11 @@ function pour(from, to) {
     safe(() => corkPop(toEl, (len + 0.14) * 1000));
     later(() => safe(() => C.haptics.medium()), (len + 0.14) * 1000);
   }
+  P.note = '';
   updateStatus();
   updateTools();
   P.sig = sigOf(e);
+  if (!res.solved) scheduleCheck();
   if (res.solved && res.reward) {
     P.celebrating = true;
     P.reward = res.reward;
@@ -632,7 +815,7 @@ function finalize() {
     P.el.status.replaceWith(cardEl);
     P.el.status = null;
   }
-  ROOT.querySelectorAll('[data-action="undo"],[data-action="add-tube"],[data-action="restart-tier"],[data-action="murky-toggle"]').forEach((b) => { b.disabled = true; });
+  ROOT.querySelectorAll('[data-action="undo"],[data-action="add-tube"],[data-action="restart-tier"],[data-action="murky-toggle"],[data-action="back-solvable"]').forEach((b) => { b.disabled = true; });
   const sw = ROOT.querySelector('[data-tools]');
   if (sw) sw.hidden = true;
   if (cardEl) playReward(cardEl, r);
@@ -703,7 +886,7 @@ function startCoach() {
 
 function tapTube(i) {
   if (P.celebrating) { skip(); return; }
-  if (P.result || !P.entry || !Number.isInteger(i)) return;
+  if (P.result || P.stepping || !P.entry || !Number.isInteger(i)) return;
   const puz = P.entry.puzzle;
   const tubes = puz.tubes;
   if (!tubes[i]) return;
@@ -736,6 +919,7 @@ function onClick(e) {
   const a = e.target.closest('[data-action]');
   if (!a || !ROOT.contains(a)) return;
   const act = a.dataset.action;
+  if (P.stepping) return;
   if (act === 'undo') {
     if (!P.entry || P.result) return;
     const r = C.game.act(undoAct);
@@ -747,14 +931,26 @@ function onClick(e) {
       safe(() => C.audio.tick('deselect'));
       safe(() => C.haptics.light());
       P.sig = sigOf(P.entry);
+      P.note = '';
       updateStatus();
       updateTools();
+      scheduleCheck();
     }
+  } else if (act === 'back-solvable') {
+    backToSolvable();
+  } else if (act === 'murky-pref') {
+    if (!murkyUnlocked(C, C.game.state)) return;
+    const on = !purifyMurky(C, C.game.state);
+    C.game.act((s, args) => C.sim.setSetting(s, { key: 'purifyMurky', value: args.on }), { on });
+    updateTools();
   } else if (act === 'add-tube') {
     if (!P.entry || P.result) return;
     const r = C.game.act(addTubeAct);
     if (r && r.ok) {
       safe(() => C.audio.tick('select'));
+      P.dead = false;
+      P.spare = false;
+      P.note = '';
       drawAll();
     }
   } else if (act === 'restart-tier') {
@@ -765,19 +961,26 @@ function onClick(e) {
     const batchId = P.entry.batchId;
     C.game.act((s, args, now) => createPurifyPuzzle(C, s, args, now), { batchId, tier, murky: isMurky(P.entry) });
     P.entry = activeOf(C.game.state).purify || null;
+    resetBoardState();
     drawAll();
     startCoach();
   } else if (act === 'murky-toggle') {
     if (!P.entry || P.result || !murkyUnlocked(C, C.game.state)) return;
+    if (isMurky(P.entry)) {
+      // Murky off for this batch, in place (0.4.1): nothing restarts, every pour stays.
+      if (!C.puzzles.purify.hiddenTotal(P.entry.puzzle)) return;
+      if (P.armed !== 'murky') { P.armed = 'murky'; updateTools(); return; }
+      clearMurkNow();
+      return;
+    }
+    // Murky on: this batch starts over Murky (a confirm once she has poured). Her
+    // choice for new batches stays as it is (the line below the chip sets that).
     if (P.entry.puzzle.moves > 0 && P.armed !== 'murky') { P.armed = 'murky'; updateTools(); return; }
-    const on = !isMurky(P.entry);
     const batchId = P.entry.batchId;
     const tier = entryTier(P.entry);
-    C.game.act((s, args, now) => {
-      C.sim.setSetting(s, { key: 'purifyMurky', value: args.murky });
-      return createPurifyPuzzle(C, s, args, now);
-    }, { batchId, tier, murky: on });
+    C.game.act((s, args, now) => createPurifyPuzzle(C, s, args, now), { batchId, tier, murky: true });
     P.entry = activeOf(C.game.state).purify || null;
+    resetBoardState();
     drawAll();
     startCoach();
     const chip = ROOT.querySelector('[data-action="murky-toggle"]');
@@ -795,9 +998,20 @@ function onClick(e) {
     clearTimers();
     C.game.act((s, args, now) => createPurifyPuzzle(C, s, args, now), { batchId, tier });
     P.entry = activeOf(C.game.state).purify;
+    resetBoardState();
     drawAll();
     startCoach();
   }
+}
+
+/** A new board: no note, no stuck card until the check says so. */
+function resetBoardState() {
+  clearTimeout(P.checkTimer);
+  P.checkTimer = 0;
+  P.note = '';
+  P.dead = false;
+  P.spare = false;
+  P.stepping = false;
 }
 
 function adopt(params) {
@@ -839,6 +1053,7 @@ export default {
     if (P.result && !params.batchId && !(activeOf(C.game.state).purify)) return; // back from a ceremony: keep the result card
     P.result = null;
     P.celebrating = false;
+    resetBoardState();
     P.entry = adopt(params);
     drawAll();
     startCoach();
@@ -849,6 +1064,7 @@ export default {
     clearTimers();
     P.celebrating = false;
     P.result = null;
+    resetBoardState();
     if (P.guide) { P.guide.stop(); P.guide = null; }
     if (P.murkyGuide) { P.murkyGuide.stop(); P.murkyGuide = null; }
   },
@@ -863,7 +1079,9 @@ export default {
       if (sw && sw.dataset.html !== html) { sw.dataset.html = html; sw.innerHTML = html; }
     }
     const cb = !!(state.settings && state.settings.colorblind);
+    if (P.stepping) return;
     if (e !== P.entry || cb !== P.cb || (e && sigOf(e) !== P.sig)) {
+      if (e !== P.entry) resetBoardState();
       P.entry = e;
       drawAll();
     }
