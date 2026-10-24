@@ -39,7 +39,7 @@ export const MECHANICS = {
 // pairs; liftoff: the lift-off move is allowed (its band and every one after).
 export const LEVEL_DEFS = [
   // ---- learning the hoop ----
-  { id: 'first', name: 'First knots', knobs: { n: 12, S: 3, colors: 2, scramble: 4, clasp: false, cap: 20000, seeds: 40, target: 1, par: [3, 3] } },
+  { id: 'first', name: 'First knots', knobs: { n: 12, S: 3, colors: 2, scramble: 5, clasp: false, cap: 20000, seeds: 40, target: 1, par: [3, 3] } },
   { id: 'sampler', name: 'A little sampler', knobs: { n: 12, S: 3, colors: 2, scramble: 5, clasp: true, cap: 20000, seeds: 40, target: 1, par: [3, 4] } },
   { id: 'floss', name: 'Embroidery floss', knobs: { n: 14, S: 4, colors: 3, scramble: 5, cap: 20000, seeds: 30, target: 0.9, par: [3, 4] } },
   { id: 'workbag', name: 'The workbag', knobs: { n: 14, S: 4, colors: 3, scramble: 6, cap: 25000, seeds: 30, target: 0.8, par: [4, 5] } },
@@ -68,7 +68,7 @@ export const LEVEL_DEFS = [
   { id: 'crewel', name: 'Crewelwork', knobs: { n: 18, S: 8, colors: 4, liftoff: true, fixed: 2, pegs: 2, scramble: 12, cap: 8000, seeds: 10, best: true, target: 0.3, par: [9, 11] } },
   { id: 'bargello', name: 'Bargello', knobs: { n: 19, S: 9, colors: 5, liftoff: true, links: 1, fixed: 1, scramble: 13, maxCross: 40, cap: 8000, seeds: 10, best: true, target: 0.2, par: [10, 12] } },
   // ---- the finale ----
-  { id: 'heirloom', name: 'The heirloom sampler', knobs: { n: 20, S: 8, colors: 5, layering: true, liftoff: true, fixed: 1, pegs: 2, hooked: 2, scramble: 14, maxCross: 40, cap: 8000, seeds: 14, best: true, target: 0.2, par: [9, 12] } },
+  { id: 'heirloom', name: 'The heirloom sampler', knobs: { n: 20, S: 8, colors: 5, layering: true, liftoff: true, fixed: 1, pegs: 2, hooked: 2, scramble: 14, maxCross: 40, cap: 8000, seeds: 20, best: true, target: 0.2, par: [9, 12] } },
 ];
 
 export const BANDS = [

@@ -4,7 +4,7 @@ import {
   COLORS, VERSION, MODEL, cdist, inArc, crosses, buildLevel, newState, move, canLift, whyNotTo, targets, legalMoves, endsAt, crossersOf,
   crossCounts, totalCrossings, isDone, remaining, movers, newGame, play, undo, replay, solve, hint, solutionStep, parseMoves, formatMoves,
   randomRate, greedyRate, mulberry, stateKey, levelSig, sparePegs, mechanicsOf, yarnLine, pegUnit, pathOf, pairLeft, hookedPairs, wordsError,
-  nearestAt, lowerBound, liftable, mutual, canLiftOff,
+  nearestAt, lowerBound, liftable, mutual, canLiftOff, OPTIONS, tautLength, tightened,
 } from '../hoop/rules.js';
 import { layout, planarMap, eulerOk, hits, plan, topAt, baseOrder, hookMarks } from '../hoop/layout.js';
 import { candidate, cleanHoop } from '../hoop/gen.js';
@@ -156,6 +156,141 @@ test('cancellation: two crossings next to each other along one strand only are k
   assert.equal(word(r.state, 0), '3- 1+ 1+', 'A still lies over B twice: sliding A off would only move the crossings onto C');
   checkPicture(L, s, 'dip');
   checkPicture(L, r.state, 'dip after');
+});
+
+// ---------- taut-pull ----------
+
+// The yarn as the hoop had it before taut-pull: moves that leave every strand
+// lying where the step rule put it.
+function loose(f) { OPTIONS.taut = false; try { return f(); } finally { OPTIONS.taut = true; } }
+const wordsOf = (s) => s.w.map((_, i) => (s.out[i] ? 'out' : word(s, i))).join(' | ');
+const straddle = (L, s, i) => { let k = 0; for (let o = 0; o < L.S; o++) if (o !== i && !s.out[o] && crosses(L.n, s.ends[2 * i], s.ends[2 * i + 1], s.ends[2 * o], s.ends[2 * o + 1])) k++; return k; };
+
+// The owner’s level 3 (Embroidery floss), as he had it: blue 3-10 under
+// yellow 5-12, and red’s end carried round from 0 to 13, over both their
+// knots on each side. Red then lies over all four of its crossings, and its
+// ends (13, 14) sit side by side, yet no pair of its crossings cancels: along
+// blue and along yellow, blue’s crossing with yellow sits between red’s two.
+function flossLevel() {
+  const n = 16, P = (p) => pegUnit(n, p);
+  const sgn = (a1, a2, b1, b2) => { const A = [P(a2)[0] - P(a1)[0], P(a2)[1] - P(a1)[1]], B = [P(b2)[0] - P(b1)[0], P(b2)[1] - P(b1)[1]]; return Math.sign(A[0] * B[1] - A[1] * B[0]); };
+  return buildLevel({ id: 'floss3', name: 'Floss', n, strands: [{ c: 'i', a: 3, b: 10 }, { c: 'w', a: 5, b: 12 }, { c: 'm', a: 0, b: 14 }],
+    x: [[0, 1, 1, sgn(3, 10, 5, 12)]], w: [[0], [0], []] });
+}
+
+test('taut-pull: the owner’s level 3: red over everything, bulging round the hoop, pulls straight and comes free', () => {
+  const L = flossLevel();
+  // as it was: the bulge
+  const r0 = loose(() => M(L, newState(L), 4, 13));
+  assert.deepEqual(r0.passed, [3, 5, 10, 12]);
+  assert.equal(word(r0.state, 2), '1+ 0+ 1+ 0+', 'red over blue and yellow, twice each');
+  assert.equal(word(r0.state, 0), '2- 1- 2-');
+  assert.equal(word(r0.state, 1), '2- 0+ 2-', 'blue’s crossing with yellow between red’s two, along both');
+  assert.equal(r0.cancelled, 0, 'so cancellation alone keeps all four');
+  assert.deepEqual(r0.freed, []);
+  assert.equal(tautLength(L, r0.state, 2), 0, 'yet red, on top of everything, could lie crossing nothing at all');
+  checkPicture(L, r0.state, 'the owner’s bulge (as it was)');
+  // now: the same move pulls red taut; crossing nothing, it comes free
+  const r = M(L, newState(L), 4, 13);
+  assert.equal(r.pulled, 4);
+  assert.deepEqual(r.freed, [{ s: 2, a: 13, b: 14 }]);
+  assert.equal(wordsOf(r.state), '1- | 0+ | out');
+  checkPicture(L, r.state, 'the owner’s level 3, pulled taut');
+});
+
+test('taut-pull: a strand under everything straightens too; a strand held over and under keeps its bends', () => {
+  // the same loop with red laid under blue and yellow instead
+  const L0 = flossLevel();
+  const u = loose(() => M(L0, newState(L0), 4, 13).state);
+  const x = u.x.map((X) => X && (X[2] === 2 ? [X[0], X[1], X[0] === 2 ? X[1] : X[0], X[3]] : X));
+  const L = buildLevel({ id: 'under', name: 'Under', n: 16, strands: [0, 1, 2].map((i) => ({ c: L0.def.strands[i].c, a: u.ends[2 * i], b: u.ends[2 * i + 1] })), x, w: u.w });
+  const s = newState(L);
+  assert.equal(wordsError(L, s.ends, s.w, s.x), null);
+  assert.equal(word(s, 2), '1- 0- 1- 0-', 'red under everything');
+  assert.equal(tautLength(L, s, 2), 0);
+  checkPicture(L, s, 'under, loose');
+  const t = tightened(L, s);
+  assert.equal(wordsOf(t), '1- | 0+ | ', 'pulled clear underneath (tightened frees nothing; a move would)');
+  // any move then frees it (a move of blue’s end along empty pegs)
+  const r = M(L, s, 0, 2);
+  assert.deepEqual(r.freed.map((f) => f.s), [2]);
+  // held over and under: the owner’s clasp keeps both its crossings
+  const O = ownerLevel();
+  let c = M(O, newState(O), 2, 15).state;
+  c = M(O, c, 1, 11).state;
+  assert.equal(tautLength(O, c, 0), -1);
+  assert.equal(totalCrossings(O, tightened(O, c)), 2);
+});
+
+test('taut-pull: repeated until nothing pulls any tighter (one pull can let another go)', () => {
+  // red 0-1, blue 4-5, yellow 8-9 on 14 pegs, moved about as the old hoop let them lie
+  const L = buildLevel({ id: 'casc', name: 'Cascade', n: 14, strands: [{ c: 'm', a: 0, b: 1 }, { c: 'i', a: 4, b: 5 }, { c: 'w', a: 8, b: 9 }], x: [], w: [[], [], []] });
+  const ms = parseMoves('4:3 3:2 1:8 2:13 1:6');
+  const s = loose(() => ms.reduce((t, [e, q]) => M(L, t, e, q, { scramble: true }).state, newState(L)));
+  const r0 = loose(() => M(L, s, 1, 12, { scramble: true }));
+  assert.equal(wordsOf(r0.state), '1+ 2+ 1+ 1- 2+ | 2+ 0+ 0- 2+ 0- | 0- 1- 1- 0-');
+  assert.equal(tautLength(L, r0.state, 1), -1, 'blue is held over and under');
+  // red’s first three crossings (all on top) take a shorter way over: one crossing, not three.
+  // Only then does a run of blue’s have a shorter way (none of its runs did before), and
+  // after that pull yellow, under everything, crosses nothing at all
+  const T = tightened(L, r0.state);
+  assert.equal(wordsOf(T), '1- | 0+ | ');
+  assert.deepEqual(tightened(L, T), T, 'stable: pulling again changes nothing');
+  checkPicture(L, r0.state, 'cascade, loose');
+  checkPicture(L, T, 'cascade, taut');
+  // and as a move: one move, every pull, yellow free
+  const r = M(L, s, 1, 12);
+  assert.equal(r.pulled, 6, 'seven crossings down to one');
+  assert.equal(wordsOf(r.state), '1- | 0+ | out');
+});
+
+test('taut-pull: no bulge left: along random play, nothing on top of (or under) everything could cross less, and what crosses the least is drawn straight', () => {
+  const len = (pts) => pts.slice(1).reduce((a, p, k) => a + Math.hypot(p[0] - pts[k][0], p[1] - pts[k][1]), 0);
+  const rng = mulberry(4);
+  let seen = 0, straight = 0;
+  for (const L of LEVELS.filter((_, i) => i % 2 === 0)) {
+    let s = newState(L);
+    for (let m = 0; m < 6 && !isDone(s); m++) {
+      let lay = null;
+      for (let i = 0; i < L.S; i++) {
+        if (s.out[i] || !s.w[i].length) continue;
+        const tops = s.w[i].map((c) => s.x[c][2] === i);
+        if (!tops.every(Boolean) && tops.some(Boolean)) continue;
+        seen++;
+        assert.equal(tautLength(L, s, i), s.w[i].length, `${L.id}: strand ${i} lies on its own layer with no bend to lose`);
+        // crossing only the strands its ends straddle, once each: a straight chord
+        if (s.w[i].length !== straddle(L, s, i)) continue;
+        lay ??= layout(L, s);
+        const a = pegUnit(L.n, s.ends[2 * i]), b = pegUnit(L.n, s.ends[2 * i + 1]);
+        assert.ok(len(lay.strands[i]) <= 1.02 * Math.hypot(a[0] - b[0], a[1] - b[1]), `${L.id}: strand ${i} drawn straight`);
+        straight++;
+      }
+      const ms = legalMoves(L, s);
+      const [e, q] = ms[Math.floor(rng() * ms.length)];
+      s = move(L, s, e, q).state;
+    }
+  }
+  assert.ok(seen > 30 && straight > 20, `${seen} on one layer, ${straight} straight`);
+});
+
+test('taut-pull: the solver’s quick way (only stretches a move made new) agrees with looking at every stretch', () => {
+  const rng = mulberry(8);
+  let n = 0, pulls = 0;
+  for (const L of LEVELS.filter((_, i) => i % 4 === 1)) {
+    let s = newState(L);
+    assert.equal(tightened(L, s), s, `${L.id}: starts pulled taut`);
+    for (let k = 0; k < 6 && !isDone(s); k++) {
+      const ms = legalMoves(L, s).filter(([, q]) => q >= 0);
+      for (const [e, q] of ms.filter((_, j) => j % 3 === k % 3)) {
+        const a = move(L, s, e, q), b = move(L, s, e, q, { quick: true });
+        assert.equal(stateKey(L, b.state), stateKey(L, a.state), `${L.id} ${e}:${q}`);
+        n++; if (a.pulled) pulls++;
+      }
+      const [e, q] = ms[Math.floor(rng() * ms.length)];
+      s = move(L, s, e, q).state;
+    }
+  }
+  assert.ok(n > 300 && pulls > 20, `${n} moves, ${pulls} with a pull`);
 });
 
 // ---------- clasps ----------
@@ -488,6 +623,7 @@ test('levels: twenty-three hoops made by real moves, every stored solution repla
     assert.ok(crossCounts(L, s).every((c) => c > 0), `${L.id}: every strand crosses something`);
 
     assert.equal(wordsError(L, s.ends, s.w, s.x), null);
+    assert.equal(tightened(L, s), s, `${L.id}: dealt pulled taut (the scramble pulls after every move too)`);
     const [lo, hi] = LEVEL_DEFS[i].knobs.par;
     assert.ok(L.par >= lo && L.par <= hi, `${L.id}: par ${L.par} in ${lo}-${hi}`);
     if (!L.stats.optimal) assert.ok(LEVEL_DEFS[i].knobs.best, `${L.id}: an unproven par only where the knobs allow`);
@@ -556,7 +692,7 @@ test('determinism: the generator makes the same hoop from the same seed, as stor
 
 test('saves: the old over-and-under model’s saved hoop is set aside (new state version, new level signatures)', () => {
   assert.equal(VERSION, 2);
-  assert.equal(MODEL, 'words-3-handlift');
+  assert.equal(MODEL, 'words-4-taut');
   const L = LEVELS[0];
   const old = { v: 1, level: L.id, ends: L.start.slice(), out: Array(L.S).fill(0), z: [...Array(L.S).keys()], moves: 0 };
   assert.notEqual(old.v, VERSION);

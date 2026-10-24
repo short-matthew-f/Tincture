@@ -52,6 +52,16 @@
 //   sliding A off would just move the crossings onto it. Alternating pairs
 //   (A under B, then A over B, next to each other along both) are a CLASP:
 //   the two strands hook each other and stay hooked until a move undoes it.
+// - TAUT-PULL. After every move, yarn that nothing holds in a bend pulls
+//   straight. A strand lying over every strand it crosses is held only by its
+//   two knots, so it is re-laid on the fewest-crossings path between them,
+//   still over everything (one under everything slides along the linen
+//   under them all, so it straightens the same way, still under). So does a
+//   STRETCH of a strand lying over (or under) everything between two
+//   crossings where it goes the other way (a bridge, or a tunnel). Repeated
+//   until nothing changes, with cancellation after each. See `tighten`.
+//   Its crossings are then the ones its ends force (interleaving) wherever
+//   the others allow; if that is none, it crosses nothing and comes free.
 // - Any empty peg will do: there is no rule about how far apart a strand's
 //   ends must be (a strand carried next to its own other knot simply has
 //   nothing between its ends).
@@ -92,7 +102,9 @@
 // longer has a way out is reported by the hint as tangled, never as lost.
 
 export const VERSION = 2;
-export const MODEL = 'words-3-handlift';
+export const MODEL = 'words-4-taut';
+/** Switches for the tests (to show what the hoop did before taut-pull); always on in play. */
+export const OPTIONS = { taut: true };
 
 // Natural-dye colors. Keys are what the save and the level data hold.
 export const COLORS = {
@@ -501,6 +513,271 @@ function carry(L, ends, w, x, ms, dir, passed) {
   return made;
 }
 
+// ---------- taut-pull ----------
+// A strand lying OVER every strand it crosses is held only by its own two
+// knots: pull it and it straightens, sliding over everything. One lying
+// UNDER every strand it crosses straightens too: it is on the lowest layer,
+// nothing it passes is beneath it, and it slides along the linen under them
+// all. Either way it may be re-laid along ANY path between its knots, on
+// its own layer; the taut lie is the path that crosses the fewest strands.
+// That is found on the map of everything else (rim, knots, crossings, and
+// the yarn between them): its faces, stepping from face to face across one
+// piece of yarn at a time, breadth first from the face at one knot to the
+// face at the other (ties broken in a fixed order). The strand's word is
+// replaced by the crossings on that path (all over, or all under); each
+// crossing goes into the other strand's word on the piece it crosses, with
+// its sign from the side it crosses from. A strand whose ends interleave k
+// others and crosses just those, once each, is already taut. Strands tied
+// into a shared knot are left as they are. Applied again and again (with
+// reduction on every word that lost a crossing) until nothing changes: each
+// pull removes crossings, so it ends.
+
+// The map of all the yarn (rim, knots, crossings, and the pieces between
+// them), with its faces; built once per position and shared by every stretch
+// looked at there. (Typed scratch, reused: one map at a time.)
+const TM = { size: 0, strand: null, seg: null, next: null, face: null, order: null, fs: null, xs: 0, ka: null };
+function tautMap(L, ends, w, x, out) {
+  const n = L.n, S = L.S;
+  // darts in pairs: 2i forward, 2i+1 back. The rim's first (peg p to p + 1),
+  // then each strand's pieces in order (piece k of strand s: base[s] + 2k).
+  let D = 2 * n;
+  const base = [];
+  for (let s2 = 0; s2 < S; s2++) { base.push(D); if (!out[s2]) D += 2 * (w[s2].length + 1); }
+  if (TM.size < D) {
+    TM.size = 2 * D;
+    TM.strand = new Int32Array(TM.size); TM.seg = new Int32Array(TM.size); TM.next = new Int32Array(TM.size);
+    TM.face = new Int32Array(TM.size); TM.order = new Int32Array(TM.size); TM.fs = new Int32Array(TM.size + 1);
+  }
+  if (TM.xs < x.length) { TM.xs = 2 * x.length + 16; TM.ka = new Int32Array(TM.xs); }
+  const { strand, seg, next, face, order, fs, ka } = TM;
+  for (let d = 0; d < 2 * n; d++) { strand[d] = -1; seg[d] = -1; }
+  for (let s2 = 0; s2 < S; s2++) {
+    if (out[s2]) continue;
+    const ws = w[s2];
+    for (let k = 0; k <= ws.length; k++) { const d = base[s2] + 2 * k; strand[d] = strand[d + 1] = s2; seg[d] = seg[d + 1] = k; }
+  }
+  // the face walk: a dart arriving at a vertex goes on along the next dart
+  // clockwise from its own way back (the rotation r lists the darts leaving v)
+  const turn = (r) => { const k = r.length; for (let i = 0; i < k; i++) next[r[i] ^ 1] = r[(i - 1 + k) % k]; };
+  const tails = [];
+  for (let p = 0; p < n; p++) {
+    tails.length = 0;
+    for (let e = 0; e < 2 * S; e++) if (ends[e] === p && !out[e >> 1]) tails.push(e);
+    if (tails.length === 2) tails.sort((a, b) => L.cwSide[b] - L.cwSide[a]);
+    const r = [2 * p];
+    for (const e of tails) { const s2 = e >> 1; r.push(e & 1 ? base[s2] + 2 * w[s2].length + 1 : base[s2]); }
+    r.push(2 * ((p - 1 + n) % n) + 1);
+    turn(r);
+  }
+  // each crossing: where it lies along its first strand (seen first), then its rotation from the second
+  for (let s2 = 0; s2 < S; s2++) {
+    if (out[s2]) continue;
+    const ws = w[s2];
+    for (let k = 0; k < ws.length; k++) {
+      const c = ws[k], X = x[c];
+      if (X[0] === s2) { ka[c] = k; continue; }
+      // s2 is its b strand (b > a, so a's word was read first)
+      const a = X[0], kA = ka[c];
+      const aNext = base[a] + 2 * (kA + 1), aPrev = base[a] + 2 * kA + 1, bNext = base[s2] + 2 * (k + 1), bPrev = base[s2] + 2 * k + 1;
+      turn(X[3] > 0 ? [aNext, bNext, aPrev, bPrev] : [aNext, bPrev, aPrev, bNext]);
+    }
+  }
+  // faces: each dart's face lies on its left (the darts of face f are order[fs[f]..fs[f+1]-1])
+  for (let d = 0; d < D; d++) face[d] = -1;
+  let nf = 0, m = 0;
+  fs[0] = 0;
+  for (let d0 = 0; d0 < D; d0++) {
+    if (face[d0] >= 0 || (d0 >= 2 * n && strand[d0] < 0)) continue;
+    for (let d = d0, guard = 0; face[d] < 0; guard++) {
+      if (guard > D) throw new Error('taut: face walk');
+      face[d] = nf; order[m++] = d;
+      d = next[d];
+    }
+    fs[++nf] = m;
+  }
+  return { strand, seg, face, order, fs, nf, base, D: m };
+}
+
+// The crossings of the fewest-crossings path for the stretch of strand A
+// that holds its crossings i0..i1-1 (from its knot, or the crossing before
+// i0, to its knot, or crossing i1), on the map of everything else, A's other
+// pieces being walls: [{ s, k, cr }] (strand s's piece k, i.e. between its
+// k-th and (k+1)-th crossings once the stretch's crossings are gone; cr =
+// sign of cross(A's way, s's way)); or null if none is shorter than
+// `limit`. On the whole map M, taking the stretch out is the same as letting
+// the way cross its pieces for nothing: a breadth-first search with steps
+// costing 0 (across the stretch) or 1 (across other yarn).
+// (scratch for the search, reused: a face's entries count only when its stamp is this search's)
+const TP = { size: 0, dist: null, via: null, prev: null, stamp: null, dq: null, mark: 0 };
+function tautPath(M, w, A, i0, i1, limit = Infinity) {
+  const { strand, seg, face, order, fs, nf, base } = M;
+  const start = face[base[A] + 2 * i0], goal = face[base[A] + 2 * i1];
+  const room = Math.max(M.D, nf) + 2;
+  if (TP.size < room) {
+    TP.size = 2 * room;
+    TP.dist = new Int32Array(TP.size); TP.via = new Int32Array(TP.size); TP.prev = new Int32Array(TP.size);
+    TP.stamp = new Int32Array(TP.size); TP.dq = new Int32Array(2 * TP.size); TP.mark = 0;
+  }
+  const { dist, via, prev, stamp, dq } = TP;
+  const mark = ++TP.mark;
+  const far = (f) => (stamp[f] === mark ? dist[f] : 0x3fffffff);
+  // (a deque: steps costing nothing go in at the front)
+  let head = TP.size, tail = TP.size;
+  stamp[start] = mark; dist[start] = 0; dq[tail++] = start;
+  while (head < tail) {
+    const f = dq[head++];
+    if (f === goal) break;
+    const df = dist[f];
+    for (let j = fs[f]; j < fs[f + 1]; j++) {
+      const d = order[j], s2 = strand[d];
+      if (s2 < 0) continue; // the rim
+      let cost = 1;
+      if (s2 === A) { if (seg[d] < i0 || seg[d] > i1) continue; cost = 0; } // the strand's other pieces are walls
+      const g = face[d ^ 1], dg = df + cost;
+      if (dg >= limit || dg >= far(g)) continue;
+      stamp[g] = mark; dist[g] = dg; via[g] = d; prev[g] = f;
+      if (cost) dq[tail++] = g; else dq[--head] = g;
+    }
+  }
+  if (far(goal) >= limit) return null;
+  const path = [];
+  const gone = new Set(w[A].slice(i0, i1));
+  for (let f = goal; f !== start; f = prev[f]) {
+    const d = via[f];
+    if (strand[d] === A) continue;
+    // its piece once the stretch's crossings are gone
+    const s2 = strand[d], ws = w[s2];
+    let k = seg[d];
+    for (let j = 0; j < seg[d]; j++) if (gone.has(ws[j])) k--;
+    // A crosses from d's left to its right: if d runs along the strand's word, cross(A, strand) = +1
+    path.push({ s: s2, k, cr: d & 1 ? -1 : 1 });
+  }
+  return path.reverse();
+}
+
+// QUICK (the solver's way): after a move from a position already pulled
+// taut, only the stretches the move made new (in the words it changed) can
+// have a shorter way; once something pulls, every stretch of every word
+// changed so far is looked at again (a pull sweeps a stretch right across
+// the hoop, and the order the pulls come in must stay as in play). A move's
+// end slides along the rim past knots; the map of the yarn changes only
+// there, at the tails it passes, and a stretch with the same crossings,
+// between the same two points, keeps every crossing it had with the same
+// pieces of yarn. Checked against the
+// full scan along random play (the tests); lift-offs, which take a whole
+// strand out of the map, always use the full scan, and so does play itself
+// (`move`): only the solver and the bots take the quick way.
+// Pull taut, until nothing changes: every strand lying over (or under)
+// everything it crosses, and every STRETCH of a strand that lies over (or
+// under) everything it crosses between two points where the strand goes the
+// other way (a bridge, or a tunnel). Mutates w (copying words not in
+// `owned`) and x (appends, holes). Returns how many crossings it removed.
+function tighten(L, ends, w, x, out, owned, quick = null) {
+  const S = L.S;
+  const live = () => w.reduce((a, ws) => a + ws.length, 0);
+  const before = live();
+  const mine = (t) => { if (!owned.has(t)) { w[t] = w[t].slice(); owned.add(t); } return w[t]; };
+  // Was this stretch (its crossings, and where it starts and ends: a crossing,
+  // or a knot's peg) there in the parent? The parent's crossings keep their
+  // ids (and so their tops) through the move, so a stretch bounded by the
+  // same crossings was a whole stretch there too.
+  const inParent = (A, lo, hi) => {
+    const p = quick.w0[A], wa = w[A], k = hi - lo;
+    const j = p.indexOf(wa[lo]);
+    if (j < 0 || j + k > p.length) return false;
+    for (let t = 1; t < k; t++) if (p[j + t] !== wa[lo + t]) return false;
+    if (lo > 0 ? j === 0 || p[j - 1] !== wa[lo - 1] : j !== 0 || quick.ends0[2 * A] !== ends[2 * A]) return false;
+    if (hi < wa.length ? j + k >= p.length || p[j + k] !== wa[hi] : j + k !== p.length || quick.ends0[2 * A + 1] !== ends[2 * A + 1]) return false;
+    return true;
+  };
+  // (the stretches known taut: the parent's, until something pulls)
+  let pulledYet = false;
+  let M = null; // the map, for as long as nothing pulls
+  for (let guard = 0; guard < 400; guard++) {
+    let done = true;
+    scan: for (let A = 0; A < S; A++) {
+      const wa = w[A];
+      if (out[A] || !wa.length) continue;
+      // (quick: only the strands whose words this move changed, and of those
+      // only the stretches that are new since the parent; see QUICK above)
+      if (quick && !owned.has(A)) continue;
+      // the stretches: runs with the same strand on top
+      for (let i0 = 0; i0 < wa.length;) {
+        let i1 = i0 + 1;
+        const over = x[wa[i0]][2] === A;
+        while (i1 < wa.length && (x[wa[i1]][2] === A) === over) i1++;
+        const lo = i0, hi = i1;
+        i0 = i1;
+        // Only worth a search if it could be shorter. A stretch of one or two
+        // crossings never was, in 14,000 tried along random play on every
+        // level (a strand's own crossings and cancellation already see to
+        // those), so only stretches of three or more are searched. And every
+        // other strand runs rim to rim and cuts the hoop in two, so a stretch
+        // whose ends lie off it must cross it an odd number of times, at
+        // least once, whatever path it takes: a stretch crossing each such
+        // strand at most once, and none that its ends lie on, is already taut.
+        if (hi - lo < 3) continue;
+        if (quick && !pulledYet && inParent(A, lo, hi)) continue;
+        const endOn = new Set();
+        if (lo > 0) endOn.add(otherOf(x[wa[lo - 1]], A)); else if (L.link[2 * A] >= 0) endOn.add(L.link[2 * A] >> 1);
+        if (hi < wa.length) endOn.add(otherOf(x[wa[hi]], A)); else if (L.link[2 * A + 1] >= 0) endOn.add(L.link[2 * A + 1] >> 1);
+        const seenB = new Set();
+        let could = false;
+        for (let k = lo; k < hi && !could; k++) {
+          const b = otherOf(x[wa[k]], A);
+          if (endOn.has(b) || seenB.has(b)) could = true;
+          seenB.add(b);
+        }
+        if (!could) continue;
+        M ??= tautMap(L, ends, w, x, out);
+        const path = tautPath(M, w, A, lo, hi, hi - lo);
+        if (!path || path.length >= hi - lo) continue;
+        // out with the old stretch
+        const old = wa.slice(lo, hi);
+        const touched = new Set();
+        for (const c of old) { const o = otherOf(x[c], A); if (o !== A) { const wo = mine(o); wo.splice(wo.indexOf(c), 1); touched.add(o); } x[c] = null; }
+        // in with the taut one: pieces are counted on the words without the old stretch
+        const nw = [];
+        const ins = path.map((h) => {
+          x.push([Math.min(A, h.s), Math.max(A, h.s), over ? A : h.s, A < h.s ? h.cr : -h.cr]);
+          nw.push(x.length - 1);
+          return { s: h.s, k: h.k, c: x.length - 1 };
+        });
+        ins.sort((p, q) => p.s - q.s || q.k - p.k);
+        for (const h of ins) mine(h.s).splice(h.k, 0, h.c);
+        const wA = mine(A);
+        wA.splice(lo, hi - lo, ...nw);
+        touched.add(A);
+        reduce(w, x, touched, owned);
+        done = false;
+        pulledYet = true;
+        M = null;
+        break scan;
+      }
+    }
+    if (done) break;
+  }
+  // how many crossings went (each lies in two words)
+  return (before - live()) / 2;
+}
+/** The fewest crossings strand A could have, re-laid on its own layer (for the tests): -1 if it is held over and under. */
+export function tautLength(L, s, A) {
+  const ws = s.w[A];
+  if (!ws.length) return 0;
+  const over = ws.every((c) => s.x[c][2] === A), under = ws.every((c) => s.x[c][2] !== A);
+  if (!over && !under) return -1;
+  const p = tautPath(tautMap(L, s.ends, s.w, s.x, s.out), s.w, A, 0, ws.length);
+  return p ? p.length : -1;
+}
+/** A state with every strand that lies over (or under) everything it crosses pulled taut (nothing freed). */
+export function tightened(L, s) {
+  const w = s.w.slice(), x = s.x.slice(), owned = new Set();
+  const pulled = tighten(L, s.ends, w, x, s.out, owned);
+  if (!pulled) return s;
+  const c = canon(w, x);
+  return { ...s, w: c.w, x: c.x };
+}
+
 // Free every unit whose strands all cross nothing. Mutates ends/out;
 // returns [{ s, a, b }] with the pegs each freed strand was tied to.
 function settle(L, ends, out, w) {
@@ -533,15 +810,17 @@ function applyLiftOff(L, ends0, w0, x0, out0, u, tidy = true) {
   const lifted = u.map((m) => ({ s: m, a: ends[2 * m], b: ends[2 * m + 1], lifted: true }));
   for (const m of u) { out[m] = 1; ends[2 * m] = -1; ends[2 * m + 1] = -1; w[m] = []; owned.add(m); }
   const cancelled = reduce(w, x, touched, owned);
+  const pulled = OPTIONS.taut ? tighten(L, ends, w, x, out, owned) : 0;
   let W = w, X = x;
   if (tidy) { const c = canon(w, x); W = c.w; X = c.x; }
   const freed = [...lifted, ...settle(L, ends, out, W)];
+  void pulled;
   return { ends, out, w: W, x: X, freed, made: 0, cancelled };
 }
 
 // The whole move on bare arrays: carry, reduce, renumber, free.
 // tidy: renumber the crossings (the solver skips it: its key renumbers anyway).
-function applyMove(L, ends0, w0, x0, out0, e, q, path, free = true, tidy = true) {
+function applyMove(L, ends0, w0, x0, out0, e, q, path, free = true, tidy = true, quick = false) {
   const ends = ends0.slice(), out = out0.slice();
   const w = w0.slice(), x = x0.slice();
   const ms = movers(L, e);
@@ -553,11 +832,14 @@ function applyMove(L, ends0, w0, x0, out0, e, q, path, free = true, tidy = true)
   for (const s of dirty) w[s] = w[s].slice();
   // the knots passed are judged before the end lands (q is empty)
   const made = carry(L, ends0, w, x, ms, path.dir, path.passed);
-  const cancelled = reduce(w, x, dirty, new Set(dirty));
+  const owned = new Set(dirty);
+  const cancelled = reduce(w, x, dirty, owned);
+  // yarn on top of (or under) everything pulls taut
+  const pulled = OPTIONS.taut ? tighten(L, ends, w, x, out, owned, quick ? { w0, ends0 } : null) : 0;
   let W = w, X = x;
   if (tidy) { const c = canon(w, x); W = c.w; X = c.x; }
   const freed = free ? settle(L, ends, out, W) : [];
-  return { ends, out, w: W, x: X, freed, made, cancelled };
+  return { ends, out, w: W, x: X, freed, made, cancelled, pulled };
 }
 
 /**
@@ -567,7 +849,7 @@ function applyMove(L, ends0, w0, x0, out0, e, q, path, free = true, tidy = true)
  * scramble (the level generator only): any knot but a stitched one may be
  * lifted, and nothing comes free.
  */
-export function move(L, s, e, q, { scramble = false } = {}) {
+export function move(L, s, e, q, { scramble = false, quick = false } = {}) {
   if (q === -1) {
     const why = canLiftOff(L, s, e >> 1);
     if (why) return { ok: false, ...why, state: s };
@@ -581,9 +863,9 @@ export function move(L, s, e, q, { scramble = false } = {}) {
   const w2 = whyNotTo(L, s, e, q);
   if (w2) return { ok: false, reason: w2, blockers: [], state: s };
   const path = pathOf(L, s.ends, e, q);
-  const r = applyMove(L, s.ends, s.w, s.x, s.out, e, q, path, !scramble);
+  const r = applyMove(L, s.ends, s.w, s.x, s.out, e, q, path, !scramble, true, quick);
   const t = { v: VERSION, level: s.level, ends: r.ends, out: r.out, w: r.w, x: r.x, moves: s.moves + 1 };
-  return { ok: true, state: t, from: s.ends[e], to: q, movers: movers(L, e), dir: path.dir, passed: path.passed, made: r.made, cancelled: r.cancelled, freed: r.freed };
+  return { ok: true, state: t, from: s.ends[e], to: q, movers: movers(L, e), dir: path.dir, passed: path.passed, made: r.made, cancelled: r.cancelled, pulled: r.pulled, freed: r.freed };
 }
 
 // ---------- undo: a tiny pure history ----------
@@ -691,31 +973,25 @@ function simApply(C, st, e, q) {
     const r = applyLiftOff(C.L, st.ends, st.w, st.x, st.out, C.L.units[C.L.unitOf[e >> 1]], false);
     return { ends: r.ends, out: r.out, w: r.w, x: r.x, freed: r.freed.length };
   }
-  const r = applyMove(C.L, st.ends, st.w, st.x, st.out, e, q, pathOf(C.L, st.ends, e, q), true, false);
+  const r = applyMove(C.L, st.ends, st.w, st.x, st.out, e, q, pathOf(C.L, st.ends, e, q), true, false, C.quick);
   return { ends: r.ends, out: r.out, w: r.w, x: r.x, freed: r.freed.length };
 }
 const simDone = (st) => st.out.every(Boolean);
 const simCross = (st) => st.w.reduce((a, ws) => a + ws.length, 0) / 2;
 
-// Lower bound on moves. A pair of strands whose crossings can't cancel
-// between themselves (pairLeft > 0) keeps crossing until one of the two moves
-// or is lifted off (a cancellation elsewhere can only remove a pair that is
-// already reducible between them), so some move must touch one of their
-// units: the minimum vertex cover of that graph over units is admissible, and
-// consistent (a move changes only pairs that involve the moved unit). A pair
-// inside one unit forces that unit.
-//
-// Where there is no lift-off, more: a move passes each knot at most once,
-// and each pass changes A and B's own crossings by one (a new one, or one
-// new cancelling two old), so a pair with k crossings that can't cancel
-// between themselves needs ceil(k/2) moves of A or B. Pairs with no unit in
-// common need separate moves: the heaviest such matching (over units) is
-// admissible too, and consistent (a move takes at most one off the one
-// matched pair at its unit). The bound is the larger of the two.
+// Lower bound on moves. Two strands whose ends interleave cross until one
+// of them moves (or is lifted off); two that are HOOKED (each lies over the
+// other somewhere, in a way no cancellation between them can undo) too:
+// neither can be pulled taut or lifted off while they are. Nothing else
+// changes either pair, so some move must touch one of their units: the
+// minimum vertex cover of that graph over units is admissible, and
+// consistent (a move changes only pairs at the moved unit; a taut-pull or a
+// strand coming free changes no such pair). A pair inside one unit forces it.
+// (Crossings that only taut-pulls or cancellations keep in place don't count:
+// a move of a third strand can clear them.)
 function vcBound(C, st) {
-  const L = C.L, U = L.units.length, w = st.w, x = st.x;
+  const L = C.L, U = L.units.length, w = st.w, x = st.x, n = C.n, ends = st.ends;
   const adj = new Array(U).fill(0);
-  const wt = L.liftoff ? null : Array.from({ length: U }, () => new Int32Array(U));
   let forced = 0, any = false;
   const cnt = new Int32Array(C.S);
   for (let a = 0; a < C.S; a++) {
@@ -724,17 +1000,18 @@ function vcBound(C, st) {
     for (const c of w[a]) cnt[otherOf(x[c], a)]++;
     for (let b = a + 1; b < C.S; b++) {
       if (!cnt[b]) continue;
-      // one crossing (or any odd number) can't cancel; two or more might
-      const k = cnt[b] === 1 ? 1 : pairLeft(w, x, a, b);
-      if (!k) continue;
+      const linked = L.unitOf[a] === L.unitOf[b];
+      const must = (!linked && crosses(n, ends[2 * a], ends[2 * a + 1], ends[2 * b], ends[2 * b + 1])) || (cnt[b] >= 2 && mutual(w, x, a, b));
+      if (!must) continue;
       const ua = L.unitOf[a], ub = L.unitOf[b];
       if (ua === ub) { forced |= 1 << ua; continue; }
       adj[ua] |= 1 << ub; adj[ub] |= 1 << ua; any = true;
-      if (wt) { const h = (k + 1) >> 1; if (h > wt[ua][ub]) { wt[ua][ub] = h; wt[ub][ua] = h; } }
     }
   }
   const pop = (v) => { let c = 0; while (v) { v &= v - 1; c++; } return c; };
-  if (!any) return pop(forced);
+  let left = false;
+  for (let a = 0; a < C.S; a++) if (!st.out[a]) left = true;
+  if (!any) return Math.max(pop(forced), left ? 1 : 0);
   let best = Infinity;
   const rec = (alive, k) => {
     if (k >= best) return;
@@ -746,19 +1023,7 @@ function vcBound(C, st) {
     rec(alive & ~nb & ~(1 << v), k + pop(nb));
   };
   rec(((1 << U) - 1) & ~forced, pop(forced));
-  if (!wt) return best;
-  // heaviest matching of pair weights (units outside `forced`; a forced unit's move counts once)
-  let mbest = 0;
-  const mrec = (alive, sum) => {
-    let i = 0;
-    while (i < U && !(alive >> i & 1)) i++;
-    if (i >= U) { if (sum > mbest) mbest = sum; return; }
-    const rest = alive & ~(1 << i);
-    mrec(rest, sum);
-    for (let j = i + 1; j < U; j++) if (rest >> j & 1 && wt[i][j]) mrec(rest & ~(1 << j), sum + wt[i][j]);
-  };
-  mrec(((1 << U) - 1) & ~forced, 0);
-  return Math.max(best, mbest + pop(forced));
+  return Math.max(best, 1);
 }
 export const lowerBound = (L, s) => vcBound(ctxOf(L), s);
 
@@ -798,7 +1063,10 @@ Heap.lt = (p, q) => (p.f !== q.f ? p.f < q.f : p.h !== q.h ? p.h < q.h : p.id < 
  * (words can grow, so that only happens when nothing at all can move).
  */
 export function solve(L, s = newState(L), { cap = 200000, weight = 1 } = {}) {
-  const C = ctxOf(L);
+  // (quick pulls are exact only from a position already pulled taut: every
+  // shipped hoop starts so, and every move leaves one so; a hand-made loose
+  // start is searched the slow way)
+  const C = { ...ctxOf(L), quick: tightened(L, s) === s };
   const st0 = { ends: s.ends.slice(), out: s.out.slice(), w: s.w.map((a) => a.slice()), x: s.x };
   if (simDone(st0)) return { ok: true, path: [], nodes: 0, optimal: true, exhausted: false };
   const best = new Map();

@@ -946,6 +946,13 @@ hoopEl.addEventListener('pointerdown', (e) => {
     let nearKnot = Infinity;
     for (const p of G.state.ends) if (p >= 0) nearKnot = Math.min(nearKnot, Math.hypot(HG.peg[p][0] - x, HG.peg[p][1] - y));
     if (nearKnot > Math.max(30, HG.w * 3)) strand = strandUnder(x, y);
+    else if (L.liftoff && nearKnot > Math.max(18, HG.w * 2)) {
+      // a short strand pulled taut across another's knot, tucked by the rim:
+      // right on its yarn, clear of its own knots, it can still be lifted off
+      const i = strandUnder(x, y);
+      const own = i >= 0 ? Math.min(...[0, 1].map((k) => { const p = G.state.ends[2 * i + k]; return Math.hypot(HG.peg[p][0] - x, HG.peg[p][1] - y); })) : 0;
+      if (i >= 0 && own > Math.max(30, HG.w * 3) && !canLiftOff(L, G.state, i)) strand = i;
+    }
   }
   down = { id: e.pointerId, x, y, q, touch: e.pointerType !== 'mouse', moved: false, strand };
   try { hoopEl.setPointerCapture(e.pointerId); } catch { /* fine */ }
@@ -1215,8 +1222,9 @@ function afterNote(res, hk, hooked0) {
     const what = lifted.length === 1 ? `the ${cshort(L.color[lifted[0].s])} strand` : 'both strands of the shared knot';
     return `You lifted ${what} right off.${rest.length ? ` ${rest.length === 1 ? `The ${cshort(L.color[rest[0].s])} strand` : `${rest.length} more strands`}, crossing nothing now, came free too.` : ''} ${togo}`;
   }
-  if (res.freed.length === 1) return `The ${cshort(L.color[res.freed[0].s])} strand came free. ${togo}`;
+  if (res.freed.length === 1) return `The ${cshort(L.color[res.freed[0].s])} strand ${res.pulled ? 'pulled straight and ' : ''}came free. ${togo}`;
   if (res.freed.length > 1) return `${res.freed.length === 2 ? 'Two' : res.freed.length === 3 ? 'Three' : res.freed.length} strands came free at once! ${togo}`;
+  if (!res.freed.length && res.pulled) return `The yarn pulled taut. ${togo}`;
   const hooked = hookedPairs(L, s).length;
   if (hooked > hooked0) return `Hooked: the end went over a knot and now loops round its strand. Carry it back to let go. ${togo}`;
   return togo;
@@ -1626,7 +1634,7 @@ const ILL = {
 };
 const HOW = [
   { t: 'Lift a knot, retie it', ill: 'lift', p: 'Tap a knot on a peg to lift it, then tap one of the glowing empty pegs to tie it there. Or just drag the knot across. The end is carried over the knots it passes, and whatever lay over the strand still does.' },
-  { t: 'Cross nothing, come free', ill: 'free', p: 'Strands cross where one lies over another, and two can cross more than once, even hook round each other (a small pair of rings marks a hook). A strand that crosses nothing at all slips off its pegs and winds onto a skein, and its two pegs are yours to use.' },
+  { t: 'Cross nothing, come free', ill: 'free', p: 'Strands cross where one lies over another, and two can cross more than once, even hook round each other (a small pair of rings marks a hook). Yarn lying on top of everything it crosses (or under everything) pulls taut after each move. A strand that crosses nothing at all slips off its pegs and winds onto a skein, and its two pegs are yours to use.' },
   { t: 'Any empty peg', ill: 'room', p: 'Tie a knot on any empty peg. The end you carry goes the way round that doesn’t pass its own other knot. Undo is free, Hint glows a good next move, and there are no timers and no way to lose.' },
 ];
 function renderHow() {
@@ -1684,7 +1692,7 @@ window.__hoop = {
     for (let k = Math.floor(pts.length * 0.2); k < pts.length * 0.8; k++) {
       let d = Infinity;
       for (const [j, o] of Object.entries(P.strands)) if (+j !== i) d = Math.min(d, distTo(o, pts[k]));
-      for (const p of G.state.ends) if (p >= 0) d = Math.min(d, Math.hypot(HG.peg[p][0] - pts[k][0], HG.peg[p][1] - pts[k][1]) - 30);
+      G.state.ends.forEach((p, e) => { if (p >= 0) d = Math.min(d, Math.hypot(HG.peg[p][0] - pts[k][0], HG.peg[p][1] - pts[k][1]) - ((e >> 1) === i ? 30 : 20)); });
       if (d > bd) { bd = d; best = pts[k]; }
     }
     return best ? pageOf(best) : null;

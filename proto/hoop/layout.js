@@ -20,10 +20,11 @@
 // A crossing hooked at a knot pulls toward that peg, so a strand that went
 // over a knot's tail wraps round it: two hooked strands look like two
 // interlocked loops.
-import { pegUnit, otherOf, pairRest } from './rules.js';
+import { pegUnit, otherOf, pairRest, crosses } from './rules.js';
+const crossesEnds = (L, s, i, o) => crosses(L.n, s.ends[2 * i], s.ends[2 * i + 1], s.ends[2 * o], s.ends[2 * o + 1]);
 
 export const SUB = 3;                  // points in each piece of yarn between crossings
-export const W_YARN = 1, W_FACE = 0.16; // pull of yarn edges / face hubs
+export const W_YARN = 1, W_FACE = 0.16, W_TAUT = 400; // pull of yarn edges / face hubs / a strand pulled taut
 
 /**
  * planarMap(L, s) -> { V: [{ fixed, p? }], adj: [[v...] in ccw order], paths: { strand: [v...] }, cross: { id: v }, faces: [[v...]], outer }
@@ -119,7 +120,15 @@ export function layout(L, s, { iters = 4000, tol = 1e-9, prev = null, wf = W_FAC
   // neighbors with weights: yarn edges, and a hub for every inner face
   const nb = V.map(() => []);
   const link = (u, v, wt) => { nb[u].push(v, wt); nb[v].push(u, wt); };
-  for (const path of Object.values(M.paths)) for (let k = 0; k + 1 < path.length; k++) link(path[k], path[k + 1], W_YARN);
+  // a strand lying over (or under) everything it crosses is pulled taut in
+  // the rules: it pulls much harder here too, so it is drawn (nearly) as the
+  // straight path between its knots and the others bend to meet it
+  for (const [i, path] of Object.entries(M.paths)) {
+    const ws = s.w[i], seen = new Set(ws.map((c) => otherOf(s.x[c], +i)));
+    const tautish = ws.length && seen.size === ws.length && (ws.every((c) => s.x[c][2] === +i) || ws.every((c) => s.x[c][2] !== +i));
+    const wt = tautish ? W_TAUT : W_YARN;
+    for (let k = 0; k + 1 < path.length; k++) link(path[k], path[k + 1], wt);
+  }
   const nFixed = V.length;
   const P = V.map((v) => (v.fixed ? v.p.slice() : [0, 0]));
   faces.forEach((f, fi) => {
@@ -128,7 +137,70 @@ export function layout(L, s, { iters = 4000, tol = 1e-9, prev = null, wf = W_FAC
     P.push([0, 0]); nb.push([]);
     for (const v of new Set(f)) link(h, v, wf);
   });
-  const fixed = (v) => v < nFixed && V[v].fixed;
+  // Taut strands lie straight. A strand that is pulled taut in the rules
+  // (over or under everything, crossing just the strands it must, once
+  // each) is pinned to the straight path between its knots, its crossings
+  // with other pinned strands where the two lines meet, its other points
+  // spaced along it in order; everything else then settles around them. A
+  // taut strand is pinned only if the crossings it shares with those already
+  // pinned come in the right order along both lines (they always do for a
+  // strand on top against one underneath; it is the drawing's choice, not
+  // the rules', when they don't).
+  const pin = new Map(); // vertex -> [x, y]
+  const tautList = Object.keys(M.paths).map(Number).filter((i) => {
+    const ws = s.w[i];
+    if (!ws.length) return false;
+    const others = new Set(ws.map((c) => otherOf(s.x[c], i)));
+    if (others.size !== ws.length) return false;
+    if (!(ws.every((c) => s.x[c][2] === i) || ws.every((c) => s.x[c][2] !== i))) return false;
+    for (const o of others) if (!crossesEnds(L, s, i, o)) return false;
+    return true;
+  });
+  const chosen = [];
+  const chordOf = (i) => [V[M.paths[i][0]].p, V[M.paths[i][M.paths[i].length - 1]].p];
+  const meet = (i, j) => {
+    const [p, q] = chordOf(i), [r, t] = chordOf(j);
+    const d = (q[0] - p[0]) * (t[1] - r[1]) - (q[1] - p[1]) * (t[0] - r[0]);
+    if (Math.abs(d) < 1e-12) return null;
+    const u = ((r[0] - p[0]) * (t[1] - r[1]) - (r[1] - p[1]) * (t[0] - r[0])) / d;
+    const v = ((r[0] - p[0]) * (q[1] - p[1]) - (r[1] - p[1]) * (q[0] - p[0])) / d;
+    return u > 0 && u < 1 && v > 0 && v < 1 ? { u, v, p: [p[0] + (q[0] - p[0]) * u, p[1] + (q[1] - p[1]) * u] } : null;
+  };
+  // the parameter along strand i of each crossing it has with a chosen strand, in its word order, must rise
+  const ordered = (i, set) => {
+    let last = 0;
+    for (const c of s.w[i]) {
+      const o = otherOf(s.x[c], i);
+      if (!set.includes(o)) continue;
+      const m = meet(i, o);
+      if (!m || m.u <= last) return false;
+      last = m.u;
+    }
+    return true;
+  };
+  for (const i of tautList) {
+    const set = [...chosen, i];
+    if (set.every((j) => ordered(j, set))) chosen.push(i);
+  }
+  for (const i of chosen) {
+    const path = M.paths[i], [A0, B0] = chordOf(i);
+    const anchors = [[0, 0]]; // [path index, t]
+    path.forEach((v, k) => {
+      const c = V[v].crossing;
+      if (c === undefined) return;
+      const o = otherOf(s.x[c], i);
+      if (chosen.includes(o)) anchors.push([k, meet(i, o).u]);
+    });
+    anchors.push([path.length - 1, 1]);
+    for (let a = 0; a + 1 < anchors.length; a++) {
+      const [k0, t0] = anchors[a], [k1, t1] = anchors[a + 1];
+      for (let k = k0; k <= k1; k++) {
+        const t = t0 + ((t1 - t0) * (k - k0)) / Math.max(1, k1 - k0);
+        if (path[k] >= nFixed || !V[path[k]].fixed) pin.set(path[k], [A0[0] + (B0[0] - A0[0]) * t, A0[1] + (B0[1] - A0[1]) * t]);
+      }
+    }
+  }
+  const fixed = (v) => (v < nFixed && V[v].fixed) || pin.has(v);
   // start: each strand's points along its chord (a warm start from prev if given)
   for (const [i, path] of Object.entries(M.paths)) {
     const A = V[path[0]].p, B = V[path[path.length - 1]].p;
@@ -146,6 +218,7 @@ export function layout(L, s, { iters = 4000, tol = 1e-9, prev = null, wf = W_FAC
     P[h] = [x / c, y / c];
   }
   if (prev) for (const [v, q] of prev) if (P[v] && !fixed(v)) P[v] = q.slice();
+  for (const [v, q] of pin) P[v] = q.slice();
   // Gauss-Seidel with over-relaxation
   const free = [];
   for (let v = 0; v < P.length; v++) if (!fixed(v)) free.push(v);

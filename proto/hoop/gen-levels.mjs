@@ -26,7 +26,9 @@ function greedy(L, seed, runs) {
 }
 
 // The scramble played backwards, with every move dropped that it can do
-// without; or a weighted search (quick, not minimal): the shorter.
+// without; or a weighted search (quick, not minimal): the shorter. (Since
+// yarn pulls taut, the scramble played backwards often no longer undoes it:
+// then a greedier search.)
 function bestFound(L, def, k) {
   let path = unscramble(L, def);
   if (path) {
@@ -37,6 +39,7 @@ function bestFound(L, def, k) {
   }
   const w = solve(L, undefined, { cap: Math.round((k.cap || SCREEN_CAP) / 2), weight: 1.6 });
   if (w.ok && (!path || w.path.length < path.length)) path = w.path;
+  if (!path) { const g = solve(L, undefined, { cap: k.cap || SCREEN_CAP, weight: 3 }); if (g.ok) path = g.path; }
   return path ? { ok: true, path, nodes: (k.cap || SCREEN_CAP), optimal: false } : null;
 }
 
