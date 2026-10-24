@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  REACH, COLORS, VERSION, MODEL, cdist, inArc, crosses, buildLevel, newState, move, canLift, whyNotTo, targets, legalMoves, endsAt, crossersOf,
+  COLORS, VERSION, MODEL, cdist, inArc, crosses, buildLevel, newState, move, canLift, whyNotTo, targets, legalMoves, endsAt, crossersOf,
   crossCounts, totalCrossings, isDone, remaining, movers, newGame, play, undo, replay, solve, hint, solutionStep, parseMoves, formatMoves,
   randomRate, greedyRate, mulberry, stateKey, levelSig, sparePegs, mechanicsOf, yarnLine, pegUnit, pathOf, pairLeft, hookedPairs, wordsError,
-  nearestAt, lowerBound,
+  nearestAt, lowerBound, liftable, mutual,
 } from '../hoop/rules.js';
 import { layout, planarMap, eulerOk, hits, plan, topAt, baseOrder } from '../hoop/layout.js';
 import { candidate, cleanHoop } from '../hoop/gen.js';
@@ -61,13 +61,14 @@ test('step rule: passing a knot lays the carried end OVER its tail; passing an e
   const L = lv(16, [[1, 6], [9, 13, 'i']]);
   let s = newState(L);
   assert.equal(totalCrossings(L, s), 0);
+  // (scramble: nothing lifts off, so the bare step can be read)
   // blue's end on 9 goes to 7: passes 8 (empty) only
-  let r = M(L, s, 2, 7);
+  let r = M(L, s, 2, 7, { scramble: true });
   assert.equal(r.made, 0);
   assert.deepEqual(r.passed, []);
   assert.equal(totalCrossings(L, r.state), 0);
   // ...to 4 instead: passes 8, 7 (empty) and 6 (red's knot): one crossing, blue over red
-  r = M(L, s, 2, 4);
+  r = M(L, s, 2, 4, { scramble: true });
   assert.equal(r.dir, -1, 'the way that does not pass its own other knot (13)');
   assert.deepEqual(r.passed, [6]);
   s = r.state;
@@ -99,14 +100,14 @@ test('step rule: passing a shared knot crosses both tails, in the order they lea
   // strands 0 (2-7) and 1 (7-12) share the knot on 7; its clockwise tail is strand 1's (end 2)
   const L = lv(16, [[2, 7], [7, 12, 'i'], [3, 6, 'w']], { links: [[2, 1]] });
   // yellow's end on 6 goes clockwise to 9, past the shared knot: first the tail on the side it comes from (strand 0), then strand 1
-  const r = M(L, newState(L), 5, 9);
+  const r = M(L, newState(L), 5, 9, { scramble: true });
   assert.deepEqual(r.passed, [7]);
   assert.equal(word(r.state, 2), '0+ 1+');
   assert.equal(word(r.state, 0), '2-');
   assert.equal(word(r.state, 1), '2-');
   // carried over BOTH of strand 0's knots, yellow slides right off it (the two crossings are neighbors along both)
   const L2 = lv(14, [[3, 6], [6, 10, 'i'], [12, 1, 'w']], { links: [[2, 1]] });
-  const r2 = M(L2, newState(L2), 5, 8);
+  const r2 = M(L2, newState(L2), 5, 8, { scramble: true });
   assert.deepEqual(r2.passed, [3, 6]);
   assert.equal(r2.cancelled, 2);
   assert.equal(word(r2.state, 2), '1+');
@@ -118,7 +119,7 @@ test('step rule: passing a shared knot crosses both tails, in the order they lea
 test('cancellation: carrying an end straight back over the knot it passed cancels both crossings', () => {
   const L = lv(16, [[1, 6], [9, 13, 'i']]);
   const s0 = newState(L);
-  const s1 = M(L, s0, 2, 4).state;
+  const s1 = M(L, s0, 2, 4, { scramble: true }).state;
   assert.equal(totalCrossings(L, s1), 1);
   const r = M(L, s1, 2, 9);
   assert.equal(r.made, 1);
@@ -149,7 +150,7 @@ test('cancellation: two crossings next to each other along one strand only are k
   assert.equal(word(s, 1), '0- 2+ 2- 0-', 'but C dips in between them along B');
   assert.equal(pairLeft(s.w, s.x, 0, 1), 0, 'on their own, A and B would part');
   // a move that stirs every word (green carried past B, A and C's knots) cancels nothing
-  const r = M(L, s, 7, 15);
+  const r = M(L, s, 7, 15, { scramble: true });
   assert.deepEqual(r.passed, [12, 13, 14]);
   assert.equal(r.cancelled, 0);
   assert.equal(word(r.state, 0), '3- 1+ 1+', 'A still lies over B twice: sliding A off would only move the crossings onto C');
@@ -181,22 +182,21 @@ test('the owner’s scenario: move the lower strand’s end next to the upper on
   assert.equal(pairLeft(s.w, s.x, 0, 1), 2, 'they can’t cancel between themselves');
   assert.ok(!crosses(16, s.ends[0], s.ends[1], s.ends[2], s.ends[3]), 'though their ends no longer interleave');
   assert.equal(remaining(s), 2, 'nothing came free');
-  // undoing it by moves, in reverse order: back to the X, unhooked
+  assert.deepEqual(liftable(L, s), [], 'hooked strands never lift off: each lies under the other somewhere');
+  // undoing it by moves, in reverse order: back to the X, unhooked, and then
+  // red lies over everything it crosses: it lifts off, and blue, crossing
+  // nothing now, follows (a cascade)
   s = M(L, s, 1, 8).state;
   r = M(L, s, 2, 4);
   assert.equal(r.cancelled, 2);
-  s = r.state;
-  assert.equal(word(s, 0), '1+');
-  assert.deepEqual(hookedPairs(L, s), []);
-  // and then the upper strand slides off past the lower one’s knot: both free
-  r = M(L, s, 1, 13);
-  assert.equal(r.freed.length, 2);
+  assert.equal(word(r.pre, 0), '1+', 'the X, just before the lift-off');
+  assert.deepEqual(r.freed.map((f) => [f.s, f.round]), [[0, 0], [1, 1]]);
   assert.ok(isDone(r.state));
 });
 
 test('clasps persist: moves of the hooked strands that pass nothing, and every move of another strand, leave the clasp', () => {
   // red 0-10 over blue 5-15; yellow 12-17 crosses blue
-  const L = lv(20, [[0, 10, 'm'], [5, 15, 'i'], [12, 17, 'w']], { over: [[0, 1]] });
+  const L = lv(20, [[0, 10, 'm'], [5, 15, 'i'], [12, 17, 'w']], { over: [[0, 1], [1, 2]] });
   const s = M(L, newState(L), 2, 19).state; // blue's end 5 -> 19, over red's knot on 0: hooked
   assert.deepEqual(hookedPairs(L, s), [[0, 1]]);
   const hooked = (t) => pairLeft(t.w, t.x, 0, 1);
@@ -299,29 +299,100 @@ test('the picture: every level, along its solution and along random scrambles, m
 
 // ---------- coming free, mechanics, undo ----------
 
-test('freeing: a strand whose word is empty slips off; shared knots go together', () => {
-  const L = lv(12, [[2, 6], [6, 10, 'i'], [4, 8, 'w']], { links: [[2, 1]], over: [[2, 0], [2, 1]] });
+// ---------- lift-off ----------
+
+test('lift-off: a strand lying over everything it crosses lifts right off, and its crossings leave the other words', () => {
+  // red 0-10 over blue 5-15; green 12-17 crosses blue, on top
+  const L = lv(20, [[0, 10, 'm'], [5, 15, 'i'], [12, 17, 'g']], { over: [[0, 1]] });
+  const s = newState(L);
+  assert.deepEqual(liftable(L, s).map((u) => u[0]).sort(), [0, 2], 'red and green lie on top of everything (a level never starts like this)');
+  // blue's end 5 -> 19, over red's knot on 0: red and blue hook; green still lies over everything and lifts off
+  const r = M(L, s, 2, 19);
+  assert.deepEqual(r.freed.map((f) => f.s), [2]);
+  assert.ok(r.pre.w[2].length > 0, 'it was crossing blue when it went: a lift-off, not a strand crossing nothing');
+  assert.equal(word(r.state, 1), '0+ 0-', 'blue’s word lost its green crossing');
+  assert.deepEqual(hookedPairs(L, r.state), [[0, 1]]);
+  assert.deepEqual(liftable(L, r.state), []);
+  assert.equal(wordsError(L, r.state.ends, r.state.w, r.state.x), null);
+});
+
+test('lift-off cascades: one strand leaving can leave the next on top of everything', () => {
+  // red 0-8 over blue 4-12, blue over yellow 10-14; yellow's end slides along empty pegs
+  const L = lv(16, [[0, 8, 'm'], [4, 12, 'i'], [10, 14, 'w']], { over: [[0, 1], [1, 2]] });
+  const r = M(L, newState(L), 5, 15);
+  assert.deepEqual(r.passed, []);
+  assert.deepEqual(r.freed.map((f) => [f.s, f.round]), [[0, 0], [1, 1], [2, 2]], 'red, then blue, then yellow');
+  assert.ok(isDone(r.state));
+});
+
+test('lift-off: a strand UNDER everything stays (the linen beneath, the strands over it pin it); a clasp never lifts off', () => {
+  // red and blue hooked; yellow lies under blue and crosses nothing else: under everything
+  const L = lv(20, [[0, 10, 'm'], [5, 15, 'i'], [12, 17, 'w']], { over: [[0, 1], [1, 2]] });
+  const r = M(L, newState(L), 2, 19);
+  assert.deepEqual(r.freed, []);
+  assert.equal(word(r.state, 2), '1-', 'yellow: under blue, and nothing else');
+  assert.deepEqual(liftable(L, r.state), []);
+  assert.ok(mutual(r.state.w, r.state.x, 0, 1), 'red and blue each lie over the other somewhere');
+  // every move that leaves red and blue hooked leaves both on the hoop
+  for (const [e, q] of legalMoves(L, r.state)) {
+    const t = move(L, r.state, e, q).state;
+    if (!t.out[0] && !t.out[1] && mutual(t.w, t.x, 0, 1)) assert.ok(!t.out[0] && !t.out[1]);
+    for (const [a, b] of hookedPairs(L, t)) assert.ok(!liftable(L, t).some((u) => u.includes(a) || u.includes(b)), `${e}:${q}`);
+  }
+});
+
+test('lift-off: strands tied into one shared knot lift off together once they lie over everything else', () => {
+  // strands 0 (2-6) and 1 (6-10) share the knot on 6, both over yellow (4-8)
+  const L = lv(12, [[2, 6], [6, 10, 'i'], [4, 8, 'w']], { links: [[2, 1]], over: [[0, 2], [1, 2]] });
   assert.deepEqual(movers(L, 1), [1, 2]);
   assert.equal(crossersOf(L, newState(L), 0).includes(1), false, 'strands sharing a knot start uncrossed');
-  // yellow on top of both: its end 8 -> 11 passes the far knot of strand 1 (10): cancels with it, strand 1 still shares a knot with 0
-  const r = M(L, newState(L), 5, 11);
-  assert.ok(r.cancelled >= 2);
-  assert.deepEqual(crossCounts(L, r.state).map((c) => c > 0), [true, false, true]);
-  assert.deepEqual(r.freed, [], 'strand 1 is clear, but its partner is not');
+  assert.deepEqual(liftable(L, newState(L)), [[0, 1]]);
+  const r = M(L, newState(L), 4, 3); // yellow's end slides along: nothing passed
+  assert.deepEqual(r.freed.map((f) => [f.s, f.round]), [[0, 0], [1, 0], [2, 1]]);
+  // with yellow over one of them, the pair stays
+  const K = lv(12, [[2, 6], [6, 10, 'i'], [4, 8, 'w']], { links: [[2, 1]], over: [[0, 2]] });
+  assert.deepEqual(liftable(K, newState(K)), [], 'yellow lies over strand 1, strand 0 over yellow: nothing lifts off');
   assert.deepEqual(mechanicsOf(L), ['links']);
 });
 
-test('painted pegs and reach', () => {
-  const L = lv(12, [[0, 6, 'm'], [3, 9, 'i']], { pegs: { 8: 'i', 4: 'm' } });
+test('the owner’s level 2 (as it was): the horizontal red is hooked with the blue, so it is not on top of everything', () => {
+  // red 7-0, red 8-4 (the horizontal one), blue 2-11; five crossings
+  const L = buildLevel({ id: 's', name: 'S', n: 12, strands: [{ c: 'm', a: 7, b: 0 }, { c: 'm', a: 8, b: 4 }, { c: 'i', a: 2, b: 11 }],
+    x: [[0, 2, 2, -1], [0, 1, 1, 1], [1, 2, 2, -1], [1, 2, 1, 1]], w: [[0, 1], [2, 1, 3], [3, 0, 2]] });
   const s = newState(L);
-  assert.equal(whyNotTo(L, s, 1, 8), 'color');
-  assert.equal(whyNotTo(L, s, 3, 8), null, 'indigo on the indigo peg');
-  assert.equal(whyNotTo(L, s, 1, 2), 'reach', 'two pegs from its other end');
-  assert.equal(whyNotTo(L, s, 1, 4), null);
-  assert.equal(whyNotTo(L, s, 1, 3), 'taken');
-  assert.equal(whyNotTo(L, s, 1, 6), 'same');
-  assert.throws(() => lv(12, [[0, 2]]), /too short/);
+  assert.ok(eulerOk(planarMap(L, s)));
+  assert.equal(word(s, 1), '2- 0+ 2+', 'under blue, over the other red, over blue');
+  assert.deepEqual(hookedPairs(L, s), [[1, 2]]);
+  assert.deepEqual(liftable(L, s), [], 'nothing would lift off');
+  checkPicture(L, s, 'owner’s level 2');
+  // the level 2 that ships now: nothing free at the start, and not a one-move hoop
+  const L2 = LEVELS[1];
+  assert.deepEqual(liftable(L2, newState(L2)), []);
+  assert.ok(L2.par >= 2);
+});
+
+// ---------- where ends may go ----------
+
+test('any empty peg: no rule about how far apart a strand’s ends are', () => {
+  const L = lv(16, [[0, 8, 'm'], [4, 12, 'i']], { over: [[0, 1]], pegs: { 6: 'i' } });
+  const s = newState(L);
+  assert.equal(whyNotTo(L, s, 1, 1), null, 'right next to its own other knot');
+  assert.equal(whyNotTo(L, s, 1, 15), null, 'on its other side too');
+  assert.equal(whyNotTo(L, s, 1, 6), 'color');
+  assert.equal(whyNotTo(L, s, 1, 4), 'taken');
+  assert.equal(whyNotTo(L, s, 1, 8), 'same');
+  assert.deepEqual(targets(L, s, 1), [1, 2, 3, 5, 7, 9, 10, 11, 13, 14, 15]);
+  // red carried right next to its own knot on 0, the way that doesn't pass it: over blue's knot on 4, cancelling the X; it lifts off
+  const r = M(L, s, 1, 1);
+  assert.equal(r.dir, -1);
+  assert.deepEqual(r.passed, [4]);
+  assert.ok(isDone(r.state));
+  // blue (under red) carried next to its own other knot instead: over red's knot: hooked, nothing free
+  const r2 = M(L, s, 2, 13);
+  assert.deepEqual(r2.freed, []);
+  assert.deepEqual(hookedPairs(L, r2.state), [[0, 1]]);
   assert.throws(() => buildLevel({ id: 'b', name: 'B', n: 12, strands: [{ c: 'm', a: 0, b: 6 }, { c: 'i', a: 3, b: 9 }] }), /cross 0 times/, 'the words must agree with the ends');
+  assert.doesNotThrow(() => lv(12, [[0, 1]]), 'a strand between neighboring pegs is fine');
 });
 
 test('undo: steps back exactly, hooks and all', () => {
@@ -349,7 +420,8 @@ test('levels: twenty hoops made by real moves, every stored solution replays, me
     const end = replay(L, L.solution);
     assert.ok(isDone(end), `${L.id} clears`);
     const s = newState(L);
-    assert.ok(crossCounts(L, s).every((c) => c > 0), `${L.id}: nothing is free before she starts`);
+    assert.ok(crossCounts(L, s).every((c) => c > 0), `${L.id}: every strand crosses something`);
+    assert.deepEqual(liftable(L, s), [], `${L.id}: nothing lies on top of everything at the start (nothing free before she starts)`);
     assert.equal(wordsError(L, s.ends, s.w, s.x), null);
     const [lo, hi] = LEVEL_DEFS[i].knobs.par;
     assert.ok(L.par >= lo && L.par <= hi, `${L.id}: par ${L.par} in ${lo}-${hi}`);
@@ -418,7 +490,7 @@ test('determinism: the generator makes the same hoop from the same seed, as stor
 
 test('saves: the old over-and-under model’s saved hoop is set aside (new state version, new level signatures)', () => {
   assert.equal(VERSION, 2);
-  assert.equal(MODEL, 'words-1');
+  assert.equal(MODEL, 'words-2-liftoff');
   const L = LEVELS[0];
   const old = { v: 1, level: L.id, ends: L.start.slice(), out: Array(L.S).fill(0), z: [...Array(L.S).keys()], moves: 0 };
   assert.notEqual(old.v, VERSION);
@@ -438,18 +510,20 @@ test('hint: follows the stored solution, finds a way from elsewhere, and spots a
   assert.deepEqual([h.end, h.to], sol[0]);
   assert.deepEqual(solutionStep(L, newState(L)), sol[0]);
   const s = newState(L);
-  const off = legalMoves(L, s).find(([e, q]) => !(e === sol[0][0] && q === sol[0][1]));
+  const off = legalMoves(L, s).find(([e, q]) => !(e === sol[0][0] && q === sol[0][1]) && !isDone(move(L, s, e, q).state));
   const t = move(L, s, off[0], off[1]).state;
   h = hint(L, t, { cap: 700 });
   assert.equal(h.kind, 'move');
   assert.ok(move(L, t, h.end, h.to).ok);
-  const D = buildLevel({ id: 'd', name: 'D', n: 6, strands: [{ c: 'm', a: 0, b: 3 }, { c: 'i', a: 1, b: 4 }], fixed: [0, 2], x: [[0, 1, 1, 1]], w: [[0], [0]] });
+  // every peg taken, and each strand under another: nowhere to go, nothing lifts off
+  const D = lv(6, [[0, 3], [1, 4, 'i'], [2, 5, 'w']], { over: [[0, 1], [1, 2], [2, 0]] });
   assert.deepEqual(legalMoves(D, newState(D)), []);
+  assert.deepEqual(liftable(D, newState(D)), []);
   assert.equal(hint(D, newState(D)).kind, 'tangled');
 });
 
 test('what the yarn could make: 14 inches a strand, one flower per 18-inch needle-length', () => {
   assert.equal(yarnLine(3).inches, 42);
   assert.match(yarnLine(9).line, /3\.5 yards.*2-inch tassel/);
-  void REACH; void COLORS; void endsAt; void sparePegs; void planarMap;
+  void COLORS; void endsAt; void sparePegs; void planarMap;
 });

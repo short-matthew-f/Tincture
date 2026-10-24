@@ -52,12 +52,26 @@
 //   sliding A off would just move the crossings onto it. Alternating pairs
 //   (A under B, then A over B, next to each other along both) are a CLASP:
 //   the two strands hook each other and stay hooked until a move undoes it.
-// - Ends must stay at least `reach` pegs apart (3 by default).
+// - Any empty peg will do: there is no rule about how far apart a strand's
+//   ends must be (a strand carried next to its own other knot simply has
+//   nothing between its ends).
 //
-// COMING FREE
-// - After every move, each strand whose word is empty slips off its pegs and
-//   winds onto a skein, freeing both pegs. Strands tied into one shared knot
-//   come free together, once both words are empty.
+// COMING FREE (lift-off)
+// - A strand that lies OVER every strand it crosses lifts right off the hoop:
+//   pull it straight up and nothing holds it (a strand that crosses nothing
+//   is the plain case). It winds onto a skein, its pegs are empty again, and
+//   its crossings vanish from the other strands' words. That can make new
+//   neighbors, so reduction runs again, and that can leave another strand on
+//   top of everything: freeing repeats until nothing more lifts off.
+// - A strand lying UNDER something does not come free, even if it lies under
+//   everything: the linen is right beneath it and the strands over it pin it
+//   to the linen. (Untied, any strand could of course be threaded out by its
+//   end; the hoop's rule is lifting straight up, and a strand underneath
+//   can't be lifted through what lies on it.) A clasped strand is under its
+//   partner somewhere, so it never lifts off.
+// - Strands tied into one shared knot lift off together: once every crossing
+//   either has with any OTHER strand has it on top (their crossings with each
+//   other lift with them).
 //
 // THE MECHANICS (each introduced on its own level, see levels.js)
 // - Hooked strands (`clasp`): a level that starts with two strands hooked.
@@ -75,8 +89,7 @@
 // longer has a way out is reported by the hint as tangled, never as lost.
 
 export const VERSION = 2;
-export const MODEL = 'words-1';
-export const REACH = 3;
+export const MODEL = 'words-2-liftoff';
 
 // Natural-dye colors. Keys are what the save and the level data hold.
 export const COLORS = {
@@ -166,13 +179,14 @@ function reduce(w, x, dirty = null, owned = null) {
 }
 
 // What is left of A and B's crossings with every other strand ignored and
-// the pair reduced on its own. If anything is left, A and B can never part
-// unless one of them moves (a cancellation elsewhere can only remove a pair
-// that is already reducible here). Used by the solver's bound and to spot
-// hooked strands.
-export function pairLeft(w, x, A, B) {
+// the pair reduced on its own (a cancellation elsewhere can only remove a
+// pair that is already reducible here). If what is left has A on top
+// somewhere and B on top somewhere, they are HOOKED: neither can lift off
+// while the other is there, and nothing changes that but a move of A or B.
+// Used by the solver's bound and to spot hooked strands.
+export function pairRest(w, x, A, B) {
   const la = w[A].filter((c) => otherOf(x[c], A) === B);
-  if (!la.length) return 0;
+  if (la.length < 2) return la;
   const lb = w[B].filter((c) => otherOf(x[c], B) === A);
   for (;;) {
     let hit = false;
@@ -185,20 +199,26 @@ export function pairLeft(w, x, A, B) {
       hit = true;
       break;
     }
-    if (!hit) return la.length;
+    if (!hit) return la;
   }
+}
+export const pairLeft = (w, x, A, B) => pairRest(w, x, A, B).length;
+/** Do A and B lie over each other, each somewhere, in a way no cancellation between them can undo? (hooked) */
+export function mutual(w, x, A, B) {
+  const r = pairRest(w, x, A, B);
+  return r.some((c) => x[c][2] === A) && r.some((c) => x[c][2] === B);
 }
 
 // ---------- levels ----------
 
-// def: { id, name, n, reach?, strands: [{ c, a, b }], fixed?: [endId],
+// def: { id, name, n, strands: [{ c, a, b }], fixed?: [endId],
 //        links?: [[cwEnd, ccwEnd]], pegs?: { peg: colorKey }, layering?,
 //        x?: [[a, b, top, sign]], w?: [[crossing ids] per strand] }
 // End ids: strand s has ends 2s (at a) and 2s+1 (at b). A link lists the end
 // whose tail leaves the shared knot on the clockwise side first; that order
 // never changes (the tails turn together as the knot slides).
 export function buildLevel(def) {
-  const n = def.n, S = def.strands.length, reach = def.reach ?? REACH;
+  const n = def.n, S = def.strands.length;
   const color = def.strands.map((s) => s.c);
   const start = [];
   for (const s of def.strands) start.push(s.a, s.b);
@@ -219,7 +239,7 @@ export function buildLevel(def) {
   const w0 = def.w ? def.w.map((a) => a.slice()) : Array.from({ length: S }, () => []);
   const x0 = (def.x || []).map((X) => X.slice());
   const L = {
-    id: def.id, name: def.name, n, reach, S, color, start, fixed, link, cwSide, pegColor, layering: !!def.layering, unitOf, units,
+    id: def.id, name: def.name, n, S, color, start, fixed, link, cwSide, pegColor, layering: !!def.layering, unitOf, units,
     colors: [...new Set(color)],
     def,
   };
@@ -231,7 +251,7 @@ export function buildLevel(def) {
 }
 
 function validate(L, w, x) {
-  const { n, S, start, fixed, link, pegColor, reach } = L;
+  const { n, S, start, fixed, link, pegColor } = L;
   for (const c of L.color) if (!COLORS[c]) return `unknown color ${c}`;
   if (!(n >= 6 && n <= 40)) return 'peg count';
   const seen = new Map();
@@ -250,7 +270,6 @@ function validate(L, w, x) {
     }
     if (fixed[e] && fixed[e ^ 1]) return `strand ${e >> 1} is stitched down at both ends`;
   }
-  for (let s = 0; s < S; s++) if (cdist(n, start[2 * s], start[2 * s + 1]) < reach) return `strand ${s} too short`;
   for (let p = 0; p < n; p++) {
     if (!pegColor[p]) continue;
     for (let e = 0; e < 2 * S; e++) if (start[e] === p && L.color[e >> 1] !== pegColor[p]) return `peg ${p} color`;
@@ -336,7 +355,7 @@ export const totalCrossings = (L, s) => s.w.reduce((a, ws) => a + ws.length, 0) 
 /** Pairs of strands hooked together: their crossings can't cancel between themselves. */
 export function hookedPairs(L, s) {
   const out = [];
-  for (let a = 0; a < L.S; a++) for (let b = a + 1; b < L.S; b++) if (!s.out[a] && !s.out[b] && pairLeft(s.w, s.x, a, b) >= 2) out.push([a, b]);
+  for (let a = 0; a < L.S; a++) for (let b = a + 1; b < L.S; b++) if (!s.out[a] && !s.out[b] && mutual(s.w, s.x, a, b)) out.push([a, b]);
   return out;
 }
 
@@ -388,14 +407,13 @@ export function canLift(L, s, e) {
 
 /**
  * whyNotTo(L, s, e, q) -> null if the knot at end e may be retied on peg q,
- * else 'same' | 'taken' | 'reach' | 'color' | 'around'. (Assumes it can be lifted.)
+ * else 'same' | 'taken' | 'color' | 'around'. (Assumes it can be lifted.)
  */
 export function whyNotTo(L, s, e, q) {
   if (!(q >= 0 && q < L.n)) return 'taken';
   if (s.ends[e] === q) return 'same';
   for (let k = 0; k < 2 * L.S; k++) if (s.ends[k] === q) return 'taken';
   for (const m of movers(L, e)) {
-    if (cdist(L.n, q, s.ends[m ^ 1]) < L.reach) return 'reach';
     if (L.pegColor[q] && L.pegColor[q] !== L.color[m >> 1]) return 'color';
   }
   if (!pathOf(L, s.ends, e, q)) return 'around';
@@ -449,18 +467,50 @@ function carry(L, ends, w, x, ms, dir, passed) {
   return made;
 }
 
-// Free every unit whose strands all have empty words. Mutates ends/out;
-// returns [{ s, a, b }] with the pegs each freed strand was tied to.
-function settle(L, ends, out, w) {
+// Lift off every unit lying over everything it crosses (outside itself),
+// again and again: each lift-off takes its crossings out of the other words,
+// reduction runs on the words it touched, and that may leave another unit on
+// top of everything. Mutates ends/out/x and w (copying any word it touches
+// that `owned` doesn't hold). Returns [{ s, a, b, round }] in lift-off order.
+function liftOff(L, ends, out, w, x, owned) {
   const freed = [];
-  for (const u of L.units) {
-    if (u.some((m) => out[m]) || u.some((m) => w[m].length > 0)) continue;
-    for (const m of u) {
-      freed.push({ s: m, a: ends[2 * m], b: ends[2 * m + 1] });
-      out[m] = 1; ends[2 * m] = -1; ends[2 * m + 1] = -1;
+  const mine = (t) => { if (!owned.has(t)) { w[t] = w[t].slice(); owned.add(t); } return w[t]; };
+  for (let round = 0; ; round++) {
+    const go = [];
+    for (const u of L.units) {
+      if (u.some((m) => out[m])) continue;
+      let top = true;
+      for (const m of u) for (const c of w[m]) { const X = x[c]; if (!u.includes(otherOf(X, m)) && X[2] !== m) { top = false; break; } }
+      if (top) go.push(u);
     }
+    if (!go.length) return freed;
+    const touched = new Set();
+    for (const u of go) {
+      for (const m of u) {
+        for (const c of w[m]) {
+          if (!x[c]) continue; // a crossing inside the unit, already gone
+          const o = otherOf(x[c], m);
+          if (!u.includes(o) && !out[o]) { const wo = mine(o); wo.splice(wo.indexOf(c), 1); touched.add(o); }
+          x[c] = null;
+        }
+      }
+      for (const m of u) {
+        freed.push({ s: m, a: ends[2 * m], b: ends[2 * m + 1], round });
+        out[m] = 1; ends[2 * m] = -1; ends[2 * m + 1] = -1; w[m] = []; owned.add(m);
+      }
+    }
+    for (const u of go) for (const m of u) touched.delete(m);
+    reduce(w, x, touched, owned);
   }
-  return freed;
+}
+/** The units that would lift off right now (none, on a level's start). */
+export function liftable(L, s) {
+  const out = [];
+  for (const u of L.units) {
+    if (u.some((m) => s.out[m])) continue;
+    if (u.every((m) => s.w[m].every((c) => u.includes(otherOf(s.x[c], m)) || s.x[c][2] === m))) out.push(u.slice());
+  }
+  return out;
 }
 
 // The whole move on bare arrays: carry, reduce, renumber, free.
@@ -477,15 +527,19 @@ function applyMove(L, ends0, w0, x0, out0, e, q, path, free = true, tidy = true)
   for (const s of dirty) w[s] = w[s].slice();
   // the knots passed are judged before the end lands (q is empty)
   const made = carry(L, ends0, w, x, ms, path.dir, path.passed);
-  const cancelled = reduce(w, x, dirty, new Set(dirty));
+  const owned = new Set(dirty);
+  const cancelled = reduce(w, x, dirty, owned);
+  // the position before anything lifts off (for the picture of the lift-off)
+  const pre = tidy && free ? { ends: ends.slice(), out: out.slice(), ...canon(w, x) } : null;
+  const freed = free ? liftOff(L, ends, out, w, x, owned) : [];
   let W = w, X = x;
   if (tidy) { const c = canon(w, x); W = c.w; X = c.x; }
-  const freed = free ? settle(L, ends, out, W) : [];
-  return { ends, out, w: W, x: X, freed, made, cancelled };
+  return { ends, out, w: W, x: X, freed, made, cancelled, pre };
 }
 
 /**
- * move(L, s, e, q, { scramble }) -> { ok, state, from, to, movers, dir, passed, made, cancelled, freed } or
+ * move(L, s, e, q, { scramble }) -> { ok, state, pre, from, to, movers, dir, passed, made, cancelled, freed } or
+ * (pre: the position just before anything lifted off; freed: what did, in order)
  *   { ok: false, reason, blockers?, state }
  * scramble (the level generator only): any knot but a stitched one may be
  * lifted, and nothing comes free.
@@ -498,7 +552,8 @@ export function move(L, s, e, q, { scramble = false } = {}) {
   const path = pathOf(L, s.ends, e, q);
   const r = applyMove(L, s.ends, s.w, s.x, s.out, e, q, path, !scramble);
   const t = { v: VERSION, level: s.level, ends: r.ends, out: r.out, w: r.w, x: r.x, moves: s.moves + 1 };
-  return { ok: true, state: t, from: s.ends[e], to: q, movers: movers(L, e), dir: path.dir, passed: path.passed, made: r.made, cancelled: r.cancelled, freed: r.freed };
+  const pre = r.freed.length ? { v: VERSION, level: s.level, ...r.pre, moves: s.moves + 1 } : t;
+  return { ok: true, state: t, pre, from: s.ends[e], to: q, movers: movers(L, e), dir: path.dir, passed: path.passed, made: r.made, cancelled: r.cancelled, freed: r.freed };
 }
 
 // ---------- undo: a tiny pure history ----------
@@ -589,7 +644,6 @@ function simMoves(C, ends, w, x) {
       if (ends.includes(q)) continue;
       let ok = true;
       for (const m of ms) {
-        if (cdist(n, q, ends[m ^ 1]) < L.reach) { ok = false; break; }
         if (L.pegColor[q] && L.pegColor[q] !== L.color[m >> 1]) { ok = false; break; }
       }
       if (ok && ms.length === 2 && !pathOf(L, ends, e, q)) ok = false;
@@ -605,42 +659,54 @@ function simApply(C, st, e, q) {
 const simDone = (st) => st.out.every(Boolean);
 const simCross = (st) => st.w.reduce((a, ws) => a + ws.length, 0) / 2;
 
-// Lower bound on moves. A pair of strands whose crossings can't cancel
-// between themselves (pairLeft > 0) stays crossed until one of the two
-// moves, so some move must touch one of their units: the minimum vertex
-// cover of that graph over units is admissible, and consistent (a move
-// changes only pairs that involve the moved unit). A pair inside one unit
-// forces that unit.
+// Lower bound on moves. Say B -> A when, in A and B's own reduced picture
+// (pairRest: what no cancellation between the two of them can undo), B lies
+// over A somewhere. That arrow changes only when A or B moves. A lift-off
+// takes away only a strand nothing lies over, so it never breaks a cycle of
+// arrows, and no strand on a cycle can lift off. So every cycle needs a move
+// of one of its units: the minimum feedback vertex set over units is
+// admissible (a hooked pair is a cycle of two). It is consistent: a move
+// changes only the arrows at the moved unit, which moves the minimum by at
+// most one. Arrows inside one unit don't count (it lifts off whole). A
+// position that isn't clear needs at least one move.
 function vcBound(C, st) {
   const L = C.L, U = L.units.length, w = st.w, x = st.x;
-  const adj = new Array(U).fill(0);
-  let forced = 0, any = false;
+  const into = new Array(U).fill(0); // into[u]: units with an arrow to u
+  let left = false, any = false;
   const cnt = new Int32Array(C.S);
   for (let a = 0; a < C.S; a++) {
-    if (st.out[a] || !w[a].length) continue;
+    if (st.out[a]) continue;
+    left = true;
+    if (!w[a].length) continue;
     cnt.fill(0);
     for (const c of w[a]) cnt[otherOf(x[c], a)]++;
     for (let b = a + 1; b < C.S; b++) {
-      // one crossing (or any odd number) can't cancel; two or more might
-      if (!cnt[b] || (!(cnt[b] & 1) && !pairLeft(w, x, a, b))) continue;
+      if (!cnt[b]) continue;
       const ua = L.unitOf[a], ub = L.unitOf[b];
-      if (ua === ub) forced |= 1 << ua;
-      else { adj[ua] |= 1 << ub; adj[ub] |= 1 << ua; any = true; }
+      if (ua === ub) continue;
+      for (const c of pairRest(w, x, a, b)) {
+        if (x[c][2] === a) into[ub] |= 1 << ua; else into[ua] |= 1 << ub;
+        any = true;
+      }
     }
   }
-  const pop = (v) => { let c = 0; while (v) { v &= v - 1; c++; } return c; };
-  if (!any) return pop(forced);
-  let best = Infinity;
-  const rec = (alive, k) => {
-    if (k >= best) return;
-    let v = -1, dv = 0;
-    for (let i = 0; i < U; i++) if (alive >> i & 1) { const d = pop(adj[i] & alive); if (d > dv) { dv = d; v = i; } }
-    if (v < 0) { best = k; return; }
-    rec(alive & ~(1 << v), k + 1);
-    const nb = adj[v] & alive;
-    rec(alive & ~nb & ~(1 << v), k + pop(nb));
+  if (!left) return 0;
+  if (!any) return 1;
+  // is there a cycle among the units in `keep`? (peel off units with no arrow in)
+  const cyclic = (keep) => {
+    let k = keep;
+    for (let changed = true; changed;) {
+      changed = false;
+      for (let u = 0; u < U; u++) if (k >> u & 1 && !(into[u] & k)) { k &= ~(1 << u); changed = true; }
+    }
+    return k !== 0;
   };
-  rec(((1 << U) - 1) & ~forced, pop(forced));
+  const all = (1 << U) - 1;
+  if (!cyclic(all)) return 1;
+  // smallest set of units whose removal leaves no cycle
+  const pop = (v) => { let c = 0; while (v) { v &= v - 1; c++; } return c; };
+  let best = U;
+  for (let m = 1; m < (1 << U); m++) { const k = pop(m); if (k < best && !cyclic(all & ~m)) best = k; }
   return best;
 }
 export const lowerBound = (L, s) => vcBound(ctxOf(L), s);
@@ -828,7 +894,7 @@ export function hint(L, s, { cap = 2500, solution = L.solution } = {}) {
 // A short fingerprint of everything that shapes play (and of the model), so a
 // save made on an older version of a level is set aside instead of misread.
 export function levelSig(L) {
-  const src = JSON.stringify([MODEL, L.n, L.reach, L.color, L.start, L.fixed, L.link, L.cwSide, L.pegColor, L.layering, L.startW, L.startX]);
+  const src = JSON.stringify([MODEL, L.n, L.color, L.start, L.fixed, L.link, L.cwSide, L.pegColor, L.layering, L.startW, L.startX]);
   let h = 0x811c9dc5;
   for (let i = 0; i < src.length; i++) { h ^= src.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
   return h.toString(36);

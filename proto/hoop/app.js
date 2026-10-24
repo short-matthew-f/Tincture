@@ -17,7 +17,7 @@
 // Tangle Basket's approach.
 import {
   COLORS, newGame, play, undo, canLift, whyNotTo, targets, endsAt, isDone, remaining, movers, hint, totalCrossings, yarnLine, VERSION,
-  cdist, newState, nearestAt, wordsError, hookedPairs,
+  newState, nearestAt, wordsError, hookedPairs,
 } from './rules.js';
 import { layout, plan, distTo, baseOrder, topAt } from './layout.js';
 import { LEVELS, MECHANICS, BANDS, levelById } from './levels.js';
@@ -184,7 +184,6 @@ function validState(Lv, s) {
     if (at.has(p) && Lv.link[e] !== at.get(p)) return false;
     at.set(p, e);
   }
-  for (let i = 0; i < Lv.S; i++) if (!s.out[i] && cdist(Lv.n, s.ends[2 * i], s.ends[2 * i + 1]) < Lv.reach) return false;
   try { return !wordsError(Lv, s.ends, s.w, s.x) && s.w.every((ws, i) => !s.out[i] || !ws.length); } catch { return false; }
 }
 function load() {
@@ -815,6 +814,7 @@ function drawKnot(c, p, e, { scale = 1, up = 0, tone2 = null, hint: hk = 0, alph
 // A strand coming free: it glows and loosens, slips off its pegs toward its
 // middle, then a little skein flies to the shelf (DOM).
 function drawLeaving(c, f, now) {
+  if (now < f.t0) { paintYarn(c, yarnGeom(f.pts, HG.w), { w: HG.w, tone: TONE[L.color[f.s]] }); return; } // its turn in the cascade is coming
   const t = clamp01((now - f.t0) / f.dur);
   const pts = f.pts;
   const A = pts[0], B = pts[pts.length - 1];
@@ -827,8 +827,13 @@ function drawLeaving(c, f, now) {
     part = sliceBy(pts, cut, g0.len - cut);
   }
   if (part.length < 2) return;
+  // it rises off the linen (its shadow falls away), glowing, then slips off its pegs
   const g = yarnGeom(part, HG.w);
-  paintYarn(c, g, { w: HG.w, tone: TONE[L.color[f.s]], lift: 0.8 + slip, glow, alpha: 1 - slip * 0.35 });
+  const rise = ease(Math.min(1, t * 2.2));
+  c.save();
+  c.translate(0, -rise * HG.w * 0.9);
+  paintYarn(c, g, { w: HG.w, tone: TONE[L.color[f.s]], lift: 0.6 + 1.4 * rise, glow, alpha: 1 - slip * 0.35 });
+  c.restore();
   if (slip < 0.5) {
     for (const p of [A, B]) {
       c.save(); c.globalAlpha = 1 - slip * 2;
@@ -973,8 +978,7 @@ function tapPeg(q) {
     if (!why) { doMove(held, q, null); return; }
     if (why === 'taken') { liftAt(q); return; }
     FX.pegShake = { q, t0: performance.now() };
-    if (why === 'reach') note = 'Too close to its other end. A strand needs at least two pegs between its ends.';
-    else if (why === 'color') note = `That painted peg only takes ${cshort(L.pegColor[q])} yarn.`;
+    if (why === 'color') note = `That painted peg only takes ${cshort(L.pegColor[q])} yarn.`;
     else if (why === 'around') note = 'A shared knot can’t go round past either of its own strands’ far knots.';
     sfx('soft');
     render(); kick();
@@ -1007,7 +1011,7 @@ function liftAt(q) {
   if (!ts.length) {
     held = -1;
     FX.wig = reduced() ? null : { e, t0: now };
-    note = 'No empty peg is far enough from its other end yet. Free a strand to make room.';
+    note = 'There’s no empty peg this knot can go to yet. Free a strand to make room.';
     sfx('soft');
     render(); kick();
     return;
@@ -1039,13 +1043,9 @@ function doMove(e, q, fromPt) {
   // what the hoop shows meanwhile: the old picture, the end carried over it
   view = { state: before };
   for (const f of res.freed) shelfHold.add(f.s);
-  // the new picture, with the strands about to come free still in place
-  // (the very state object when nothing comes free, so its layout and cache carry on)
-  let after = res.state;
-  if (res.freed.length) {
-    after = { ...res.state, ends: res.state.ends.slice(), out: res.state.out.slice() };
-    for (const f of res.freed) { after.ends[2 * f.s] = f.a; after.ends[2 * f.s + 1] = f.b; after.out[f.s] = 0; }
-  }
+  // the new picture just before anything lifts off (the very state object
+  // when nothing does, so its layout and cache carry on)
+  const after = res.pre;
   run(async () => {
     FX.slide = { movers: ms, pt: start };
     kick();
@@ -1077,8 +1077,19 @@ function doMove(e, q, fromPt) {
     view = { state: after };
     FX.tug = null;
     if (res.freed.length) {
-      const P = pxOf(after);
-      await comeFree(res.freed.map((f) => ({ ...f, pts: P.strands[f.s] })));
+      // lift-off: the freed strands rise, glow and wind away, round by round
+      // (one lifting off can leave another on top of everything), while the
+      // yarn left behind settles into its new lie
+      const Pa = pxOf(after), Pb = pxOf(res.state);
+      const from2 = {}, to2 = {};
+      for (const i of Object.keys(Pb.strands)) { to2[i] = resample(Pb.strands[i], MORPH_N); from2[i] = Pa.strands[i] ? resample(Pa.strands[i], MORPH_N) : to2[i]; }
+      if (Object.keys(to2).length) view = { state: res.state, morph: { from: from2, to: to2, xb: fractions(Pb), t: 0 } };
+      else view = { state: res.state };
+      const rounds = Math.max(...res.freed.map((f) => f.round));
+      await Promise.all([
+        comeFree(res.freed.map((f) => ({ ...f, pts: Pa.strands[f.s], lifted: after.w[f.s].length > 0 }))),
+        wait(reduced() ? 0 : 260 * rounds + 120).then(() => (view && view.morph ? tween(reduced() ? 0 : 420, (t) => { view.morph.t = t; }) : null)).then(() => { view = { state: res.state }; }),
+      ]);
     }
     view = null;
     note = afterNote(res, hk, hooked0);
@@ -1090,8 +1101,9 @@ function afterNote(res, hk, hooked0) {
   if (isDone(s)) return 'Every strand is free. Lovely work.';
   const left = remaining(s), x = totalCrossings(L, s);
   const togo = `${x} ${x === 1 ? 'crossing' : 'crossings'} left, ${left} ${left === 1 ? 'strand' : 'strands'} to go.`;
-  if (res.freed.length === 1) return `The ${cshort(L.color[res.freed[0].s])} strand came free. ${togo}`;
-  if (res.freed.length > 1) return `${res.freed.length === 2 ? 'Two' : res.freed.length === 3 ? 'Three' : res.freed.length} strands came free at once! ${togo}`;
+  const how = res.freed.some((f) => res.pre.w[f.s].length) ? 'lifted right off' : 'came free';
+  if (res.freed.length === 1) return `The ${cshort(L.color[res.freed[0].s])} strand ${how}. ${togo}`;
+  if (res.freed.length > 1) return `${res.freed.length === 2 ? 'Two' : res.freed.length === 3 ? 'Three' : res.freed.length} strands ${how} at once! ${togo}`;
   const hooked = hookedPairs(L, s).length;
   if (hooked > hooked0) return `Hooked: the end went over a knot and now loops round its strand. Carry it back to let go. ${togo}`;
   return togo;
@@ -1101,11 +1113,11 @@ async function comeFree(freed) {
   const now = performance.now();
   const dur = reduced() ? 260 : 700;
   const shelfSlots = $$('#shelf .slot');
-  FX.leaving = freed.map((f, k) => ({ ...f, t0: now + k * 90, dur }));
+  FX.leaving = freed.map((f, k) => ({ ...f, t0: now + (f.round || 0) * (reduced() ? 0 : 260) + k * 60, dur }));
   sfx('free', freed.length);
   kick();
   if (navigator.vibrate && !reduced()) { try { navigator.vibrate(12); } catch { /* fine */ } }
-  await wait(dur * 0.7 + (freed.length - 1) * 90);
+  await wait(dur * 0.7 + Math.max(...freed.map((f) => (f.round || 0) * 260)) + (freed.length - 1) * 60);
   // a skein for each, off to the shelf
   const flights = freed.map((f, k) => {
     const g = yarnGeom(f.pts, HG.w);
@@ -1126,8 +1138,6 @@ async function comeFree(freed) {
       { transform: `translate(${to[0] - 22}px, ${to[1] - 14}px) scale(.68)` },
     ], { duration: 620, delay: k * 90, easing: 'cubic-bezier(.4,0,.5,1)', fill: 'forwards' });
   });
-  // the strands are gone from the picture now
-  view = null;
   await wait(dur * 0.3);
   FX.leaving = [];
   await Promise.all(flights);
@@ -1494,8 +1504,8 @@ const ILL = {
 };
 const HOW = [
   { t: 'Lift a knot, retie it', ill: 'lift', p: 'Tap a knot on a peg to lift it, then tap one of the glowing empty pegs to tie it there. Or just drag the knot across. The end is carried over the knots it passes, and whatever lay over the strand still does.' },
-  { t: 'Cross nothing, come free', ill: 'free', p: 'Strands cross where one lies over another, and two strands can cross more than once, even hook round each other. A strand that crosses nothing at all slips off its pegs and winds onto a skein, and its two pegs are free to use again.' },
-  { t: 'Leave room to lie flat', ill: 'room', p: 'A strand’s two ends stay at least three pegs apart, so the empty pegs are your working space. Undo is free, Hint glows a good next move, and there are no timers and no way to lose.' },
+  { t: 'On top of everything, off it comes', ill: 'free', p: 'A strand lying on top of everything it crosses lifts right off. Strands can cross more than once and even hook round each other; one that lies under anything stays. A freed strand winds onto a skein, and its two pegs are yours to use.' },
+  { t: 'Any empty peg', ill: 'room', p: 'Tie a knot on any empty peg. The end you carry goes the way round that doesn’t pass its own other knot. Undo is free, Hint glows a good next move, and there are no timers and no way to lose.' },
 ];
 function renderHow() {
   const st = HOW[howStep];

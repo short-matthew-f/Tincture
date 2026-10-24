@@ -12,7 +12,7 @@ import {
   buildLevel, solve, replay, isDone, randomRate, greedyPlayout, mulberry, formatMoves, sparePegs, newState, totalCrossings, hookedPairs,
 } from './rules.js';
 
-const SEEDS = +(process.env.SEEDS || 24);
+const SEEDS = +(process.env.SEEDS || 60);
 export const RANDOM_K = 60, RANDOM_SEED = 4242, RANDOM_RUNS = 400, GREEDY_RUNS = 100;
 const SCREEN_CAP = 6000;   // a candidate must be solved this fast to be kept
 const CAP = 120000;        // the proof of the kept one
@@ -39,8 +39,9 @@ function generateOne(idx) {
     if (!sol.ok) { unsolved++; continue; }
     const par = sol.path.length;
     const off = par < k.par[0] ? k.par[0] - par : par > k.par[1] ? par - k.par[1] : 0;
-    const gq = greedy(L, 99 + seed, 30);
-    cands.push({ score: off + Math.abs(gq.rate - k.target), seed, def, L, sol });
+    // (the greedy player is only consulted when the par is in range)
+    const gq = off ? null : greedy(L, 99 + seed, 12);
+    cands.push({ score: off ? off + 1 : Math.abs(gq.rate - k.target), seed, def, L, sol });
   }
   if (!cands.length) throw new Error(`${d.id}: no solvable candidate (${tried} dealt, ${unsolved} unsolved)`);
   cands.sort((a, b) => a.score - b.score || a.sol.nodes - b.sol.nodes || a.seed - b.seed);

@@ -3,10 +3,7 @@
 //
 // A candidate is made the way a real tangle is: from a CLEAN hoop, by moves.
 //   - deal 2S - links pegs and tie strands across them as non-crossing
-//     chords, each at least `reach` - 1 pegs apart if that fits, shorter if
-//     not (a snug hoop can't be clean otherwise; the scramble must lengthen
-//     any short one, and every move it makes is a real one at full reach);
-//     the first `links` times, two
+//     chords; the first `links` times, two
 //     neighboring ends of different strands are tied into one shared knot;
 //   - deal colors (spread evenly), stitched-down knots (never both ends of a
 //     strand, never a shared knot);
@@ -14,13 +11,15 @@
 //     a stitched one may be lifted, nothing comes free on the way), never
 //     straight back to the peg a knot just left. Moves made this way make
 //     genuine clasps and strands that cross more than once;
-//   - keep it only if every strand crosses something, there are at least
-//     `minCross` crossings (and at most `maxCross`), and hooked strands are
-//     present or absent as the knob `clasp` asks;
+//   - keep it only if nothing would come free at once (every strand lies
+//     under something: no strand crosses nothing, none lies over everything
+//     it crosses), there are at least `minCross` crossings (and at most
+//     `maxCross`), and hooked strands are present or absent as the knob
+//     `clasp` asks;
 //   - paint pegs: about half on empty pegs, half under a matching knot.
 // gen-levels.mjs solves many candidates and keeps the one nearest the
 // level's target.
-import { REACH, cdist, crosses, buildLevel, newState, move, legalMoves, hookedPairs, totalCrossings, movers, pathOf } from './rules.js';
+import { crosses, buildLevel, newState, move, legalMoves, hookedPairs, totalCrossings, movers, pathOf, liftable } from './rules.js';
 
 // Colors in the order levels bring them in (friendly, high-contrast ones first).
 export const COLOR_ORDER = ['m', 'i', 'w', 'g', 'c', 'n', 'o', 'l'];
@@ -31,7 +30,7 @@ const shuffle = (rng, a) => {
 };
 
 /** A clean hoop: { ends, links: [[cwEnd, ccwEnd]] } with non-crossing chords, or null. */
-export function cleanHoop(rng, n, S, links = 0, reach = REACH) {
+export function cleanHoop(rng, n, S, links = 0) {
   for (let tries = 0; tries < 200; tries++) {
     // random chords one at a time, long enough and crossing none placed before
     const ends = [];
@@ -39,7 +38,7 @@ export function cleanHoop(rng, n, S, links = 0, reach = REACH) {
     for (let s = 0; s < S && ok; s++) {
       const opts = [];
       for (let a = 0; a < n; a++) for (let b = a + 1; b < n; b++) {
-        if (ends.includes(a) || ends.includes(b) || cdist(n, a, b) < reach) continue;
+        if (ends.includes(a) || ends.includes(b)) continue;
         let cut = false;
         for (let t = 0; t < s && !cut; t++) if (crosses(n, a, b, ends[2 * t], ends[2 * t + 1])) cut = true;
         if (!cut) opts.push([a, b]);
@@ -63,9 +62,6 @@ export function cleanHoop(rng, n, S, links = 0, reach = REACH) {
       lk.push([e1, e2]);
     }
     if (lk.length < links) continue;
-    ok = true;
-    for (let s = 0; s < S && ok; s++) if (cdist(n, ends[2 * s], ends[2 * s + 1]) < reach) ok = false;
-    if (!ok) continue;
     // which tail leaves a shared knot on the clockwise side: the one whose far end comes first clockwise
     const cwOff = (e) => (((ends[e ^ 1] - ends[e]) % n) + n) % n;
     const links2 = lk.map(([a, b]) => (cwOff(a) < cwOff(b) ? [a, b] : [b, a]));
@@ -76,18 +72,14 @@ export function cleanHoop(rng, n, S, links = 0, reach = REACH) {
 
 /**
  * candidate(rng, knobs) -> level def (without id/name) or null.
- * knobs: { n, S, links=0, fixed=0, pegs=0, colors, layering=false, reach=3,
+ * knobs: { n, S, links=0, fixed=0, pegs=0, colors, layering=false,
  *          scramble, minCross, maxCross, clasp (true: must, false: must not) }
  */
 export function candidate(rng, k) {
-  const n = k.n, S = k.S, reach = k.reach ?? REACH;
+  const n = k.n, S = k.S;
   for (let tries = 0; tries < 60; tries++) {
-    // the clean hoop may hold short strands (or a snug hoop could never be
-    // clean); the scramble must lengthen them, with real moves
-    let clean = null, cr = reach - 1;
-    for (; cr >= 1 && !clean; cr--) clean = cleanHoop(rng, n, S, k.links || 0, cr);
+    const clean = cleanHoop(rng, n, S, k.links || 0);
     if (!clean) return null;
-    cr++;
     const K = Math.min(k.colors || 3, COLOR_ORDER.length);
     const pal = COLOR_ORDER.slice(0, K);
     const col = shuffle(rng, [...Array(S).keys()].map((s) => pal[s % K]));
@@ -101,22 +93,24 @@ export function candidate(rng, k) {
     if (fixed.length < (k.fixed || 0)) continue;
     fixed.sort((a, b) => a - b);
     const base = {
-      n, reach, layering: !!k.layering,
+      n, layering: !!k.layering,
       strands: [...Array(S).keys()].map((s) => ({ c: col[s], a: clean.ends[2 * s], b: clean.ends[2 * s + 1] })),
       fixed, links: clean.links, pegs: {},
     };
     let L;
-    try { L = buildLevel({ id: 'clean', name: 'clean', ...base, reach: cr }); } catch { continue; }
+    try { L = buildLevel({ id: 'clean', name: 'clean', ...base }); } catch { continue; }
     // scramble with real moves
-    // (a strand that crosses nothing yet is moved first, past at least one knot)
-    const free = { ...L, layering: false, reach };
+    // (while some strand lies on top of everything, or crosses nothing, a
+    // move carrying an end over one of its knots is preferred: something has
+    // to lie over every strand, or it would lift right off)
+    const free = { ...L, layering: false };
     let s = newState(L), last = null;
-    for (let m = 0; m < 3 * k.scramble; m++) {
-      const bare = s.w.map((ws) => !ws.length);
-      if (m >= k.scramble && !bare.some(Boolean)) break;
+    for (let m = 0; m < 4 * k.scramble; m++) {
+      const onTop = s.w.map((ws, i) => ws.every((c) => s.x[c][2] === i));
+      if (m >= k.scramble && !onTop.some(Boolean)) break;
       let ms = legalMoves(free, s).filter(([e, q]) => !L.fixed[e] && !(last && last[0] === e && last[1] === q));
-      if (bare.some(Boolean) && rng() < 0.7) {
-        const pick = ms.filter(([e, q]) => movers(L, e).some((x) => bare[x >> 1]) && pathOf(L, s.ends, e, q).passed.length);
+      if (onTop.some(Boolean) && rng() < 0.75) {
+        const pick = ms.filter(([e, q]) => pathOf(L, s.ends, e, q).passed.some((r) => s.ends.some((p, t) => p === r && onTop[t >> 1] && !movers(L, e).some((x) => (x >> 1) === (t >> 1)))));
         if (pick.length) ms = pick;
       }
       if (!ms.length) break;
@@ -127,7 +121,7 @@ export function candidate(rng, k) {
       s = r.state;
       last = [e, from];
     }
-    if (s.w.some((ws) => !ws.length)) continue;
+    if (liftable(L, s).length) continue;
     const X = totalCrossings(L, s);
     if (X < (k.minCross ?? S) || X > (k.maxCross ?? 99)) continue;
     const hooked = hookedPairs(L, s).length > 0;
