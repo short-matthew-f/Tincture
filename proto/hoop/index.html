@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#F4EFE4">
+<title>The Hoop</title>
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Young+Serif&amp;family=Figtree:wght@400;500;600;700&amp;display=swap">
+<link rel="stylesheet" href="../shared.css">
+<style>
+  :root { --gutter: 12px; --wood-d: #8E6A42; --wood-l: #D2AF7E; --gold-soft: #F3E3B8; }
+  [hidden] { display: none !important; }
+  button { font: inherit; color: inherit; }
+  body { overscroll-behavior-y: none; background: radial-gradient(120% 70% at 50% 0%, #F8F3E8 0%, var(--paper) 60%, #EDE4D2 100%); }
+  .app { max-width: 480px; margin: 0 auto; padding: 0 var(--gutter) calc(10px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 6px; min-height: 100dvh; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .sr:focus-within { position: static; width: auto; height: auto; clip: auto; white-space: normal; display: flex; flex-wrap: wrap; gap: 6px; }
+  .sr button { min-height: 44px; }
+
+  /* top bar */
+  .top { display: flex; align-items: center; gap: 4px; padding-top: 2px; }
+  .iconbtn { appearance: none; border: 0; background: none; min-width: 44px; min-height: 44px; display: grid; place-items: center; border-radius: 12px; color: var(--ink-soft); cursor: pointer; text-decoration: none; font-size: 22px; touch-action: manipulation; }
+  .iconbtn:active { background: rgba(42,38,34,.06); }
+  .levelbtn { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px; text-align: left; padding: 0 10px; }
+  .levelbtn .nm { font: 400 17px var(--font-display); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .levelbtn .no { font-size: 12px; font-variant-numeric: tabular-nums; font-weight: 700; color: var(--ink-soft); white-space: nowrap; }
+  .levelbtn .chev { margin-left: auto; color: var(--ink-soft); font-size: 13px; }
+  .tog { min-width: 44px; padding: 0 8px; font-size: 15px; }
+  .settings .btn svg { width: 18px; height: 18px; vertical-align: -4px; margin-right: 4px; }
+
+  /* the skein shelf beside the hoop */
+  .shelfrow { display: flex; align-items: flex-end; gap: 8px; min-height: 30px; font-size: 12px; color: var(--ink-soft); position: relative; }
+  .shelfrow::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 4px; border-radius: 2px; background: linear-gradient(var(--wood-l), var(--wood-d)); box-shadow: 0 2px 0 rgba(42,38,34,.12); }
+  .shelfrow b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+  #moveCount { padding-bottom: 7px; white-space: nowrap; }
+  #shelf { flex: 1; display: flex; gap: 1px; overflow: hidden; height: 26px; align-items: flex-end; padding-bottom: 4px; }
+  #shelf svg { flex: none; width: 27px; height: 17px; }
+  #shelf .slot { flex: none; width: 25px; height: 15px; margin: 1px; border-radius: 8px; border: 1.5px dashed rgba(42,38,34,.18); margin-right: 1px; }
+
+  /* the hoop */
+  .hoopwrap { position: relative; display: flex; justify-content: center; align-items: flex-start; flex: none; margin-top: 4px; }
+  .grow { flex: 1 1 0; min-height: 0; }
+  #hoop { display: block; touch-action: none; cursor: pointer; -webkit-user-select: none; user-select: none; }
+  .cheer { position: absolute; left: 50%; top: 46%; z-index: 6; pointer-events: none; transform: translate(-50%, -50%); font: 400 23px var(--font-display); color: #4A3A26; background: rgba(251,246,234,.92); padding: 7px 16px; border-radius: 999px; box-shadow: 0 2px 10px rgba(42,38,34,.18); white-space: nowrap; }
+  .flying { position: fixed; z-index: 45; pointer-events: none; width: 44px; height: 28px; left: 0; top: 0; }
+  .flying svg { width: 100%; height: 100%; overflow: visible; }
+
+  /* message and actions, in thumb reach */
+  #msg { margin: 0; min-height: 40px; font-size: 14px; line-height: 1.35; font-weight: 500; display: flex; align-items: center; }
+  .actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .actions .btn { padding: 0 6px; white-space: nowrap; }
+  .btn:disabled { opacity: .45; }
+  .btn.lit { box-shadow: 0 0 0 2px var(--gold), var(--shadow); }
+
+  /* sheets */
+  .sheet { position: fixed; inset: 0; z-index: 60; background: rgba(42,38,34,.32); display: flex; align-items: flex-end; justify-content: center; }
+  .sheet .panel { width: 100%; max-width: 480px; max-height: 92dvh; overflow-y: auto; background: var(--paper); border-radius: 20px 20px 0 0; padding: 14px 16px calc(16px + env(safe-area-inset-bottom)); box-shadow: 0 -8px 30px rgba(42,38,34,.2); }
+  .sheet h2 { font: 400 24px var(--font-display); margin: 4px 0 6px; }
+  .sheet .x { float: right; }
+  .settings { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .band { font: 600 11px var(--font-ui); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-soft); margin: 14px 2px 6px; }
+  .lvls { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .lvls button { width: 100%; min-height: 64px; display: flex; align-items: center; gap: 8px; text-align: left; border: 0; border-radius: 12px; background: var(--card); box-shadow: 0 1px 0 var(--line); padding: 6px 8px; cursor: pointer; position: relative; }
+  .lvls button[aria-current="true"] { box-shadow: 0 0 0 2px var(--gold); background: #FBF3DD; }
+  .lvls canvas { flex: none; width: 48px; height: 48px; }
+  .lvls .t { min-width: 0; font-size: 13px; line-height: 1.25; }
+  .lvls .t b { display: block; font-size: 11px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+  .lvls .chip { display: inline-block; margin-top: 2px; font-size: 10px; font-weight: 700; color: #6A5A1E; background: var(--gold-soft); border-radius: 999px; padding: 1px 6px; }
+  .tick { position: absolute; left: 38px; top: 3px; width: 20px; height: 20px; border-radius: 50%; background: var(--gold-soft); box-shadow: 0 0 0 2px #fff, 0 1px 2px rgba(42,38,34,.3); display: grid; place-items: center; color: #6A5A1E; font-size: 12px; font-weight: 800; }
+  .lvstar { position: absolute; right: 6px; top: 4px; width: 14px; height: 14px; }
+  .steps { display: flex; gap: 6px; justify-content: center; margin: 10px 0; }
+  .steps i { width: 8px; height: 8px; border-radius: 50%; background: rgba(42,38,34,.18); }
+  .steps i.on { background: var(--accent); }
+  .how p { font-size: 15px; line-height: 1.45; margin: 8px 0; }
+  .how svg.ill { display: block; width: 100%; max-width: 320px; height: auto; margin: 6px auto; }
+  .row2 { display: flex; gap: 8px; margin-top: 12px; }
+  .row2 .btn { flex: 1; }
+  .intro .item { display: flex; gap: 12px; align-items: center; margin: 10px 0; }
+  .intro .item svg { flex: none; width: 56px; height: 56px; }
+  .intro .item p { margin: 0; font-size: 15px; line-height: 1.4; }
+  .intro .item strong { display: block; font: 400 17px var(--font-display); }
+
+  /* finish */
+  .finish { text-align: center; }
+  .finrow { display: flex; align-items: center; justify-content: center; gap: 12px; margin: 12px 0 6px; }
+  #finHoop { width: 104px; height: 104px; flex: none; }
+  .finrow .cap { font-size: 12px; color: var(--ink-soft); margin-top: 2px; }
+  .bigshelf { flex: 1; min-width: 0; padding: 8px 4px 0; border-radius: 12px; background: linear-gradient(180deg, #F3EAD8, #EADBBE); }
+  .bigshelf .row { display: flex; justify-content: center; align-items: flex-end; flex-wrap: wrap; gap: 4px 2px; padding-bottom: 5px; border-bottom: 8px solid var(--wood-d); box-shadow: 0 2px 0 rgba(42,38,34,.15); margin-bottom: 10px; }
+  .pile { display: flex; flex-direction: column; align-items: center; gap: 2px; flex: 0 1 31%; min-width: 0; }
+  .pile .sk { display: flex; flex-direction: column-reverse; align-items: center; }
+  .pile .sk svg { width: 44px; height: 27px; margin-top: -10px; }
+  .pile .sk svg:last-child { margin-top: 0; }
+  .pile .tag { font-size: 11px; line-height: 1.2; color: var(--ink); background: var(--card); padding: 2px 5px; border-radius: 6px; box-shadow: 0 1px 0 var(--line); max-width: 100%; }
+  .par { display: inline-flex; align-items: center; gap: 8px; margin: 6px auto 2px; padding: 6px 12px; border-radius: 999px; background: var(--card); box-shadow: 0 1px 0 var(--line); font-size: 14px; text-align: left; }
+  .par svg { width: 22px; height: 22px; flex: none; }
+  .knits { font: 400 17px/1.35 var(--font-display); margin: 8px 0 2px; }
+  .finish .btn { width: 100%; margin-top: 8px; }
+
+  @media (prefers-reduced-motion: reduce) { .sheet .panel { animation: none; } }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <header class="top">
+    <a class="iconbtn" href="../" aria-label="Back to the prototypes">&#8592;</a>
+    <button type="button" class="btn small levelbtn" id="levelsBtn" aria-haspopup="dialog">
+      <span class="no" id="lvNo">1/20</span><span class="nm" id="lvName">First knots</span><span class="chev" aria-hidden="true">&#9662;</span>
+    </button>
+    <button type="button" class="btn small tog" id="howBtn" aria-haspopup="dialog" aria-label="How this works">?</button>
+  </header>
+
+  <div class="shelfrow"><span id="shelfCount" class="sr"></span><div id="shelf" aria-hidden="true"></div><span id="moveCount">Moves <b>0</b></span></div>
+
+  <section class="hoopwrap" id="hoopwrap" aria-label="The hoop">
+    <canvas id="hoop" role="img" aria-label="An embroidery hoop with yarn tied across it"></canvas>
+  </section>
+  <div class="sr" id="srList" aria-label="Knots you can move"></div>
+
+  <p id="msg" role="status" aria-live="polite"></p>
+  <div class="grow"></div>
+  <div class="actions">
+    <button type="button" class="btn small" id="undoBtn">Undo</button>
+    <button type="button" class="btn small" id="hintBtn">Hint</button>
+    <button type="button" class="btn small" id="restartBtn">Start over</button>
+  </div>
+</div>
+
+<div class="sheet" id="levelSheet" role="dialog" aria-modal="true" aria-labelledby="lvTitle" hidden>
+  <div class="panel">
+    <button type="button" class="iconbtn x" data-close aria-label="Close">&#10005;</button>
+    <h2 id="lvTitle">Hoops</h2>
+    <p class="hint" style="margin:0">Any hoop, in any order. A tick means every strand came free.</p>
+    <div class="settings">
+      <button type="button" class="btn small" id="howBtn2">How this works</button>
+      <button type="button" class="btn small" id="glyphBtn" aria-pressed="false">Color symbols: off</button>
+      <button type="button" class="btn small" id="soundBtn" aria-pressed="false">Soft sounds: off</button>
+    </div>
+    <div id="lvList"></div>
+  </div>
+</div>
+
+<div class="sheet" id="howSheet" role="dialog" aria-modal="true" aria-labelledby="howTitle" hidden>
+  <div class="panel how">
+    <button type="button" class="iconbtn x" data-close aria-label="Close">&#10005;</button>
+    <h2 id="howTitle">How this works</h2>
+    <div id="howBody"></div>
+    <div class="steps" id="howDots"></div>
+    <div class="row2">
+      <button type="button" class="btn" id="howBack">Back</button>
+      <button type="button" class="btn primary" id="howNext">Next</button>
+    </div>
+  </div>
+</div>
+
+<div class="sheet" id="introSheet" role="dialog" aria-modal="true" aria-labelledby="introTitle" hidden>
+  <div class="panel intro">
+    <h2 id="introTitle">Something new on the hoop</h2>
+    <div id="introBody"></div>
+    <button type="button" class="btn primary" id="introOk" style="width:100%;margin-top:8px">Lovely, let’s untangle</button>
+  </div>
+</div>
+
+<div class="sheet" id="finishSheet" role="dialog" aria-modal="true" aria-labelledby="finTitle" hidden>
+  <div class="panel finish">
+    <h2 id="finTitle">All free</h2>
+    <p class="muted" id="finSub" style="margin:0"></p>
+    <div class="finrow">
+      <div><canvas id="finHoop" aria-hidden="true"></canvas><div class="cap">The hoop as you found it</div></div>
+      <div class="bigshelf" id="finShelf"></div>
+    </div>
+    <div class="par" id="finPar"></div>
+    <p class="knits" id="finKnits"></p>
+    <button type="button" class="btn primary" id="finNext">Next hoop</button>
+    <button type="button" class="btn" id="finAgain">Untangle this one again</button>
+    <button type="button" class="btn" id="finAll">All hoops</button>
+  </div>
+</div>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>
