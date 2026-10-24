@@ -1,4 +1,4 @@
-// The Winding Room, Lifting Table and Dye Garden in quests and events: each has a daily
+// The Winding Room, Lifting Table, Dye Garden, Tangle Basket and Hoop in quests and events: each has a daily
 // quest type once its room is open, a how-to that sends her there (or to its price
 // first), and event points.
 import { test } from 'node:test';
@@ -14,6 +14,8 @@ const ROOMS = [
   { id: 'skeins', quest: 'wind-hanks', event: 'hankTied', points: 'hank' },
   { id: 'lift', quest: 'lift-painting', event: 'paintingLifted', points: 'lifted' },
   { id: 'garden', quest: 'garden-visit', event: 'gardenVisit', points: 'harvest' },
+  { id: 'tangle', quest: 'untangle-baskets', event: 'basketUntangled', points: 'untangled' },
+  { id: 'hoop', quest: 'clear-hoops', event: 'hoopUntangled', points: 'hoop' },
 ];
 
 for (const r of ROOMS) {

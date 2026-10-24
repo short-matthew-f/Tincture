@@ -1108,6 +1108,86 @@ export function solve(L, s = newState(L), { cap = 200000, weight = 1 } = {}) {
   return { ok: false, path: [], nodes: expanded, optimal: false, exhausted: true };
 }
 
+// Quick ways out, for hoops too big to prove (the generator's best found, and
+// the hint off the stored path). Neither is minimal; both are deterministic.
+// Crossings left are a strong guide here but not a safe one: a greedy player
+// who always takes the move leaving the fewest goes round in circles on the
+// harder hoops. Remembering every position seen is what gets these through.
+const guide = (C, st) => simCross(st) + 2 * vcBound(C, st);
+const startOf = (s) => ({ ends: s.ends.slice(), out: s.out.slice(), w: s.w.map((a) => a.slice()), x: s.x });
+/**
+ * bestFirst(L, s?, { cap, lam }) -> { ok, path, nodes, exhausted }: always
+ * expands the position with the least lam × moves + crossings left (+ twice the
+ * bound), never one seen before at fewer moves. Small lam: quick and long;
+ * larger lam: shorter, slower.
+ */
+export function bestFirst(L, s = newState(L), { cap = 4000, lam = 3 } = {}) {
+  const C = { ...ctxOf(L), quick: tightened(L, s) === s };
+  const st0 = startOf(s);
+  if (simDone(st0)) return { ok: true, path: [], nodes: 0, exhausted: false };
+  const best = new Map(), nodes = [], open = new Heap();
+  let id = 0, expanded = 0;
+  const k0 = keyOf(C, st0.ends, st0.w, st0.x);
+  nodes.push({ st: st0, g: 0, parent: -1, e: -1, q: -1, key: k0 });
+  best.set(k0, 0);
+  open.push({ f: 0, h: 0, id: id++, k: 0 });
+  while (open.size) {
+    const top = open.pop(), nd = nodes[top.k];
+    if (best.get(nd.key) < nd.g) continue;
+    if (!nd.st) nd.st = simApply(C, nodes[nd.parent].st, nd.e, nd.q);
+    if (simDone(nd.st)) {
+      const path = [];
+      for (let k = top.k; nodes[k].parent >= 0; k = nodes[k].parent) path.push([nodes[k].e, nodes[k].q]);
+      return { ok: true, path: path.reverse(), nodes: expanded, exhausted: false };
+    }
+    if (++expanded > cap) return { ok: false, path: [], nodes: expanded, exhausted: false };
+    const ms = simMoves(C, nd.st.ends, nd.st.w, nd.st.x);
+    for (let k = 0; k < ms.length; k += 2) {
+      const st = simApply(C, nd.st, ms[k], ms[k + 1]);
+      const g = nd.g + 1, kk = keyOf(C, st.ends, st.w, st.x), old = best.get(kk);
+      if (old !== undefined && old <= g) continue;
+      best.set(kk, g);
+      const h = guide(C, st);
+      nodes.push({ st: null, g, parent: top.k, e: ms[k], q: ms[k + 1], key: kk });
+      open.push({ f: lam * g + h, h, id: id++, k: nodes.length - 1 });
+    }
+  }
+  return { ok: false, path: [], nodes: expanded, exhausted: true };
+}
+/**
+ * beamSearch(L, s?, { width, depth, cap }) -> { ok, path, nodes }: move by
+ * move, keeps the `width` positions with the fewest crossings left (and the
+ * least bound), each seen once. The first clear hoop found is at the fewest
+ * moves this beam can see.
+ */
+export function beamSearch(L, s = newState(L), { width = 100, depth = 40, cap = Infinity } = {}) {
+  const C = { ...ctxOf(L), quick: tightened(L, s) === s };
+  const st0 = startOf(s);
+  if (simDone(st0)) return { ok: true, path: [], nodes: 0 };
+  let layer = [{ st: st0, path: [] }];
+  const seen = new Set([keyOf(C, st0.ends, st0.w, st0.x)]);
+  let expanded = 0;
+  for (let d = 1; d <= depth; d++) {
+    const next = [];
+    for (const nd of layer) {
+      if (++expanded > cap) return { ok: false, path: [], nodes: expanded };
+      const ms = simMoves(C, nd.st.ends, nd.st.w, nd.st.x);
+      for (let k = 0; k < ms.length; k += 2) {
+        const st = simApply(C, nd.st, ms[k], ms[k + 1]);
+        if (simDone(st)) return { ok: true, path: [...nd.path, [ms[k], ms[k + 1]]], nodes: expanded };
+        const kk = keyOf(C, st.ends, st.w, st.x);
+        if (seen.has(kk)) continue;
+        seen.add(kk);
+        next.push({ st, from: nd, m: [ms[k], ms[k + 1]], h: guide(C, st), i: next.length });
+      }
+    }
+    if (!next.length) return { ok: false, path: [], nodes: expanded };
+    next.sort((a, b) => a.h - b.h || a.i - b.i);
+    layer = next.slice(0, width).map((y) => ({ st: y.st, path: [...y.from.path, y.m] }));
+  }
+  return { ok: false, path: [], nodes: expanded };
+}
+
 export function mulberry(seed) {
   let a = seed >>> 0;
   return () => {
@@ -1139,31 +1219,39 @@ export function randomRate(L, K, seed = 1, runs = 200) {
   for (let r = 0; r < runs; r++) if (randomPlayout(L, rng, K) > 0) ok++;
   return ok / runs;
 }
-/** A greedy player with no lookahead: fewest crossings left after the move (ties at random). */
-export function greedyPlayout(L, rng, K) {
+/**
+ * A greedy player with no lookahead: fewest crossings left after the move
+ * (ties at random). Moves used to clear, or -1 within K. memo (optional, one
+ * Map per level): the best moves found at each position, shared by the runs
+ * (they meet the same positions again and again); the same play without it.
+ */
+export function greedyPlayout(L, rng, K, memo = null) {
   const C = ctxOf(L);
   let st = startSt(L);
   for (let k = 1; k <= K; k++) {
-    const ms = simMoves(C, st.ends, st.w, st.x);
-    if (!ms.length) return -1;
-    let bestI = [], bs = Infinity;
-    const kids = [];
-    for (let i = 0; i < ms.length; i += 2) {
-      const t = simApply(C, st, ms[i], ms[i + 1]);
-      kids[i] = t;
-      const sc = simCross(t);
-      if (sc < bs) { bs = sc; bestI = [i]; } else if (sc === bs) bestI.push(i);
+    const key = memo ? keyOf(C, st.ends, st.w, st.x) : null;
+    let bestKids = memo ? memo.get(key) : undefined;
+    if (!bestKids) {
+      const ms = simMoves(C, st.ends, st.w, st.x);
+      let bs = Infinity;
+      bestKids = [];
+      for (let i = 0; i < ms.length; i += 2) {
+        const t = simApply(C, st, ms[i], ms[i + 1]);
+        const sc = simCross(t);
+        if (sc < bs) { bs = sc; bestKids = [t]; } else if (sc === bs) bestKids.push(t);
+      }
+      if (memo) memo.set(key, bestKids);
     }
-    const i = bestI[Math.floor(rng() * bestI.length)];
-    st = kids[i];
+    if (!bestKids.length) return -1;
+    st = bestKids[Math.floor(rng() * bestKids.length)];
     if (simDone(st)) return k;
   }
   return -1;
 }
-export function greedyRate(L, K, seed = 1, runs = 100) {
+export function greedyRate(L, K, seed = 1, runs = 100, memo = null) {
   const rng = mulberry(seed);
   let ok = 0;
-  for (let r = 0; r < runs; r++) if (greedyPlayout(L, rng, K) > 0) ok++;
+  for (let r = 0; r < runs; r++) if (greedyPlayout(L, rng, K, memo) > 0) ok++;
   return ok / runs;
 }
 
@@ -1191,14 +1279,31 @@ export function solutionStep(L, s, solution = L.solution) {
   return null;
 }
 
+/**
+ * wayFrom(L, s, { cap }) -> { path } (a whole way out from s), { tangled: true }
+ * (provably none), or {} (none found within the cap): a short A* first, then
+ * on a hard hoop a quick best-first search by crossings left (a way, not the
+ * shortest). A screen can keep the path and follow it hint by hint.
+ */
+export function wayFrom(L, s, { cap = 2500 } = {}) {
+  if (isDone(s)) return { path: [] };
+  const r = solve(L, s, { cap: Math.ceil(cap / 2), weight: 1.5 });
+  if (r.ok) return { path: r.path };
+  if (r.exhausted) return { tangled: true };
+  const b = bestFirst(L, s, { cap, lam: 3 });
+  if (b.ok) return { path: b.path };
+  if (b.exhausted) return { tangled: true };
+  return {};
+}
+
 /** hint -> { kind: 'move', end, to } | { kind: 'tangled' } | { kind: 'none' } */
 export function hint(L, s, { cap = 2500, solution = L.solution } = {}) {
   if (isDone(s)) return { kind: 'none' };
   const known = solutionStep(L, s, solution);
   if (known) return { kind: 'move', end: known[0], to: known[1] };
-  const r = solve(L, s, { cap, weight: 1.5 });
-  if (r.ok && r.path.length) return { kind: 'move', end: r.path[0][0], to: r.path[0][1] };
-  if (r.exhausted) return { kind: 'tangled' };
+  const way = wayFrom(L, s, { cap });
+  if (way.path && way.path.length) return { kind: 'move', end: way.path[0][0], to: way.path[0][1] };
+  if (way.tangled) return { kind: 'tangled' };
   // out of search budget: the move that leaves the fewest crossings
   const C = ctxOf(L);
   const st = { ends: s.ends, out: s.out, w: s.w, x: s.x };

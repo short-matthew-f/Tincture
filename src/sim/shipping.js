@@ -17,7 +17,7 @@ import { eventPoints } from './events.js';
 import {
   colorPrice, colorFamily, incomeMultiplier, vehicleCapacity, vehicleTripMs, discoveredCount,
 } from './economy.js';
-import { takeStock, addStock, keepOf, stockTotal, PURITY_ORDER } from './storage.js';
+import { takeStock, addStock, keepMap, stockTotal, PURITY_ORDER } from './storage.js';
 
 const DAY = 86400e3;
 const num = (x, d = 0) => (Number.isFinite(x) ? x : d);
@@ -76,6 +76,17 @@ export function currentDemand(state, routeId, now = 0) {
   if (!r) return { family: null, bonus: 0, until: 0 };
   const driftMs = (r.demandDriftDays ?? DEMAND_DRIFT_DAYS) * DAY;
   const window = Math.floor(num(now) / driftMs);
+  // A pure function of (route, window): remembered per route for its latest window
+  // (bestPicks and every jar priced on a trip ask again).
+  const memo = DEMAND_MEMO.get(routeId);
+  if (memo && memo.window === window) return { ...memo.value };
+  const value = demandFor(r, routeId, window, driftMs);
+  DEMAND_MEMO.set(routeId, { window, value });
+  return { ...value };
+}
+const DEMAND_MEMO = new Map();
+
+function demandFor(r, routeId, window, driftMs) {
   const rng = mulberry32((hashString(routeId) ^ Math.imul(window + 1, 0x9e3779b1)) >>> 0);
   rng();
   const family = r.palette[Math.floor(rng() * r.palette.length) % r.palette.length];
@@ -173,6 +184,11 @@ export function unloadCargo(state, args = {}) {
  * Packer did it (auto-pack ships at base value).
  */
 export function dispatch(state, args = {}, now = 0) {
+  return send(state, args, now, true);
+}
+
+/** dispatch() without working out the trip's value when `withValue` is false (the Dispatcher ignores it). */
+function send(state, args, now, withValue) {
   const v = vehicleAt(state, args.vehicle);
   if (!v || !isIdle(v)) return { ok: false, reason: 'busy' };
   const routeId = args.routeId ?? v.route;
@@ -188,7 +204,7 @@ export function dispatch(state, args = {}, now = 0) {
   v.arrivesAt = now + vehicleTripMs(v);
   questEvent(state, 'crateShipped', 1, { routeId, packed: v.packed });
   eventPoints(state, 'crate', 1, { routeId, packed: v.packed, colors: (v.cargo ?? []).map((c) => c.colorId) });
-  return { ok: true, arrivesAt: v.arrivesAt, value: cargoValue(state, routeId, v.cargo, v.packed, now) };
+  return { ok: true, arrivesAt: v.arrivesAt, value: withValue ? cargoValue(state, routeId, v.cargo, v.packed, now) : undefined };
 }
 
 /** resolveTrips(state, now) -> {coins, trips}. Pays every vehicle home by `now`. */
@@ -218,18 +234,20 @@ export function resolveTrips(state, now = 0) {
 function bestPicks(state, routeId, room, now) {
   const r = ROUTES_BY_ID[routeId];
   const d = currentDemand(state, routeId, now);
-  // Kept jars (storage.keepOf) never ship on their own.
-  const list = Object.entries(state.stock ?? {})
-    .map(([colorId, e]) => [colorId, Math.max(0, num(e?.jars) - keepOf(state, colorId))])
-    .filter(([, jars]) => jars > 0)
-    .map(([colorId, jars]) => {
-      const fam = colorFamily(colorId);
-      const on = r.any || r.palette.includes(fam);
-      const score = (fam === d.family ? 2 : 0) + (on ? 1 : 0);
-      return { colorId, jars, score, price: colorPrice(state, colorId) };
-    })
-    .filter((x) => x.score > 0 || r.any)
-    .sort((a, b) => b.score - a.score || b.price - a.price);
+  // Kept jars (storage.keepOf) never ship on their own. keepMap gives the same
+  // reserve as keepOf for every color in stock, worked out once instead of per color.
+  const keeps = keepMap(state);
+  const list = [];
+  for (const [colorId, e] of Object.entries(state.stock ?? {})) {
+    const jars = Math.max(0, num(e?.jars) - num(keeps[colorId]));
+    if (!(jars > 0)) continue;
+    const fam = colorFamily(colorId);
+    const on = r.any || r.palette.includes(fam);
+    const score = (fam === d.family ? 2 : 0) + (on ? 1 : 0);
+    if (!(score > 0 || r.any)) continue;
+    list.push({ colorId, jars, score, price: colorPrice(state, colorId) });
+  }
+  list.sort((a, b) => b.score - a.score || b.price - a.price);
   const picks = [];
   let left = room;
   for (const x of list) {
@@ -261,7 +279,7 @@ export function autoDispatch(state, now = 0) {
     const avail = picks.reduce((s, p) => s + p.jars, 0) + cargoJars(v.cargo);
     if (avail < cap * 0.25) return;
     loadCargo(state, { vehicle: i, routeId: v.route, picks }, now);
-    const res = dispatch(state, { vehicle: i, routeId: v.route, packed: false }, now);
+    const res = send(state, { vehicle: i, routeId: v.route, packed: false }, now, false);
     if (res.ok) dispatched++;
   });
   return { dispatched };

@@ -211,8 +211,9 @@ less per active minute than hand orders (docs/PLAN-v0.3.md "Each release").
 
 ## Lifting Table
 
-`src/sim/lift.js`. Optional, calm active play (27 hand-made paintings); like
-the Tile Room it must pay less per active minute than hand orders.
+`src/sim/lift.js`. Optional, calm active play (104 paintings in 10 chapters,
+opened in order); like the Tile Room it must pay less per active minute than
+hand orders.
 
 - **Unlock:** revealed at 18 colors, 3,500 Coins (`src/sim/unlocks.js`
   `lift`), between the map window (15 / 2,500) and the Tile Room (20 / 5,000).
@@ -223,6 +224,9 @@ the Tile Room it must pay less per active minute than hand orders.
   minutes)`, `RATE = 1`, and the estimate 4 s per move of the stored solution
   plus 6 s per step with a trap (`lift-queues.js` stats): 0.75 income-minutes
   for the first painting (40 s), about 15 for the hardest (fox, ~15.5 min).
+  Chapters 4 to 10 (77 paintings) run 2.3 to 13.7 estimated minutes a
+  painting, each chapter climbing from about 3 to about 12: the same pay per
+  minute, so 100 paintings add play, not a better rate.
   A painting lifted again pays `REPEAT_SHARE = 0.25` (so a fast repeat of the
   first painting cannot out-earn orders).
 - **Stock:** 0.05 jars per lifted cell of each palette color, to her nearest
@@ -244,8 +248,10 @@ the Tile Room it must pay less per active minute than hand orders.
 
 ## Winding Room (Skein Stacks)
 
-`src/sim/skeins.js`. Optional, calm active play (the 12 playtested levels of
-`proto/skeins/`); it must pay less per active minute than hand orders.
+`src/sim/skeins.js`. Optional, calm active play (112 levels in 11 chapters:
+the 12 playtested levels of `proto/skeins/` and 100 more from
+`proto/skeins/gen-levels.mjs`); it must pay less per active minute than hand
+orders.
 
 - **Unlock:** revealed at 12 colors, 1,500 Coins (`src/sim/unlocks.js`
   `skeins`), between the Merge Shelf (8 / 400) and the map window
@@ -265,6 +271,21 @@ the Tile Room it must pay less per active minute than hand orders.
   against 2 to 8 for hand orders. A first draft at 0.25 + 1 paid 2.1 on
   level 1 and was cut. `test/skeins.test.js` plays levels 1, 6 and 12
   through the sim and checks each stays under 2.5 and their mean under 2.
+- **112 levels (0.4.x):** the pay is unchanged. Spindle pegs (a hank of 8),
+  felted stacks (yarn dealt for free) and orders (only set colors count) all
+  shift moves per hank a little; the planning bot, which wastes fewer
+  placements than a person, pays at most 1.95 income-minutes per active minute
+  at 3 s a placement on any level (mean 1.51). `test/skeins.test.js` now plays
+  levels 1, 6, 12 and eight later ones (an order, a basket, felt, spindles, a
+  small spindle board, the peek, the finale) with the planning bot.
+- **Difficulty:** the merge rule is forgiving (a careless player who merges
+  when it can and otherwise drops stacks at random almost never fills a
+  board), so the ramp in each chapter comes from more colors, mixed trays with
+  weaker top-color pull (six presets in `gen-levels.mjs`), bigger goals and
+  more marks on the board, with a reset at each chapter start. Untangle goals
+  ask for aim (a hank tied beside each snarl). `node proto/skeins/survey.mjs
+  --levels --seeds 10` verifies all 112: the planning bot finishes all 1,120
+  games and needed one nudge in all of them (level 59, once).
 - The balance players never wind yarn: `sim-player.savingGoal` skips the
   unlock and `nextSkipping` hides it from their Next button (the 9-run
   check, all three profiles over 14 days, is unchanged to the coin).
@@ -297,6 +318,49 @@ it must pay less per active minute than hand orders.
 - The balance players never sit down in the garden: `sim-player.savingGoal`
   skips its unlock and `nextSkipping` counts it as open, so the scripted runs
   are unchanged by it.
+- **The Garden Path** (108 gardens, `src/puzzles/garden-path.js`) pays the
+  same way: jars × `JAR_MINUTES`, the main goal paying like the bonus goal
+  (`GOAL_MINUTES`), and the same few jars of stock; no first-time bonus, and
+  stars pay nothing. Path gardens are smaller than the five places (the
+  autopilot clears one in 15–60 s, median about 36 s; its goal in about 25 s),
+  so a garden pays less but at the same rate per minute. `test/garden-path.test.js`
+  checks four of them (the densest included) against the same two bounds at
+  two workshop sizes.
+
+## Tangle Basket
+
+`src/sim/tangle.js`. Optional, calm active play (the 109 baskets of
+`proto/tangle/`); like the other rooms it must pay less per active minute than
+hand orders.
+
+- **Unlock:** revealed at 28 colors, 9,000 Coins (`src/sim/unlocks.js`
+  `tangle`), after the Gallery Wing (25 / 8,000) and before Commissions
+  (Phase 3, 30 / 20,000). Renovate closes it like the others (Heritage
+  `keep-basket` holds it); her untangled baskets and the one on the table stay.
+- **Pay:** a first untangling pays `basketMinutes(L)` × `orderBasePay(state, 1)`
+  × `incomeMultiplier`, with `basketMinutes = max(0.5, RATE × estimated active
+  minutes)`, `RATE = 1`, and the estimate 10 s to take the basket in plus 4 s
+  per pull of the stored solution (0.57 min for basket 1, 3.2 min for the
+  57-strand ones). It scales one order-minute, as the Winding Room's hanks do,
+  so while the order floor (25% of the cheapest upgrade) binds, a quick basket
+  still pays no more per minute than an order (a draft that paid
+  `orderBasePay(state, minutes)` paid the whole floor for a 34 s basket: 1.76
+  income-minutes per minute in a fresh workshop). A basket untangled again pays
+  `REPEAT_SHARE = 0.25`. Nothing is spent and no stock is added: the yarn is
+  her discovered colors.
+- **Check** (`tools/balance` scripted casual and engaged players, seeds 1 to 3,
+  days 1 to 8, every third check-in from 28 colors on: 28 to 109 colors):
+  exactly 1.00 income-minute per estimated active minute for every basket
+  (the order floor never binds there), against 2 to 8 for hand orders (2 to 4
+  income-minutes each, 30 to 60 s). At 28 colors one income-minute is about
+  48K coins: basket 1 pays about 27K and a 57-strand basket about 157K, against
+  97K to 194K for one hand order. A player twice as fast as the estimate makes
+  2, the slow end of orders. `test/tangle.test.js` checks every basket pays at
+  most 1.2 income-minutes per estimated minute (also on a fresh workshop where
+  the floor binds), at double speed no more than the cheapest order per
+  minute, and a repeat a quarter.
+- The balance players never sit down at the basket: `sim-player.savingGoal`
+  skips the unlock and `nextSkipping` hides it from their Next button.
 
 ## Open
 
@@ -342,12 +406,41 @@ it must pay less per active minute than hand orders.
   collectors, vehicle upgrades to Wagon/Barge (fleet slots fill with handcarts
   and the Dispatcher keeps them busy, so they are never idle to replace), packing
   bonus, the Order Clerk, Packer and Steward.
-- **Speed.** A 21-day run takes about 0.3 s (Forgetful) to 1.5 s (Engaged); the
-  30-seed tables take ~77 s on 4 cores and the balance test ~17 s. Most of it
-  is the engine: with the Dispatcher, `tickFactory` sub-steps up to 48 times per
-  catch-up and each step re-runs `autoDispatch` → `bestPicks`, which recomputes
-  hue family and route demand for every stocked color per vehicle; the rest is
-  one `flowMeter` read per purchase (thousands per run, more with each
-  Renovate rebuild). The test spreads its 45 runs over worker threads
-  (`tools/balance/parallel.js`); the first-session check (30 seeds of
-  `firstSessions`) adds under a second.
+- **Speed.** A 21-day run takes about 0.3 s (Forgetful) to 0.8 s (Engaged) of
+  CPU; the balance test about 31 s of CPU over 4 worker threads (was 42 s,
+  measured side by side), 12 s of wall time alone (was 16 s) and 13–14 s for
+  all of `npm test` when the machine is otherwise quiet (was 18 s). Other
+  sessions' load on the shared container can still add up to ~1.5–2×.
+  Profile (`node --cpu-prof` on the 9 kinds of job): no single hot spot; the
+  work is the greedy buyer's thousands of purchases per run (each followed by a
+  flow-meter read, `sim.next`, unlock statuses) and the Dispatcher's up-to-48
+  `tickFactory` sub-steps (`step`, `autoDispatch` → `bestPicks`). What the
+  speed-up pass removed, without changing a result: `rates()` recomputed for an
+  unchanged workshop (~3 of 4 calls; now remembered per `stations` object,
+  keyed on every input, and its loops no longer destructure share pairs);
+  `upgradeOptions` built and labeled ~30 options for every flow-meter and
+  `cheapestUpgrade` call (now a label-free scan that labels only the pick);
+  `capacity` recomputed (remembered like rates); `bestPicks` asked `keepOf` per
+  stocked color, each building a Set and a commission progress string (now one
+  `keepMap` per load); string-built commission memo keys (now flat arrays);
+  route demand rehashed per jar (remembered per route and window); trip value
+  priced for Dispatcher loads that ignore it; region postcard lists and shelf
+  line slots rebuilt per call. The buyer reads `rates().jars` and capacity
+  directly instead of the whole flow meter. Freezing the shared rates result
+  cost 7% of a run, so callers must only read it (ARCHITECTURE.md).
+- **Digest.** `node tools/balance/digest.js` prints a sha256 of the test's 45
+  run summaries (`runs`), of their final states (`states`) and of the 30
+  first-session runs (`first`). A speed-up must leave all three unchanged (the
+  pass above did: compared before/after on the same tree); `test/balance.test.js`
+  pins `runs` as BALANCE_DIGEST, so a change that is meant to move the balance
+  updates it there. The digest is of floating-point results: a Node/V8 upgrade
+  that changes `Math.pow` or `Math.cbrt` rounding would change it too.
+- **Not done: caching the simulation on disk.** Keying the 45 results on a hash
+  of every file they depend on would roughly halve a warm `npm test` (the
+  balance file is its critical path), but a cold run (fresh clone, any sim or
+  content edit, which is most edits during a feature) costs the same as now,
+  and a missed input would let a stale cache hide a balance regression. The inputs are wider than `src/sim`
+  and `src/content`: the player imports `src/puzzles/grading.js` and
+  `matching.js`, the factory `src/puzzles/purify.js`, so the key would have to
+  follow the import graph (plus the Node version). Worth it only if the suite
+  must stay under 20 s while other sessions load the machine.

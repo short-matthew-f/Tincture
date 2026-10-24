@@ -27,6 +27,8 @@ import { deltaEHex } from '../color.js';
 import { gardenCardHtml, gardenCardSig } from './garden-card.js';
 import { liftCardHtml, liftCardSig } from './lift.js';
 import { skeinsCardHtml, skeinsCardSig } from './skeins.js';
+import { tangleCardHtml, tangleCardSig } from './tangle.js';
+import { hoopCardHtml, hoopCardSig } from './hoop.js';
 
 // ---------------------------------------------------------------------------
 // Shared constants and small helpers
@@ -556,7 +558,7 @@ ${packAction}
 </div>`;
 
   return h`<div class="screen-head is-left"><div class="titles"><div class="title">Puzzle table</div><div class="subtitle">Short, calm, and always worth it</div></div></div>
-<div class="screen-body pz-body pz-hub">${gradingCard}${purifyCard}${skeinsCardHtml(C, state)}${liftCardHtml(C, state)}${tilesCardHtml(state)}${gardenCardHtml(C, state)}${packingCard}</div>`;
+<div class="screen-body pz-body pz-hub">${gradingCard}${purifyCard}${skeinsCardHtml(C, state)}${liftCardHtml(C, state)}${tilesCardHtml(state)}${gardenCardHtml(C, state)}${tangleCardHtml(C, state)}${hoopCardHtml(C, state)}${packingCard}</div>`;
 }
 
 function sigOf(state) {
@@ -580,6 +582,8 @@ function sigOf(state) {
     gardenCardSig(C, state),
     liftCardSig(C, state),
     skeinsCardSig(C, state),
+    tangleCardSig(C, state),
+    hoopCardSig(C, state),
   ]);
 }
 
@@ -722,6 +726,10 @@ function onClick(e) {
     C.navigate('garden', {});
   } else if (act === 'open-lift') {
     C.navigate('lift', {});
+  } else if (act === 'open-tangle') {
+    C.navigate('tangle', {});
+  } else if (act === 'open-hoop') {
+    C.navigate('hoop', {});
   } else if (act === 'open-skeins') {
     C.navigate('skeins', {});
   } else if (act === 'continue-packing') {

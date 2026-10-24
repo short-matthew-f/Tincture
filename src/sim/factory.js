@@ -208,7 +208,7 @@ function step(state, t0, t1, muddyBudget = { left: Infinity }) {
     m.progress -= Math.floor(m.progress / MIXER.batchJars) * MIXER.batchJars;
     // A muddy batch is one mixer batch (MIXER.batchJars) set aside: from this
     // step's output first, the rest from that color's stock (lowest purity).
-    const mine = due.filter((d) => d.i === i);
+    const mine = due.length ? due.filter((d) => d.i === i) : due;
     const owed = [];
     for (const d of mine) {
       const take = Math.min(MIXER.batchJars, keep);

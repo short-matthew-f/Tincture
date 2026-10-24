@@ -1,9 +1,17 @@
 // sim/lift.js — The Lifting Table as sim actions on state (pure).
-// The rules live in src/puzzles/lift.js and the 27 paintings in
-// src/puzzles/lift-levels.js (ported from proto/lift/, where the playtested
+// The rules live in src/puzzles/lift.js and the paintings, in chapters, in
+// src/puzzles/lift-levels.js (shipped from proto/lift/, where the playtested
 // prototype and its authoring tools stay). This module owns the save shape,
-// the moves of the painting on the easel, the coins and the stock a finished
-// painting pays, and the hooks for quests and events.
+// which paintings are open, the moves of the painting on the easel, the coins
+// and the stock a finished painting pays, and the hooks for quests and events.
+//
+// Which paintings are open (the gallery wall's rooms): chapter 1 is open from
+// the start; a chapter opens once every painting of the chapter before it is
+// lifted. Inside an open chapter the first painting is open, and each one after
+// it opens once the one before it is lifted. A painting she has lifted, and the
+// one on her easel, always stay open, and so does a chapter she has lifted a
+// painting in (saves from before the chapters, when any painting could be
+// picked, keep everything they reached).
 //
 // state.lift = {
 //   cur: 'sun',                  // the painting on the easel (a level id)
@@ -15,7 +23,8 @@
 //                                // game has paid its finish (undo, then finish
 //                                // again, never pays twice)
 //   done: { sun: 1 },            // times each painting has been lifted
-//   seenIntro: { mystery: true },// mechanics whose intro card she has seen
+//   seenIntro: { mystery: true, 'chapter:garden': true },
+//                                // mechanics and chapters whose intro card she has seen
 //   settings: { fast: false, sound: true, glyphs: true },
 //   paid: 0, lifted: 0,          // coins every painting has paid; paintings lifted (repeats too)
 //   last: null | { levelId, coins, sold, stock: [{colorId, jars}], repeat, at },
@@ -48,7 +57,7 @@
 // Domain event (bus): 'paintingLifted' {levelId, coins, sold, stock, repeat, lifted}.
 
 import * as R from '../puzzles/lift.js';
-import { LEVELS, LEVEL_IDS, PALETTE, levelById } from '../puzzles/lift-levels.js';
+import { LEVELS, LEVEL_IDS, PALETTE, CHAPTERS, levelById, chapterIndex } from '../puzzles/lift-levels.js';
 import { emit } from './bus.js';
 import { deltaEHex } from '../color.js';
 import { colorHex, colorPrice, incomeMultiplier } from './economy.js';
@@ -89,7 +98,41 @@ export function unlocked(state) {
   return !!(state && state.unlocks && state.unlocks.lift);
 }
 
-export { LEVELS, LEVEL_IDS, PALETTE, levelById };
+export { LEVELS, LEVEL_IDS, PALETTE, CHAPTERS, levelById, chapterIndex };
+
+// ---------------------------------------------------------------------------
+// Chapters: which paintings are open
+// ---------------------------------------------------------------------------
+
+const doneOf = (state) => (state && state.lift && isObj(state.lift.done) ? state.lift.done : {});
+const idsOf = (ci) => LEVEL_IDS.slice(CHAPTERS[ci].from, CHAPTERS[ci].to);
+
+/** chapterDone(state, ci) -> is every painting of chapter ci lifted? */
+export function chapterDone(state, ci) {
+  const done = doneOf(state);
+  return ci >= 0 && ci < CHAPTERS.length && idsOf(ci).every((id) => num(done[id]) > 0);
+}
+
+/** chapterOpen(state, ci) -> can she hang paintings of chapter ci on the easel? */
+export function chapterOpen(state, ci) {
+  if (!(ci >= 0 && ci < CHAPTERS.length)) return false;
+  if (ci === 0 || chapterDone(state, ci - 1)) return true;
+  const done = doneOf(state);
+  const cur = state && state.lift && state.lift.cur;
+  return idsOf(ci).some((id) => num(done[id]) > 0 || id === cur);
+}
+
+/** paintingOpen(state, levelId) -> may she start this painting? (see the top of this file) */
+export function paintingOpen(state, levelId) {
+  const idx = LEVEL_IDS.indexOf(levelId);
+  if (idx < 0) return false;
+  const done = doneOf(state);
+  if (num(done[levelId]) > 0) return true;
+  if (state && state.lift && state.lift.cur === levelId) return true;
+  const ci = chapterIndex(levelId);
+  if (!chapterOpen(state, ci)) return false;
+  return idx === CHAPTERS[ci].from || num(done[LEVEL_IDS[idx - 1]]) > 0;
+}
 
 // ---------------------------------------------------------------------------
 // The painting on the easel: moves -> rules state (memoized replay)
@@ -204,12 +247,13 @@ export function openEasel(state) {
   return { ok: true, levelId: L.id };
 }
 
-/** startPainting(state, {levelId}) -> {ok, levelId}: that painting, fresh, on the easel (any painting, any order). */
+/** startPainting(state, {levelId}) -> {ok, levelId} | {ok:false, reason:'closed'}: that painting, fresh, on the easel (an open one: paintingOpen). */
 export function startPainting(state, { levelId } = {}) {
   if (!unlocked(state)) return { ok: false, reason: 'locked' };
   const t = ensureLift(state);
   const L = levelById(levelId);
   if (!L) return { ok: false, reason: 'unknown' };
+  if (!paintingOpen(state, L.id)) return { ok: false, reason: 'closed' };
   t.cur = L.id;
   t.game = freshGame(L);
   remember(t.game, L, [R.newState(L)]);
@@ -443,11 +487,45 @@ function finish(state, L, now) {
 // Reads
 // ---------------------------------------------------------------------------
 
-/** nextLevelId(state, fromId) -> the next painting not yet lifted after fromId, else simply the next one. */
+/**
+ * nextLevelId(state, fromId) -> the next open painting not yet lifted after
+ * fromId; else the first open one not yet lifted anywhere; else (everything
+ * lifted) simply the next one, for a repeat.
+ */
 export function nextLevelId(state, fromId) {
-  const done = (state && state.lift && state.lift.done) || {};
+  const done = doneOf(state);
   const idx = Math.max(0, LEVEL_IDS.indexOf(fromId));
-  return LEVEL_IDS.slice(idx + 1).find((id) => !done[id]) || LEVEL_IDS[(idx + 1) % LEVEL_IDS.length];
+  const fresh = (id) => !(num(done[id]) > 0) && paintingOpen(state, id);
+  return LEVEL_IDS.slice(idx + 1).find(fresh) || LEVEL_IDS.find(fresh) || LEVEL_IDS[(idx + 1) % LEVEL_IDS.length];
+}
+
+/** continueId(state) -> where "Continue" goes: the easel's painting until it is lifted (or while a repeat of it is under way), else the next open one not yet lifted. */
+export function continueId(state) {
+  const t = state && state.lift;
+  const cur = t && levelById(t.cur) ? t.cur : LEVEL_IDS[0];
+  const done = doneOf(state);
+  if (!(num(done[cur]) > 0)) return cur;
+  const g = current(state);
+  if (g && g.L.id === cur && !g.done && g.moves.length) return cur; // a repeat under way
+  return nextLevelId(state, cur);
+}
+
+/**
+ * wall(state) -> the gallery wall, room by room (a cheap read for the screen):
+ * [{id, name, line, index, open, done, lifted, total, paintings: [{id, index, open, done, current, next}]}].
+ * `next` marks the one painting "Continue" goes to; `current` the easel's.
+ */
+export function wall(state) {
+  const done = doneOf(state);
+  const cur = state && state.lift && state.lift.cur;
+  const nx = continueId(state);
+  return CHAPTERS.map((c, ci) => {
+    const paintings = LEVEL_IDS.slice(c.from, c.to).map((id, k) => ({
+      id, index: c.from + k, open: paintingOpen(state, id), done: num(done[id]) > 0, current: id === cur, next: id === nx,
+    }));
+    const lifted = paintings.filter((p) => p.done).length;
+    return { id: c.id, name: c.name, line: c.line, index: ci, open: chapterOpen(state, ci), done: lifted === paintings.length, lifted, total: paintings.length, paintings };
+  });
 }
 
 /** summary(state) -> a cheap read for the Puzzles hub card. */
@@ -458,12 +536,18 @@ export function summary(state) {
   const L = levelById(id);
   const left = cur ? R.remaining(cur.s) : L.W * L.H;
   const done = t && isObj(t.done) ? Object.keys(t.done).filter((k) => levelById(k)).length : 0;
+  const ci = chapterIndex(id);
+  const ch = CHAPTERS[ci];
   return {
     open: unlocked(state),
     levelId: id,
     name: L.name,
     index: LEVEL_IDS.indexOf(id),
     total: LEVEL_IDS.length,
+    chapter: ci,
+    chapterName: ch.name,
+    inChapter: LEVEL_IDS.indexOf(id) - ch.from,
+    chapterSize: ch.to - ch.from,
     playing: !!(cur && cur.moves.length && !cur.done),
     cleared: !!(cur && cur.done),
     progress: 1 - left / (L.W * L.H),

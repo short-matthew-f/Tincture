@@ -12,7 +12,14 @@
 //    on the chip as hanks are tied, the finished shelf and "Next: level 2";
 //  - a reload mid-level (right after a placement, mid-flight) resumes exactly;
 //  - 44 px controls, no horizontal scroll, the dock inside the viewport and
-//    the tab bar hidden, no console errors.
+//    the tab bar hidden, no console errors;
+//  - 112 levels in chapters: her finished levels from a save, the hub card's
+//    "Play level N", the level list (Continue, chapter sections, done ticks,
+//    the next level highlighted), each newer mechanic's intro card shown once
+//    and drawn on its board (snarls, an order slip, the basket, felted
+//    stacks, spindle pegs, the next-tray peek, untangling), silhouette boards
+//    (heart, sheep, mitten, teapot, star, flower) fitting at 360 px, Continue
+//    after a finished level, and a reload mid-level on a mechanic level.
 // Run: node test/skeins.e2e.mjs   (screenshots: $SKEINS_SHOTS or the OS temp dir)
 
 import { spawn, execSync } from 'node:child_process';
@@ -149,7 +156,7 @@ async function geometry(page, label) {
     const sec = document.querySelector('#screen-skeins');
     const body = sec.querySelector('.screen-body');
     const dock = sec.querySelector('[data-dock]');
-    const small = [...sec.querySelectorAll('.sk-actions .btn, .sk-foot .btn, .sk-tslot, .btn-back, .how-link, [data-levelbtn], .sk-sheet:not([hidden]) .btn, .sk-sheet:not([hidden]) [data-level]')]
+    const small = [...sec.querySelectorAll('.sk-actions .btn, .sk-foot .btn, .sk-tslot, .btn-back, .how-link, [data-levelbtn], .sk-sheet:not([hidden]) .btn, .sk-sheet:not([hidden]) [data-level], .sk-sheet:not([hidden]) .sk-chhead')]
       .filter((el) => el.getClientRects().length)
       .map((el) => { const r = el.getBoundingClientRect(); return { cls: el.className, w: r.width, h: r.height }; })
       .filter((r) => r.h < 43.5 || r.w < 43.5);
@@ -369,6 +376,233 @@ async function walk(viewport, tag) {
   await context.close();
 }
 
+
+/** Seeds her progress: levels 1..n finished, the level on the table (no session yet), intro cards seen. */
+async function seedProgress(page, { finished, li, seen = {} }) {
+  await page.evaluate(({ finished, li, seen }) => {
+    const { game } = window.tincture;
+    game.act((st) => {
+      st.unlocks.skeins = true;
+      const k = st.skeins;
+      k.finished = {};
+      for (let i = 0; i < finished; i++) k.finished[i] = true;
+      k.li = li;
+      k.sess = null;
+      k.other = {};
+      k.seen = { ...seen };
+      return {};
+    }, {});
+    game.save();
+  }, { finished, li, seen });
+}
+
+/** A few placements with the planning bot through the sim (fills the board for a screenshot). */
+async function botMoves(page, n) {
+  await page.evaluate((n) => {
+    const { game, ctx } = window.tincture;
+    const R = ctx.puzzles.skeins;
+    for (let i = 0; i < n; i++) {
+      const s = game.state.skeins.sess.state;
+      if (s.done) break;
+      const m = R.botMove(s);
+      if (m.clear !== undefined) game.act(ctx.sim.skeins.clearPeg, { cell: m.clear });
+      else game.act(ctx.sim.skeins.place, { t: m.t, cell: m.cell });
+    }
+  }, n);
+}
+
+/** Jump to level li (her progress opened up to it) and wait for the board; returns the intro card's text or ''. */
+async function goLevel(page, li) {
+  await page.evaluate((li) => {
+    const { game, ctx } = window.tincture;
+    game.act((st) => { for (let i = 0; i < li; i++) st.skeins.finished[i] = true; return {}; }, {});
+    game.act(ctx.sim.skeins.startLevel, { level: li, fresh: true });
+  }, li);
+  await tap(page, '#screen-skeins .btn-back');
+  await page.waitForSelector('#pz-skeins [data-action="open-skeins"]', { state: 'visible' });
+  await tap(page, '#pz-skeins [data-action="open-skeins"]');
+  await page.waitForSelector('#screen-skeins .sk-tslot', { state: 'visible' });
+  await page.waitForTimeout(250);
+  const open = await page.locator('#screen-skeins [data-intro]:not([hidden])').count();
+  return open ? (await page.locator('#screen-skeins [data-intro]').textContent()).replace(/\s+/g, ' ').trim() : '';
+}
+
+const firstWith = (page, m) => page.evaluate((m) => {
+  const R = window.tincture.ctx.puzzles.skeins;
+  return R.LEVELS.findIndex((_, i) => R.levelMechanics(i).includes(m));
+}, m);
+
+/** 112 levels: chapters, Continue, intro cards, mechanics and silhouettes on the board. */
+async function chaptersWalk(viewport, tag) {
+  const context = await browser.newContext({ viewport, deviceScaleFactor: 2, isMobile: true, hasTouch: true, serviceWorkers: 'block' });
+  const page = await context.newPage();
+  const cdp = await context.newCDPSession(page);
+  await page.route(/fonts\.(googleapis|gstatic)\.com/, (route) => route.abort());
+  const errors = trackErrors(page);
+  const shot = (name) => page.screenshot({ path: path.join(SHOTS, `${tag}-${name}.png`) });
+  await page.goto(URL_, { waitUntil: 'load' });
+  await boot(page);
+  await seed(page);
+  // her save: chapter 1 and 2 wound (23 levels), level 24 (the first order) next, the snarl card read
+  await seedProgress(page, { finished: 23, li: 23, seen: { snarl: true } });
+  await page.reload({ waitUntil: 'load' });
+  await boot(page);
+  await page.evaluate(() => { window.tincture.game.state.onboarding.seen.skeins = true; });
+
+  // --- the hub card -------------------------------------------------------------------------------
+  await tap(page, '#tabbar [data-tab="puzzles"]');
+  await page.waitForSelector('#pz-skeins [data-action="open-skeins"]', { state: 'visible' });
+  const card = (await page.locator('#pz-skeins').textContent()).replace(/\s+/g, ' ').trim();
+  check(/Play level 24/.test(card) && /Dye day/.test(card) && /23 levels finished/.test(card), `${tag}: the hub card names the next level and its chapter ("${card.slice(0, 120)}")`);
+  await page.evaluate(() => document.querySelector('#pz-skeins').scrollIntoView({ block: 'center' }));
+  await shot('c01-hub-card');
+
+  // --- level 24: the order card, once ----------------------------------------------------------------
+  await tap(page, '#pz-skeins [data-action="open-skeins"]');
+  await page.waitForSelector('#screen-skeins [data-intro]:not([hidden])', { state: 'visible', timeout: 6000 });
+  const intro = (await page.locator('#screen-skeins [data-intro]').textContent()).replace(/\s+/g, ' ');
+  check(/Orders/.test(intro) && /customer/.test(intro), `${tag}: the order level opens with its intro card ("${intro.trim().slice(0, 90)}")`);
+  await shot('c02-intro-order');
+  await geometry(page, `${tag} intro card`);
+  await tap(page, '#screen-skeins [data-act="intro-ok"]');
+  check(await page.evaluate(() => window.tincture.game.state.skeins.seen.order === true), `${tag}: the card is marked read`);
+  const count = (await page.locator('#screen-skeins [data-count]').textContent()).trim();
+  check(/for the weaver/.test(count), `${tag}: the goal reads as an order slip ("${count}")`);
+  await botMoves(page, 6);
+  await page.waitForTimeout(300);
+  await shot('c03-order-board');
+
+  // --- the level list: Continue, chapters, ticks, next highlighted ------------------------------------
+  await tap(page, '#screen-skeins [data-act="levels"]');
+  await page.waitForSelector('#screen-skeins [data-levels]:not([hidden])', { state: 'visible' });
+  const list = await page.evaluate(() => {
+    const sh = document.querySelector('#screen-skeins [data-levels]');
+    return {
+      heads: sh.querySelectorAll('.sk-chhead').length,
+      expanded: [...sh.querySelectorAll('.sk-chhead[aria-expanded="true"]')].map((b) => +b.dataset.chapter),
+      rows: sh.querySelectorAll('[data-level]').length,
+      next: [...sh.querySelectorAll('[data-level].next')].map((b) => +b.dataset.level),
+      cont: (sh.querySelector('[data-act="continue"]') || {}).textContent || '',
+      openHeads: [...sh.querySelectorAll('.sk-chhead')].filter((b) => !b.disabled).length,
+    };
+  });
+  check(list.heads === 11 && list.openHeads === 3, `${tag}: 11 chapter sections, 3 open (${list.heads}, ${list.openHeads})`);
+  check(list.expanded.length === 1 && list.expanded[0] === 2 && list.rows === 10, `${tag}: the chapter with the next level is open (${list.expanded}, ${list.rows} rows)`);
+  check(list.next.length === 1 && list.next[0] === 23, `${tag}: level 24 is highlighted as next (${list.next})`);
+  check(/Continue level 24/.test(list.cont), `${tag}: the Continue button resumes level 24 ("${list.cont.trim()}")`);
+  await shot('c04-levels');
+  await geometry(page, `${tag} level list`);
+  await tap(page, '#screen-skeins [data-chapter="1"]');
+  await page.waitForTimeout(150);
+  const ticks = await page.evaluate(() => document.querySelectorAll('#screen-skeins #sk-ch-1 .tick').length);
+  check(ticks === 10, `${tag}: chapter 2 shows ten done ticks (${ticks})`);
+  await shot('c05-levels-chapter2');
+  await tap(page, '#screen-skeins [data-act="continue"]');
+  await page.waitForFunction(() => document.querySelector('#screen-skeins [data-levels]').hidden);
+  check(await page.evaluate(() => window.tincture.game.state.skeins.sess.state.level === 23 && window.tincture.game.state.skeins.sess.state.moves === 6), `${tag}: Continue went back to the same board`);
+
+  // --- each newer mechanic: its card, then its board ------------------------------------------------------
+  const MECH = [['snarl', 'Snarls'], ['basket', 'basket of trays'], ['felt', 'Felted stacks'], ['spindle', 'Spindle pegs'], ['preview', 'next tray'], ['untie', 'Untangle']];
+  for (const [m, word] of MECH) {
+    const li = await firstWith(page, m);
+    // the snarl card was read in her save: show it again for the screenshot
+    if (m === 'snarl') await page.evaluate(() => { delete window.tincture.game.state.skeins.seen.snarl; });
+    const text = await goLevel(page, li);
+    check(new RegExp(word).test(text), `${tag}: level ${li + 1} opens with the ${m} card ("${text.slice(0, 60)}")`);
+    if (text) {
+      await shot(`c06-intro-${m}`);
+      await tap(page, '#screen-skeins [data-act="intro-ok"]');
+    }
+    const fresh = await page.evaluate(() => document.querySelectorAll('#screen-skeins .sk-stack.felt').length);
+    await botMoves(page, m === 'untie' ? 16 : 9);
+    await page.waitForTimeout(350);
+    const drawn = await page.evaluate((m) => {
+      const sec = document.querySelector('#screen-skeins');
+      return {
+        snarl: sec.querySelectorAll('.sk-peg.snarl').length,
+        felt: sec.querySelectorAll('.sk-stack.felt').length,
+        spindle: sec.querySelectorAll('.sk-peg.spindle').length,
+        next: !sec.querySelector('[data-next]').hidden,
+        chips: sec.querySelector('[data-chips]').textContent,
+      };
+    }, m);
+    const ok = { snarl: drawn.snarl > 0, basket: /basket/.test(drawn.chips), felt: fresh > 0, spindle: drawn.spindle > 0, preview: drawn.next, untie: /untangle|loosen|wake|untangled/i.test(drawn.chips) }[m];
+    check(ok, `${tag}: the ${m} board draws it (${JSON.stringify(drawn).slice(0, 120)})`);
+    await shot(`c07-board-${m}`);
+    await geometry(page, `${tag} ${m} board`);
+  }
+  // a felted stack wakes beside a hank: play the felt level on until one wakes
+  {
+    const li = await firstWith(page, 'felt');
+    await goLevel(page, li);
+    const before = await page.evaluate(() => window.tincture.game.state.skeins.sess.state.felt.length);
+    await page.evaluate(() => {
+      const { game, ctx } = window.tincture;
+      const R = ctx.puzzles.skeins;
+      for (let i = 0; i < 200; i++) {
+        const s = game.state.skeins.sess.state;
+        if (s.done || s.felt.length < 3) break;
+        const m = R.botMove(s);
+        if (m.clear !== undefined) game.act(ctx.sim.skeins.clearPeg, { cell: m.clear });
+        else game.act(ctx.sim.skeins.place, { t: m.t, cell: m.cell });
+      }
+    });
+    await page.waitForTimeout(300);
+    const after = await page.evaluate(() => window.tincture.game.state.skeins.sess.state.felt.length);
+    check(after < before, `${tag}: felted stacks wake as hanks are tied beside them (${before} -> ${after})`);
+    await shot('c08-felt-woken');
+  }
+
+  // --- silhouettes on the board ---------------------------------------------------------------------
+  for (const shape of ['heart35', 'sheep', 'mitten', 'teapot', 'star37', 'flower25']) {
+    const li = await page.evaluate((sh) => window.tincture.ctx.puzzles.skeins.LEVELS.findIndex((L) => L.shape === sh), shape);
+    const text = await goLevel(page, li);
+    if (text) await tap(page, '#screen-skeins [data-act="intro-ok"]');
+    await botMoves(page, 8);
+    await page.waitForTimeout(300);
+    await shot(`c09-shape-${shape}`);
+    await geometry(page, `${tag} ${shape} board`);
+  }
+
+  // --- a reload mid-level on a mechanic level, by touch ----------------------------------------------
+  {
+    const li = await firstWith(page, 'snarl');
+    const text = await goLevel(page, li);
+    if (text) await tap(page, '#screen-skeins [data-act="intro-ok"]');
+    for (let i = 0; i < 3; i++) await playMove(page, cdp, { drag: i === 1 });
+    const before = await sk(page);
+    await page.reload({ waitUntil: 'load' });
+    await boot(page);
+    const after = await sk(page);
+    check(JSON.stringify(after.sess) === JSON.stringify(before.sess), `${tag}: a reload mid-level on a snarl level resumes exactly (move ${after.sess.state.moves})`);
+  }
+
+  // --- Continue after a finished level ------------------------------------------------------------------
+  {
+    await page.evaluate(() => {
+      const { game, ctx } = window.tincture;
+      game.act((st) => { st.skeins.finished = {}; for (let i = 0; i < 41; i++) st.skeins.finished[i] = true; st.skeins.other = {}; return {}; }, {});
+      game.act(ctx.sim.skeins.startLevel, { level: 4, fresh: true });
+      const R = ctx.puzzles.skeins;
+      for (let i = 0; i < 400 && !game.state.skeins.sess.state.done; i++) {
+        const m = R.botMove(game.state.skeins.sess.state);
+        if (m.clear !== undefined) game.act(ctx.sim.skeins.clearPeg, { cell: m.clear });
+        else game.act(ctx.sim.skeins.place, { t: m.t, cell: m.cell });
+      }
+    });
+    await tap(page, '#tabbar [data-tab="puzzles"]');
+    await page.waitForSelector('#pz-skeins [data-action="open-skeins"]', { state: 'visible' });
+    const c2 = (await page.locator('#pz-skeins').textContent()).replace(/\s+/g, ' ');
+    check(/Play level 42/.test(c2), `${tag}: after a finished replay, the card offers the newest level ("${c2.trim().slice(0, 90)}")`);
+    await tap(page, '#pz-skeins [data-action="open-skeins"]');
+    await page.waitForSelector('#screen-skeins .sk-tslot', { state: 'visible' });
+    check(await page.evaluate(() => window.tincture.game.state.skeins.sess.state.level) === 41, `${tag}: the room opens on level 42`);
+  }
+
+  check(errors.length === 0, `${tag}: no console errors (${errors.slice(0, 3).join(' | ')})`);
+  await context.close();
+}
+
 /** From the workshop: Next names the Winding Room, the sheet buys it, the ceremony plays, and a two-choice card offers the way in. */
 async function workshopWalk(viewport, tag) {
   const context = await browser.newContext({ viewport, deviceScaleFactor: 2, isMobile: true, hasTouch: true, serviceWorkers: 'block' });
@@ -413,6 +647,8 @@ try {
   await workshopWalk({ width: 390, height: 844 }, '390');
   await walk({ width: 390, height: 844 }, '390');
   await walk({ width: 360, height: 740 }, '360');
+  await chaptersWalk({ width: 390, height: 844 }, '390');
+  await chaptersWalk({ width: 360, height: 740 }, '360');
 } catch (e) {
   failures++;
   console.error('FAIL', e && e.stack ? e.stack : e);

@@ -419,8 +419,19 @@ export function merge(state, args = {}, now = 0) {
 // Lines
 // ---------------------------------------------------------------------------
 
-/** Every candidate line of the grid: rows, then columns, then the two main diagonals. */
+/** Every candidate line of the grid: rows, then columns, then the two main diagonals (frozen, one list per grid size). */
 function lineSlots(s) {
+  const key = s.cols + 'x' + s.rows;
+  let slots = LINE_SLOTS.get(key);
+  if (!slots) {
+    slots = Object.freeze(buildLineSlots(s).map((x) => Object.freeze({ ...x, cells: Object.freeze(x.cells) })));
+    LINE_SLOTS.set(key, slots);
+  }
+  return slots;
+}
+const LINE_SLOTS = new Map();
+
+function buildLineSlots(s) {
   const out = [];
   if (s.cols === LINE_LENGTH) {
     for (let r = 0; r < s.rows; r++) out.push({ kind: 'row', index: r, cells: Array.from({ length: s.cols }, (_, c) => r * s.cols + c) });
@@ -451,7 +462,7 @@ export function findLines(state) {
     const fams = new Set(items.filter((x) => !x.golden).map((x) => colorFamily(x.color)));
     if (fams.size > 1) continue;
     const family = fams.size ? [...fams][0] : colorFamily(items[0].color);
-    out.push({ kind: slot.kind, index: slot.index, cells: slot.cells, family });
+    out.push({ kind: slot.kind, index: slot.index, cells: slot.cells.slice(), family });
   }
   return out;
 }

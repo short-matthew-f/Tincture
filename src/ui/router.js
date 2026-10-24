@@ -42,7 +42,7 @@ export const TABS = Object.freeze(['workshop', 'orders', 'puzzles', 'map', 'cata
 
 /** Screens that always hide the tab bar (their own bottom controls need the room). */
 export const FULLSCREEN_IDS = Object.freeze(['matching', 'grading', 'purify', 'packing',
-  'paint', 'naming', 'phase-beat', 'tiles', 'skeins', 'garden', 'lift']);
+  'paint', 'naming', 'phase-beat', 'tiles', 'skeins', 'garden', 'lift', 'tangle', 'hoop']);
 
 /**
  * Where each overlay lives: the tab lit while it is on top, and the base it
@@ -57,6 +57,8 @@ export const HOME_TABS = Object.freeze({
   hunter: 'map',
   garden: 'puzzles',
   lift: 'puzzles',
+  tangle: 'puzzles',
+  hoop: 'puzzles',
   naming: 'catalog',
   settings: 'workshop',
 });

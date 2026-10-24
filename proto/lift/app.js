@@ -8,7 +8,7 @@ import {
   frontJar, laneLeft, laneOpen, canLift, isCovered, jarColors, VERSION,
   bestHint, guessMove, frontUnit, verdict, backToSolvableSteps, stateKey,
 } from './rules.js';
-import { LEVELS, PALETTE, MECHANICS, BANDS, levelById } from './levels.js';
+import { LEVELS, PALETTE, MECHANICS, CHAPTERS, levelById } from './levels.js';
 
 const KEY = 'tincture.proto.lift';
 const HISTORY_SAVED = 400; // undo is unlimited in a session; the save keeps the last 400 steps
@@ -435,13 +435,13 @@ function jarHTML(j, { n = null, n2 = null, id = j.id, extra = '', hide = false }
   const full = hasFill && n >= j.cap && (!j.c2 || n2 >= j.cap2);
   const label = j.c2 ? (hasFill ? `${n}+${n2}` : `${j.cap}+${j.cap2}`) : hasFill ? `${n}/${j.cap}` : `${j.cap}`;
   const c2 = j.c2 || j.c;
-  const cls = `jar ${j.c2 ? 'mix' : ''} ${full ? 'full' : ''} ${hide ? 'mystery' : ''} ${extra}`;
+  const cls = `jar ${j.c2 ? 'mix' : ''} ${j.heavy ? 'crock' : ''} ${full ? 'full' : ''} ${hide ? 'mystery' : ''} ${extra}`;
   return `<span class="${cls}" data-id="${id}" style="--jc:${PALETTE[j.c].hex};--jc2:${PALETTE[c2].hex};--mix:${jarHex(j)};color:${glyphInk(j.c)}">` +
     '<span class="cork"></span><span class="neck"></span>' +
     `<span class="glass"><span class="tint"></span><span class="fill2" style="transform:scaleY(${f2})"></span><span class="fill" style="transform:scaleY(${f1})"></span><span class="blend"></span><span class="band"></span><span class="shine"></span>${hide ? '' : glyphSvg(j.c) + (j.c2 ? glyphSvg(j.c2) : '')}</span>` +
     `<span class="num">${hide ? '?' : label}</span></span>`;
 }
-const jarName = (j) => (j.c2 ? `${cname(j.c)} and ${cname(j.c2)} mixing jar` : `${cname(j.c)} jar`);
+const jarName = (j) => (j.c2 ? `${cname(j.c)} and ${cname(j.c2)} mixing jar` : `${cname(j.c)} ${j.heavy ? 'crock' : 'jar'}`);
 
 const TIE = '<svg class="tie" viewBox="0 0 30 22" aria-hidden="true"><path d="M2 4 C 10 18, 20 18, 28 6" fill="none" stroke="#8C6512" stroke-width="2" stroke-linecap="round" stroke-dasharray="3 2"/><circle cx="15" cy="15" r="2.6" fill="#B08A5E"/></svg>';
 const LOCK = '<svg class="lock" viewBox="0 0 30 34" aria-hidden="true"><path d="M8 15v-5a7 7 0 0 1 14 0v5" fill="none" stroke="#6A4E12" stroke-width="3.2"/><rect x="4" y="14" width="22" height="18" rx="4" fill="#E2B04A" stroke="#6A4E12" stroke-width="1.6"/><circle cx="15" cy="22" r="2.4" fill="#6A4E12"/><path d="M15 23v4" stroke="#6A4E12" stroke-width="2"/></svg>';
@@ -449,7 +449,8 @@ const LOCK = '<svg class="lock" viewBox="0 0 30 34" aria-hidden="true"><path d="
 function render(s = G.state) {
   document.body.classList.toggle('glyphs', !!data.glyphs);
   const idx = LEVELS.indexOf(L);
-  $('#lvNo').textContent = `${idx + 1}/${LEVELS.length}`;
+  const ci = CHAPTERS.findIndex((c) => idx >= c.from && idx < c.to);
+  $('#lvNo').textContent = `${ci + 1}·${idx - CHAPTERS[ci].from + 1}`;
   $('#lvName').textContent = L.name;
   const gb = $('#glyphBtn');
   gb.setAttribute('aria-pressed', String(!!data.glyphs));
@@ -752,6 +753,7 @@ function explainBlocked(m) {
   note = why === 'locked' ? 'This lane opens when you lift its key cell, the one with the little brass key.'
     : why === 'tied' ? 'These two jars are tied together, so they need two free places on the belt.'
       : why === 'bench' ? 'The bench is full. Bring a jar back to the belt first.'
+        : why === 'crock' ? 'A crock is too heavy for the bench. It rides the belt until it fills.'
         : 'The belt is full. Rest a belt jar on the bench to make room.';
   render();
   if (why === 'locked') {
@@ -1003,10 +1005,12 @@ function openLevels() {
   wall.innerHTML = '';
   const firstOf = {};
   LEVELS.forEach((Lv, i) => { for (const m of Lv.mechanics) if (!(m in firstOf)) firstOf[m] = i; });
-  BANDS.forEach((band, bi) => {
-    const to = bi + 1 < BANDS.length ? BANDS[bi + 1].from : LEVELS.length;
+  // The prototype hangs every chapter open (any painting, in any order: it is
+  // the test bench); the game opens them in order (src/sim/lift.js).
+  CHAPTERS.forEach((band, bi) => {
+    const to = band.to;
     const h = document.createElement('h3');
-    h.textContent = band.name;
+    h.textContent = `${bi + 1}. ${band.name}`;
     const ul = document.createElement('ul');
     ul.className = 'gallery';
     for (let i = band.from; i < to; i++) {
@@ -1024,7 +1028,7 @@ function openLevels() {
       b.append(fr);
       const t = document.createElement('span');
       t.className = 't';
-      t.innerHTML = `<b>${i + 1}.</b> ${Lv.name}`;
+      t.innerHTML = `<b>${i - band.from + 1}.</b> ${Lv.name}`;
       b.append(t);
       if (fresh.length) { const c = document.createElement('span'); c.className = 'chip'; c.textContent = `new: ${MECHANICS[fresh[0]].name.toLowerCase()}`; b.append(c); }
       b.addEventListener('click', () => { closeSheet($('#levelSheet')); if (Lv !== L) startLevel(Lv.id, { fresh: true }); });
@@ -1067,6 +1071,8 @@ const ICON = {
   cloth: '<svg viewBox="0 0 52 52"><rect x="6" y="8" width="40" height="38" fill="#8babc5"/><rect x="18" y="6" width="14" height="40" fill="rgba(250,244,228,.85)"/><path d="M18 6h14" stroke="#B08A5E" stroke-width="3"/></svg>',
   key: '<svg viewBox="0 0 52 52"><circle cx="18" cy="26" r="8" fill="#F3D27A" stroke="#6A4E12" stroke-width="2"/><path d="M26 26h18M38 26v7M43 26v5" stroke="#6A4E12" stroke-width="3"/></svg>',
   belt3: '<svg viewBox="0 0 52 52"><rect x="4" y="18" width="44" height="18" rx="6" fill="#4A3F36"/><g fill="#eee4c8">' + [10, 22, 34].map((x) => `<rect x="${x}" y="21" width="8" height="12" rx="2"/>`).join('') + '</g></svg>',
+  crock: '<svg viewBox="0 0 52 52"><rect x="16" y="6" width="20" height="8" rx="3" fill="#C9B08A" stroke="#8E6A42" stroke-width="2"/><rect x="11" y="12" width="30" height="34" rx="10" fill="#EDE3CD" stroke="#8E6A42" stroke-width="3"/><rect x="12.5" y="20" width="27" height="4" fill="#3e6a9e" opacity=".7"/><rect x="15" y="29" width="22" height="14" rx="5" fill="#b8433a"/></svg>',
+  leftover: '<svg viewBox="0 0 52 52"><rect x="5" y="29" width="42" height="9" rx="4" fill="#C9B08A"/><path d="M10 38v9M42 38v9" stroke="#8E6A42" stroke-width="3"/><rect x="10" y="9" width="15" height="20" rx="4" fill="#FFFDF6" stroke="#6A5235" stroke-width="1.6"/><rect x="11.5" y="17" width="12" height="11" rx="3" fill="#3e6a9e"/><rect x="30" y="13" width="13" height="16" rx="4" fill="none" stroke="rgba(42,38,34,.32)" stroke-dasharray="3 2" stroke-width="1.6"/></svg>',
   bench2: '<svg viewBox="0 0 52 52"><rect x="8" y="22" width="36" height="10" rx="4" fill="#C9B08A"/><path d="M12 32v10M40 32v10" stroke="#8E6A42" stroke-width="3"/><g fill="#eee4c8"><rect x="13" y="10" width="10" height="12" rx="3"/><rect x="29" y="10" width="10" height="12" rx="3"/></g></svg>',
 };
 function maybeIntro() {

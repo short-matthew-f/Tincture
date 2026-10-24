@@ -11,3 +11,8 @@ export * as skeins from './skeins.js';
 export * as garden from './garden.js';
 export * as lift from './lift.js';
 export * as liftLevels from './lift-levels.js';
+export * as tangle from './tangle.js';
+export * as tangleLevels from './tangle-levels.js';
+export * as hoop from './hoop.js';
+export * as hoopLevels from './hoop-levels.js';
+export * as hoopLayout from './hoop-layout.js';

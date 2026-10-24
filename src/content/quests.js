@@ -20,7 +20,7 @@
 export const QUEST_EVENTS = Object.freeze([
   'orderFilled', 'boardSolved', 'hunterSent', 'crateShipped', 'batchPurified',
   'colorNamed', 'merged', 'regionsPainted', 'colorDiscovered', 'upgradeBought', 'tilesRound',
-  'hankTied', 'paintingLifted', 'gardenVisit',
+  'hankTied', 'paintingLifted', 'gardenVisit', 'basketUntangled', 'hoopUntangled',
 ]);
 
 /** Extra hooks only the weekly quest uses. */
@@ -28,7 +28,7 @@ export const WEEKLY_EVENTS = Object.freeze(['commissionDone', 'postcardSetDone',
 
 export const ALL_QUEST_EVENTS = Object.freeze([...QUEST_EVENTS, ...WEEKLY_EVENTS]);
 
-export const QUEST_FLAGS = Object.freeze(['hunters', 'gallery', 'shelf', 'fleet', 'tiles', 'skeins', 'lift', 'garden']);
+export const QUEST_FLAGS = Object.freeze(['hunters', 'gallery', 'shelf', 'fleet', 'tiles', 'skeins', 'lift', 'garden', 'tangle', 'hoop']);
 
 export const DAILY_COUNT = 3;
 export const BANK_MAX_DAYS = 2;
@@ -49,7 +49,7 @@ export const WEEKLY_SEALS = 150;
 //           'factory' (Phase 2: 10 colors and the Mill Room)
 // ---------------------------------------------------------------------------
 
-export const NEED_KEYS = Object.freeze(['shelf', 'hunters', 'gallery', 'shipping', 'commissions', 'factory', 'tiles', 'skeins', 'lift', 'garden']);
+export const NEED_KEYS = Object.freeze(['shelf', 'hunters', 'gallery', 'shipping', 'commissions', 'factory', 'tiles', 'skeins', 'lift', 'garden', 'tangle', 'hoop']);
 
 const how = (text, screen, params, cta, needs = null) => Object.freeze({
   how: text, go: Object.freeze({ screen, params: Object.freeze({ ...(params || {}) }) }), cta, needs,
@@ -68,6 +68,8 @@ export const QUEST_HOW = Object.freeze({
   hankTied: how('In the Winding Room, drag a stack of yarn onto the pegboard. Ten of one color twist into a hank, and every hank counts.', 'skeins', null, 'Open the Winding Room', 'skeins'),
   paintingLifted: how('At the Lifting Table, put jars on the belt to lift a painting\'s colors out from the bottom up. Each painting you finish counts, and you can lift one again.', 'lift', null, 'Open the Lifting Table', 'lift'),
   gardenVisit: how('In the Dye Garden, steer the basket to gather dye plants, then head home. Any visit with something in the basket counts, wandering or harvesting.', 'garden', null, 'Open the Dye Garden', 'garden'),
+  basketUntangled: how('At the Tangle Basket, tap a raised strand with nothing on top to pull it free, until the basket is empty. Each basket you untangle counts, and you can untangle one again.', 'tangle', null, 'Open the Tangle Basket', 'tangle'),
+  hoopUntangled: how('At the Hoop, lift a knot and retie it on an empty peg so its strand crosses less. A strand that crosses nothing comes free; each hoop you clear counts, and you can clear one again.', 'hoop', null, 'Open the Hoop', 'hoop'),
   tilesRound: how('In the Tile Room, take every tile of one glaze from a dish and set them on a pattern line. Each round you finish counts.', 'tiles', null, 'Open the Tile Room', 'tiles'),
   upgradeBought: how('In the workshop, tap any upgrade you can afford. Every level counts.', 'workshop', null, 'Open the workshop'),
   commissionDone: how('A commission asks for jars of a few colors. Deliver each step from your stock and it completes.', 'commissions', null, 'See commissions', 'commissions'),
@@ -99,6 +101,8 @@ export const QUEST_TYPES = Object.freeze([
   q({ id: 'wind-hanks', text: 'Wind {n|hank|hanks} in the Winding Room', event: 'hankTied', requires: { flag: 'skeins' }, weight: 6, nRange: [2, 4] }),
   q({ id: 'lift-painting', text: 'Lift {n|painting|paintings} at the Lifting Table', event: 'paintingLifted', requires: { flag: 'lift' }, weight: 6, nRange: [1, 1] }),
   q({ id: 'garden-visit', text: 'Gather in the Dye Garden {n|time|times}', event: 'gardenVisit', requires: { flag: 'garden' }, weight: 6, nRange: [1, 2] }),
+  q({ id: 'untangle-baskets', text: 'Untangle {n|basket|baskets}', event: 'basketUntangled', requires: { flag: 'tangle' }, weight: 6, nRange: [1, 2] }),
+  q({ id: 'clear-hoops', text: 'Clear {n|hoop|hoops} at the Hoop', event: 'hoopUntangled', requires: { flag: 'hoop' }, weight: 6, nRange: [1, 2] }),
   q({ id: 'purify-batch', text: 'Purify {n|batch|batches}', event: 'batchPurified', requires: { phase: 2 }, weight: 6, nRange: [1, 2] }),
 ]);
 

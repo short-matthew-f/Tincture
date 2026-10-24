@@ -16,7 +16,7 @@
 export const ROTATION_WEEKS = 8;
 
 /** Event points per themed action (spec: "fed by event points from any themed activity"). */
-export const POINTS_PER = Object.freeze({ order: 10, board: 15, crate: 5, purify: 10, paint: 2, bouquet: 30, mosaic: 30, hank: 4, lifted: 25, harvest: 20 });
+export const POINTS_PER = Object.freeze({ order: 10, board: 15, crate: 5, purify: 10, paint: 2, bouquet: 30, mosaic: 30, hank: 4, lifted: 25, harvest: 20, untangled: 20, hoop: 20 });
 
 /**
  * How to earn each kind of event point (the Quests screen's "How to earn event points").
@@ -39,6 +39,8 @@ export const EVENT_POINT_HOW = Object.freeze({
   hank: src('Wind a hank in the Winding Room', 'A hank of any of the {families} counts.', 'skeins', null, 'Open the Winding Room', 'skeins'),
   lifted: src('Lift a painting at the Lifting Table', 'A finished painting counts when its jars hold any of the {families}.', 'lift', null, 'Open the Lifting Table', 'lift'),
   harvest: src('Gather in the Dye Garden', 'A visit counts when your basket brings home dyes of the {families}.', 'garden', null, 'Open the Dye Garden', 'garden'),
+  untangled: src('Untangle a basket at the Tangle Basket', 'A finished basket counts when its yarn includes any of the {families}.', 'tangle', null, 'Open the Tangle Basket', 'tangle'),
+  hoop: src('Clear a hoop at the Hoop', 'A cleared hoop counts when its yarn includes any of the {families}.', 'hoop', null, 'Open the Hoop', 'hoop'),
   mosaic: src('Finish a Tile Room wall', 'A finished wall glazed with any of the {families} counts.', 'tiles', null, 'Open the Tile Room', 'tiles'),
   paint: src('Paint a Gallery region in the event\'s colors', 'Each region you paint with one of the {families} counts.', 'gallery', null, 'Open the Gallery', 'gallery'),
 });

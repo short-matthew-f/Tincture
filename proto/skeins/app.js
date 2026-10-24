@@ -1,7 +1,8 @@
 // Skein Stacks: UI, drag, rendering and animation. Rules live in rules.js (pure).
 import {
   LEVELS, COLORS, HANK, board, topRun, bands, newSession, sessionPlace, sessionClear, sessionSwap,
-  sessionUndo, situation, goalOwed, hankName, bestPlacement,
+  sessionUndo, situation, goalOwed, hankName, bestPlacement, goalOf, isSnarled, isFelted, hankAt,
+  CHAPTERS, chapterOf, chapterStart, levelMechanics, MECHANICS, traysLeft, isValidSession,
 } from './rules.js';
 
 const KEY = 'tincture.proto.skeins';
@@ -42,8 +43,7 @@ let S = { v: 1, li: 0, glyphs: false, finished: {}, notes: {}, sess: null, other
 const randSeed = () => ((Date.now() ^ Math.floor(Math.random() * 4294967296)) >>> 0) || 1;
 
 function validSess(sess, li) {
-  return sess && sess.state && sess.state.v === 1 && sess.state.level === li && Array.isArray(sess.state.stacks) &&
-    sess.state.stacks.length === board(li).cells.length && Array.isArray(sess.state.tray) && Array.isArray(sess.past) && sess.stats;
+  return isValidSession(sess, li);
 }
 function save() {
   try {
@@ -71,7 +71,8 @@ let L = null; // layout
 const boardEl = $('#board');
 function layout() {
   const b = board(S.li);
-  const units = Math.max(...b.cells.map((c) => c.col + (c.row & 1) * 0.5)) + 1;
+  const x0 = b.minX || 0;
+  const units = Math.max(...b.cells.map((c) => c.col + (c.row & 1) * 0.5)) - x0 + 1;
   const K = 0.98; // a slightly tilted table: hexes a touch shorter than true
   const vw = document.documentElement.clientWidth;
   const availW = Math.min(vw, 460) - 24 - 20;
@@ -82,23 +83,23 @@ function layout() {
   let w = Math.min(64, availW / units, availH / (rise + (b.rows - 1) * 0.75 * K + K));
   w = Math.max(34, Math.floor(w));
   const hs = w * K, step = hs * 0.75, pad = w * rise;
-  const pos = b.cells.map((c) => ({ x: (c.col + (c.row & 1) * 0.5) * w + w / 2, y: pad + c.row * step + hs / 2 }));
+  const pos = b.cells.map((c) => ({ x: (c.col + (c.row & 1) * 0.5 - x0) * w + w / 2, y: pad + c.row * step + hs / 2 }));
   return { b, w, hs, pw: w * 0.93, ph: hs * 0.93, W: units * w, H: pad + (b.rows - 1) * step + hs, pos };
 }
 const dl = (len, w = L.w) => Math.min(w * 0.08, (w * 0.6) / Math.max(1, len));
 
-function stackHTML(stack, { pw, ph, w, badge = true, lit = 0, d } = {}) {
+function stackHTML(stack, { pw, ph, w, badge = true, lit = 0, d, felt = false, need = HANK } = {}) {
   if (!stack || !stack.length) return '';
   const n = stack.length;
   const step = d ?? dl(n, w);
-  let h = `<div class="stack" style="width:${pw}px;height:${ph}px">`;
+  let h = `<div class="stack${felt ? ' felt' : ''}" style="width:${pw}px;height:${ph}px">`;
   stack.forEach((c, i) => {
     const isTop = i === n - 1;
     h += `<div class="ly${isTop ? ' top' : ''}${i >= n - lit ? ' lit' : ''}" style="--c:${hex(c)};transform:translateY(${(-i * step).toFixed(1)}px)"></div>`;
   });
   if (badge) {
     const run = topRun(stack), c = stack[n - 1];
-    h += `<span class="badge${run >= HANK - 3 ? ' near' : ''}" style="--c:${hex(c)};margin-top:${(-(n - 1) * step).toFixed(1)}px">${S.glyphs ? glyph(c) : ''}${run}</span>`;
+    h += `<span class="badge${run >= need - 3 ? ' near' : ''}${felt ? ' felt' : ''}" style="--c:${hex(c)};margin-top:${(-(n - 1) * step).toFixed(1)}px">${S.glyphs ? glyph(c) : ''}${run}</span>`;
   }
   return h + '</div>';
 }
@@ -107,6 +108,7 @@ const stacksNow = () => view || st().stacks;
 function pegLabel(i) {
   const s = stacksNow()[i];
   if (s === null) return `Knot ${i + 1}`;
+  if (isSnarled(st(), i)) return `Peg ${i + 1}, snarled`;
   if (!s.length) return `Peg ${i + 1}, empty`;
   return `Peg ${i + 1}: ${topRun(s)} ${COLORS[s[s.length - 1]].name} on top, ${s.length} in all`;
 }
@@ -114,7 +116,9 @@ function pegClass(i) {
   const s = stacksNow()[i];
   let c = 'peg';
   if (s === null) c += ' knot';
+  else if (isSnarled(st(), i)) c += ' snarl';
   else if (!s.length && (sel >= 0 || drag) && !busy) c += ' open';
+  if (hankAt(S.li, i) !== HANK) c += ' spindle';
   if (drag && drag.target === i) c += ' target';
   return c;
 }
@@ -128,7 +132,7 @@ function renderBoard() {
     const p = L.pos[i];
     h += `<button type="button" class="${pegClass(i)}" data-cell="${i}" ${cell.knot ? 'disabled' : ''} aria-label="${pegLabel(i)}"
       style="left:${(p.x - L.pw / 2).toFixed(1)}px;top:${(p.y - L.ph / 2).toFixed(1)}px;width:${L.pw.toFixed(1)}px;height:${L.ph.toFixed(1)}px;z-index:${cell.row * 2 + 1}">
-      <span class="hole"></span>${stackHTML(stacks[i], L)}</button>`;
+      <span class="hole"></span>${stackHTML(stacks[i], { ...L, felt: isFelted(st(), i), need: hankAt(S.li, i) })}</button>`;
   });
   boardEl.innerHTML = h;
 }
@@ -137,7 +141,7 @@ function renderCell(i, lit = 0) {
   if (!el) return;
   const old = $('.stack', el);
   if (old) old.remove();
-  el.insertAdjacentHTML('beforeend', stackHTML(stacksNow()[i], { ...L, lit }));
+  el.insertAdjacentHTML('beforeend', stackHTML(stacksNow()[i], { ...L, lit, felt: isFelted(st(), i), need: hankAt(S.li, i) }));
   el.setAttribute('aria-label', pegLabel(i));
   el.className = pegClass(i);
 }
@@ -162,18 +166,29 @@ function renderTray() {
 
 function renderGoal() {
   const lv = LEVELS[S.li];
+  const g = goalOf(S.li);
   const hanks = hanksView || st().hanks;
   $('#levelBtn').textContent = `Level ${S.li + 1}`;
-  $('#lvlName').textContent = `Level ${S.li + 1} · ${lv.name}`;
-  $('#count').innerHTML = `${Math.min(hanks.length, lv.goal.hanks)}<small>of ${lv.goal.hanks} hanks</small>`;
+  $('#lvlName').textContent = `Level ${S.li + 1} · ${lv.name} · ${CHAPTERS[chapterOf(S.li)].name}`;
+  $('#count').innerHTML = `${Math.min(hanks.length, g.hanks)}<small>of ${g.hanks} ${g.order ? `for ${g.who}` : 'hanks'}</small>`;
   let sl = '';
-  for (let i = 0; i < lv.goal.hanks; i++) sl += i < hanks.length ? `<span class="slot on" style="--c:${hex(hanks[i])}"></span>` : '<span class="slot"></span>';
+  for (let i = 0; i < g.hanks; i++) sl += i < hanks.length ? `<span class="slot on" style="--c:${hex(hanks[i])}"></span>` : '<span class="slot"></span>';
   $('#slots').innerHTML = sl;
-  const want = lv.goal.colors || {};
+  const want = g.colors;
   $('#chips').innerHTML = Object.keys(want).map((c) => {
     const have = hanks.filter((h) => h === +c).length;
     return `<span class="chip${have >= want[c] ? ' met' : ''}"><span class="dot" style="--c:${hex(+c)}">${S.glyphs ? glyph(+c) : ''}</span>${COLORS[c].name}: ${Math.min(have, want[c])} of ${want[c]}</span>`;
-  }).join('');
+  }).join('') + extraChips();
+}
+function extraChips() {
+  const s = st();
+  const g = goalOf(S.li);
+  let h = '';
+  const locks = (s.snarl || []).length + (s.felt || []).length;
+  if (g.untie) h += `<span class="chip${locks ? '' : ' met'}">${locks ? `${locks} to untangle` : 'All untangled'}</span>`;
+  if (g.trays) h += `<span class="chip">${traysLeft(s) ? `${traysLeft(s)} trays in the basket` : 'Spare trays'}</span>`;
+  if (s.next) h += `<span class="chip">Next tray: ${s.next.map((x) => bands(x).slice().reverse().map((b) => `${b.n} ${COLORS[b.c].name.split(' ')[0]}`).join('/')).join(' · ')}</span>`;
+  return h;
 }
 
 function renderActions() {
@@ -386,7 +401,7 @@ function doPlace(t, cell) {
     const pegStack = $(`.peg[data-cell="${cell}"] .stack`, boardEl);
     if (!reduced()) await waapi(pegStack, [{ transform: 'translateY(-14px) scale(1.06)' }, { transform: 'translateY(2px) scale(.98)', offset: 0.7 }, { transform: 'none' }], { duration: 170, easing: 'ease-out' });
     const moves = await playSteps(r.steps);
-    const owedLeft = LEVELS[S.li].goal.hanks - r.state.hanks.length;
+    const owedLeft = goalOf(S.li).hanks - r.state.hanks.length;
     if (r.hanks.length) note = owedLeft > 0 ? `${r.hanks.map(hankName).join(', ')}! ${owedLeft} more to go.` : `${hankName(r.hanks.at(-1))}! That is the goal.`;
     else if (moves > 1) note = `A chain of ${moves} slides.`;
     else note = '';
@@ -469,9 +484,14 @@ function showDone() {
 }
 
 function openLevels() {
+  // the prototype opens every level (no progress gate), grouped by chapter
   $('#levelList').innerHTML = LEVELS.map((lv, i) => {
-    const goal = `${lv.goal.hanks} hanks, ${lv.colors} colors${lv.goal.colors ? ', some in set colors' : ''}`;
-    return `<li><button type="button" data-level="${i}" class="${i === S.li ? 'cur' : ''}"><span class="n">${i + 1}</span><span class="t">${lv.name}<small>${goal}</small></span><span class="mark">${S.finished[i] ? skeinSVG(i % COLORS.length) : ''}</span></button></li>`;
+    const g = goalOf(i);
+    const c = chapterOf(i);
+    const head = i === chapterStart(c) ? `<li class="chhead"><b>${c + 1}. ${CHAPTERS[c].name}</b> <small>${CHAPTERS[c].blurb}</small></li>` : '';
+    const mech = levelMechanics(i).map((m) => MECHANICS[m].name.toLowerCase()).join(', ');
+    const goal = `${g.order ? `order for ${g.who}: ` : ''}${g.hanks} hanks, ${lv.colors} colors${mech ? `; ${mech}` : ''}`;
+    return `${head}<li><button type="button" data-level="${i}" class="${i === S.li ? 'cur' : ''}"><span class="n">${i + 1}</span><span class="t">${lv.name}<small>${goal}</small></span><span class="mark">${S.finished[i] ? skeinSVG(i % COLORS.length) : ''}</span></button></li>`;
   }).join('');
   $('#levels').hidden = false;
   const cur = $('#levelList .cur');
@@ -485,7 +505,7 @@ function pegAtPoint(x, y) {
   let best = -1, bd = Infinity;
   const stacks = st().stacks;
   L.pos.forEach((p, i) => {
-    if (!stacks[i] || stacks[i].length) return;
+    if (!stacks[i] || stacks[i].length || isSnarled(st(), i)) return;
     const d = Math.hypot(br.left + p.x - x, br.top + p.y - y);
     if (d < bd) { bd = d; best = i; }
   });

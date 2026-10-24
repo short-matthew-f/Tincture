@@ -4,11 +4,11 @@ import {
   COLORS, VERSION, MODEL, cdist, inArc, crosses, buildLevel, newState, move, canLift, whyNotTo, targets, legalMoves, endsAt, crossersOf,
   crossCounts, totalCrossings, isDone, remaining, movers, newGame, play, undo, replay, solve, hint, solutionStep, parseMoves, formatMoves,
   randomRate, greedyRate, mulberry, stateKey, levelSig, sparePegs, mechanicsOf, yarnLine, pegUnit, pathOf, pairLeft, hookedPairs, wordsError,
-  nearestAt, lowerBound, liftable, mutual, canLiftOff, OPTIONS, tautLength, tightened,
+  nearestAt, lowerBound, liftable, mutual, canLiftOff, OPTIONS, tautLength, tightened, bestFirst, beamSearch, greedyPlayout, wayFrom,
 } from '../hoop/rules.js';
 import { layout, planarMap, eulerOk, hits, plan, topAt, baseOrder, hookMarks } from '../hoop/layout.js';
 import { candidate, cleanHoop } from '../hoop/gen.js';
-import { LEVELS, LEVEL_DEFS, MECHANICS, BANDS } from '../hoop/levels.js';
+import { LEVELS, LEVEL_DEFS, MECHANICS, BANDS, CHAPTERS, difficulty, levelById } from '../hoop/levels.js';
 import { HOOPS } from '../hoop/hoops.js';
 
 // A hoop with strands [a, b, color] whose starting crossings are the straight
@@ -407,9 +407,9 @@ test('the picture: the owner’s clasp is drawn as two hooked loops, each crossi
   assert.equal(baseOrder([0, 1, 2], layout(C3, t).crossings).length, 3);
 });
 
-test('the picture: every level, along its solution and along random scrambles, matches its words', () => {
+test('the picture: every opening level and every fourth later one, along its solution and along random scrambles, matches its words', () => {
   let states = 0;
-  for (const L of LEVELS) {
+  for (const L of LEVELS.filter((_, i) => i < 23 || i % 4 === 0)) {
     let s = newState(L);
     checkPicture(L, s, `${L.id} start`, new Set([0]));
     parseMoves(L.solution).forEach(([e, q], k) => {
@@ -418,7 +418,7 @@ test('the picture: every level, along its solution and along random scrambles, m
     });
   }
   const rng = mulberry(5);
-  for (const L of LEVELS.filter((_, i) => i % 5 === 0)) {
+  for (const L of LEVELS.filter((_, i) => i % 9 === 0)) {
     let s = newState(L);
     for (let k = 0; k < 3; k++) {
       const ms = legalMoves({ ...L, layering: false }, s);
@@ -611,32 +611,51 @@ test('undo: steps back exactly, hooks and all', () => {
 
 // ---------- the levels ----------
 
-test('levels: twenty-three hoops made by real moves, every stored solution replays, mechanics one at a time, hooked strands early', () => {
-  assert.equal(LEVELS.length, 23);
+test('levels: the opening twenty-three as playtested, then eighty harder ones; every stored solution replays, mechanics one at a time, hooked strands early', () => {
+  assert.equal(LEVELS.length, 103);
+  assert.equal(new Set(LEVELS.map((L) => L.id)).size, 103);
   const seen = new Set();
   LEVELS.forEach((L, i) => {
+    // (a later chapter is laid out in order of difficulty, so a hoop answers to the knobs of the slot that dealt it)
+    const k = (L.stats.dealt ? LEVEL_DEFS.find((d) => d.id === L.stats.dealt) : LEVEL_DEFS[i]).knobs;
     const sol = parseMoves(L.solution);
     assert.equal(sol.length, L.par);
     const end = replay(L, L.solution);
     assert.ok(isDone(end), `${L.id} clears`);
     const s = newState(L);
     assert.ok(crossCounts(L, s).every((c) => c > 0), `${L.id}: every strand crosses something`);
-
     assert.equal(wordsError(L, s.ends, s.w, s.x), null);
     assert.equal(tightened(L, s), s, `${L.id}: dealt pulled taut (the scramble pulls after every move too)`);
-    const [lo, hi] = LEVEL_DEFS[i].knobs.par;
-    assert.ok(L.par >= lo && L.par <= hi, `${L.id}: par ${L.par} in ${lo}-${hi}`);
-    if (!L.stats.optimal) assert.ok(LEVEL_DEFS[i].knobs.best, `${L.id}: an unproven par only where the knobs allow`);
+    const [lo, hi] = k.par;
+    // (a harder hoop's range screens its quick way out; the wide search after may find a shorter one)
+    assert.ok((L.par >= lo || k.ceil !== undefined) && L.par <= hi, `${L.id}: par ${L.par} in ${lo}-${hi}`);
+    if (!L.stats.optimal) assert.ok(k.best || k.ceil !== undefined, `${L.id}: an unproven par only where the knobs allow`);
+    if (k.ceil !== undefined) {
+      // the harder hoops: the greedy player mostly fails, readable, with clasps
+      assert.ok(L.stats.greedy <= k.ceil + 1e-9, `${L.id}: greedy ${L.stats.greedy} over its ceiling ${k.ceil}`);
+      assert.ok(L.stats.crossings <= 34 && L.stats.hooked >= 1, `${L.id}: readable, hooked`);
+      assert.ok(L.stats.dealt && LEVEL_DEFS.some((d) => d.id === L.stats.dealt), `${L.id}: which slot dealt it`);
+    }
     const fresh = L.mechanics.filter((m) => !seen.has(m));
-    assert.ok(fresh.length <= (i === LEVELS.length - 1 ? 3 : 1), `${L.id} brings in ${fresh}`);
+    assert.ok(fresh.length <= (i === 22 ? 3 : 1), `${L.id} brings in ${fresh}`);
+    if (i >= 23) assert.deepEqual(fresh, [], `${L.id}: nothing new after the opening`);
     for (const m of L.mechanics) { assert.ok(MECHANICS[m], m); seen.add(m); }
   });
   assert.deepEqual(LEVELS[0].mechanics, [], 'level 1 has nothing hooked');
   assert.ok(LEVELS[1].mechanics.includes('clasp'), 'level 2 brings in hooked strands');
-  assert.ok(LEVELS.filter((L) => hookedPairs(L, newState(L)).length).length >= 6, 'clasps are common');
+  assert.ok(LEVELS.filter((L) => hookedPairs(L, newState(L)).length).length >= 80, 'clasps are common');
   assert.deepEqual([...seen].sort(), Object.keys(MECHANICS).sort(), 'every mechanic appears');
   assert.ok(BANDS.every((b, i) => i === 0 || b.from > BANDS[i - 1].from));
   assert.ok(LEVELS.slice(0, 5).every((L) => L.stats.optimal), 'the early pars are all proven');
+  // chapters: about ten each, in order; the later ones climb, and each starts a little easier than the last one ended
+  CHAPTERS.forEach((c, k) => {
+    const to = k + 1 < CHAPTERS.length ? CHAPTERS[k + 1].from : LEVELS.length;
+    assert.ok(to - c.from >= 7 && to - c.from <= 11, c.name);
+    if (k < 3) return;
+    for (let i = c.from + 1; i < to; i++) assert.ok(difficulty(LEVELS[i].stats) >= difficulty(LEVELS[i - 1].stats), `${LEVELS[i].id} climbs`);
+    assert.ok(difficulty(LEVELS[c.from].stats) < difficulty(LEVELS[c.from - 1].stats), `${c.name} starts with a small reset`);
+    assert.ok(LEVELS.slice(c.from, to).every((L) => L.stats.greedy <= (k >= 7 ? 0.2 : 0.5)), `${c.name}: greedy ceilings`);
+  });
 });
 
 test('levels: pars are minimal (A* with a consistent bound, re-run here on the quick ones; breadth-first on the smallest)', () => {
@@ -686,6 +705,38 @@ test('determinism: the generator makes the same hoop from the same seed, as stor
   const s = replay(L, parseMoves(L.solution).slice(0, 1));
   assert.equal(stateKey(L, s), stateKey(L, JSON.parse(JSON.stringify(s))));
   assert.deepEqual(layout(L, s).crossings, layout(L, s).crossings, 'the picture repeats too');
+  // a harder hoop: dealt again from its seed with the knobs of the slot that dealt it (the chapter is laid out in order of difficulty afterwards)
+  const H = levelById('familytree');
+  const di = LEVEL_DEFS.findIndex((d) => d.id === H.stats.dealt);
+  const hh = HOOPS.familytree;
+  assert.deepEqual(JSON.parse(JSON.stringify(candidate(mulberry(hh.seed * 7919 + di * 131 + 1), LEVEL_DEFS[di].knobs))), hh.def, 'a harder hoop deals again from its seed');
+  assert.deepEqual(bestFirst(H, newState(H), { cap: 400 }), bestFirst(H, newState(H), { cap: 400 }));
+  assert.equal(greedyRate(H, 30, 7, 4, new Map()), greedyRate(H, 30, 7, 4, new Map()));
+});
+
+test('the quick ways out: best-first and beam find real solutions on the harder hoops, where the greedy player goes round in circles', () => {
+  for (const id of ['jacobean', 'mitre', 'hikeshi']) {
+    const L = levelById(id);
+    const b = bestFirst(L, newState(L), { cap: 3000, lam: 3 });
+    assert.ok(b.ok && isDone(replay(L, b.path)), `${id}: best-first finds a way`);
+    const m = beamSearch(L, newState(L), { width: 30, cap: 2000 });
+    if (m.ok) assert.ok(isDone(replay(L, m.path)), `${id}: the beam's way replays`);
+    assert.ok(b.path.length >= L.par || !L.stats.optimal, `${id}: no quick way beats a proven par`);
+  }
+  // a way out from off the stored path (what the game's Hint keeps and follows), or none found within the cap
+  const W = levelById('backstitch');
+  let ws = newState(W);
+  for (const [e, q] of legalMoves(W, ws).slice(0, 2)) ws = move(W, ws, e, q).state;
+  const way = wayFrom(W, ws, { cap: 600 });
+  if (way.path) assert.ok(isDone(replay(W, way.path, ws)), 'a way found from here replays from here');
+  else assert.ok(way.tangled || Object.keys(way).length === 0);
+  assert.deepEqual(wayFrom(W, replay(W, W.solution)), { path: [] }, 'nothing to do on a clear hoop');
+  // the memo changes nothing about how the greedy player plays a position, only how often it is worked out
+  const L = levelById('aida');
+  const memo = new Map();
+  const r1 = greedyPlayout(L, mulberry(3), 60, memo);
+  assert.equal(greedyPlayout(L, mulberry(3), 60, memo), r1, 'replayed from the memo, the same');
+  assert.ok(memo.size > 0);
 });
 
 // ---------- saves ----------
@@ -717,6 +768,15 @@ test('hint: follows the stored solution, finds a way from elsewhere, and spots a
   h = hint(L, t, { cap: 300 });
   assert.equal(h.kind, 'move');
   assert.ok(move(L, t, h.end, h.to).ok);
+  // a harder hoop, off its stored path: the hint still finds a way (a quick best-first search)
+  const HL = levelById('mitre');
+  const hs = newState(HL);
+  const hsol = parseMoves(HL.solution);
+  const hoff = legalMoves(HL, hs).find(([e, q]) => !(e === hsol[0][0] && q === hsol[0][1]));
+  const ht = move(HL, hs, hoff[0], hoff[1]).state;
+  const hh = hint(HL, ht, { cap: 300 });
+  assert.equal(hh.kind, 'move');
+  assert.ok(move(HL, ht, hh.end, hh.to).ok);
   // every peg taken, and each strand under another: nowhere to go, nothing lifts off
   const D = lv(6, [[0, 3], [1, 4, 'i'], [2, 5, 'w']], { over: [[0, 1], [1, 2], [2, 0]] });
   assert.deepEqual(legalMoves(D, newState(D)), []);

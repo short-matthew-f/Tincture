@@ -45,6 +45,12 @@
   .peg .hole::after { content: ''; position: absolute; left: 50%; top: 50%; width: 16%; height: 16%; transform: translate(-50%, -50%); border-radius: 50%; background: #9C7F55; box-shadow: 0 1px 0 rgba(255,255,255,.35); }
   .peg.knot .hole { background: radial-gradient(circle at 50% 40%, #A98B5F, #8E7048 70%); opacity: .55; }
   .peg.knot { cursor: default; }
+  .peg.snarl .hole { background: repeating-radial-gradient(circle at 50% 50%, #8E7048 0 2px, #C9AE84 2px 4px); opacity: .8; }
+  .peg.spindle .hole { box-shadow: inset 0 0 0 3px #C9A55E; }
+  .stack.felt .ly { filter: saturate(.5) brightness(1.05); }
+  .badge.felt::after { content: ' felted'; font-weight: 500; }
+  #levelList .chhead { padding: 10px 4px 2px; font: 400 17px var(--font-display); }
+  #levelList .chhead small { font: 500 12px var(--font-ui); color: var(--ink-soft); }
   .peg.open .hole { box-shadow: none; background: radial-gradient(circle at 50% 42%, #E8D6B0, #CDB284 70%); }
   .peg.target .hole { background: radial-gradient(circle at 50% 42%, #F9E8B8, #E2B04A 80%); }
   .peg:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }

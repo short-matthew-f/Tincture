@@ -52,6 +52,7 @@
 // - Buried colors: a strand marked `q` looks undyed gray while it is covered.
 //   A display rule only; the rules ignore it.
 // - A smaller rack: `slots` is 4 instead of 5.
+// - A travel rack: `slots` is 3 (the late cashmere baskets).
 //
 // NO FAIL STATE
 // - Stuck: nothing can be pulled (in practice, the rack is full and no free
@@ -411,7 +412,7 @@ export function mechanicsOf(L) {
   if (L.pins.length) m.push('pin');
   if (L.strands.some((s) => s.c2)) m.push('variegated');
   if (L.strands.some((s) => s.q)) m.push('buried');
-  if (L.slots < 5) m.push('rack4');
+  if (L.slots < 5) m.push(L.slots < 4 ? 'rack3' : 'rack4');
   if (L.snarls.some((s) => s.length === 2)) m.push('snarl');
   if (L.snarls.some((s) => s.length > 2)) m.push('snarl3');
   if (L.tucks) m.push('tuck');

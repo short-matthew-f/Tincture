@@ -1,12 +1,15 @@
-// The Lifting Table: the shipped data matches the playtested prototype, a few
-// stored solutions replay with the shipped rules (proto/test/lift.test.js
-// covers every painting), and the sim: unlock, moves, undo, the spare bench
-// spot, the pay (coins and stock, capacity and keep respected, repeats), the
-// hooks, the save round trip mid-painting, old saves, Renovate, the balance.
+// The Lifting Table: the shipped data matches the playtested prototype (104
+// paintings in 10 chapters; the first 27 exactly as they shipped before, so her
+// saves keep their marks and games), a sample of stored solutions replays with
+// the shipped rules (proto/test/lift.test.js covers every painting), crocks and
+// jars left out, and the sim: unlock, chapters and which paintings are open,
+// moves, undo, the spare bench spot, the pay (coins and stock, capacity and
+// keep respected, repeats), the hooks, the save round trip mid-painting, old
+// saves, Renovate, the balance.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as R from '../src/puzzles/lift.js';
-import { LEVELS, LEVEL_IDS, PALETTE, MECHANICS, BANDS, levelById } from '../src/puzzles/lift-levels.js';
+import { LEVELS, LEVEL_IDS, PALETTE, MECHANICS, CHAPTERS, levelById, chapterIndex } from '../src/puzzles/lift-levels.js';
 import { ART } from '../src/puzzles/lift-art.js';
 import { QUEUES } from '../src/puzzles/lift-queues.js';
 import * as P from '../proto/lift/levels.js';
@@ -22,9 +25,14 @@ const NOW = Date.UTC(2026, 9, 23, 9);
 
 // --- the data and the rules -------------------------------------------------------
 
-test('27 paintings, the same as the prototype: art cell for cell, lanes, keys, solutions, signatures', () => {
-  assert.equal(LEVELS.length, 27);
+// The signatures the first 27 paintings shipped with (0.4.1): a save's game on
+// one of them is only kept while its signature matches, so these never change.
+const SIGS_0_4_1 = { sun: 't16rvk', tulip: '1yf8lqr', teacup: 'rb3zum', sail: 'w04wfg', skein: '9jsmhh', mushrooms: '1dwlyvt', sheep: '1dzf3v1', cherries: '99bstz', cottage: '1yn7ank', apple: '12cepfc', lighthouse: '1cl3s63', cat: '14e095m', teapot: 'erp6lq', quilt: '1wjlsjg', hedgehog: 'zu1daw', bee: '1td1enx', birdhouse: 'kiiukn', loom: '1jqsnj4', owl: 'm36ba6', fox: '18ap8hq', harbor: '1n0i406', wheel: '16iyyim', dyepot: '1eygqub', strawberries: '1i131i', mittens: 'pz0whm', village: '13zjqms', sampler: '7w60pa' };
+
+test('104 paintings in 10 chapters, the same as the prototype: art cell for cell, lanes, keys, solutions, signatures', () => {
+  assert.ok(LEVELS.length >= 100 && LEVELS.length <= 110, `${LEVELS.length} paintings`);
   assert.equal(P.LEVELS.length, LEVELS.length);
+  assert.equal(new Set(LEVEL_IDS).size, LEVELS.length, 'ids are unique');
   LEVELS.forEach((L, i) => {
     const Q = P.LEVELS[i];
     assert.equal(L.id, Q.id);
@@ -32,25 +40,64 @@ test('27 paintings, the same as the prototype: art cell for cell, lanes, keys, s
     assert.equal(L.sig, Q.sig, `${L.id} signature`);
     assert.equal(L.solution, Q.solution);
     assert.deepEqual(L.mechanics, Q.mechanics);
-    assert.deepEqual([L.slots, L.bench, L.cover, L.locks], [Q.slots, Q.bench, Q.cover, Q.locks]);
+    assert.equal(L.chapter, Q.chapter);
+    assert.deepEqual([L.slots, L.bench, L.cover, L.locks, L.left], [Q.slots, Q.bench, Q.cover, Q.locks, Q.left]);
   });
   assert.deepEqual(QUEUES, PROTO_QUEUES, 'lift-queues.js is a copy of proto/lift/queues.js');
   assert.deepEqual(PALETTE, P.PALETTE);
   assert.deepEqual(MECHANICS, P.MECHANICS);
-  assert.deepEqual(BANDS, P.BANDS);
-  for (const id of Object.keys(ART)) assert.ok(levelById(id), `${id}: shipped art belongs to a painting`);
+  assert.deepEqual(CHAPTERS.map((c) => ({ ...c })), P.CHAPTERS);
+  assert.deepEqual(Object.keys(ART), LEVEL_IDS, 'one picture per painting, in order');
   assert.deepEqual(LEVEL_IDS, LEVELS.map((L) => L.id));
   for (const L of LEVELS) assert.ok(R.capacitiesMatch(L), `${L.id}: jar capacity equals cell count per color`);
+  // The first 27 are exactly as they shipped: ids, order and signatures.
+  assert.deepEqual(LEVEL_IDS.slice(0, 27), Object.keys(SIGS_0_4_1));
+  for (const [id, sig] of Object.entries(SIGS_0_4_1)) assert.equal(levelById(id).sig, sig, `${id} keeps its signature`);
+  // Chapters tile the list: 10 to 12 paintings from chapter 4 on, each painting in its own chapter.
+  assert.equal(CHAPTERS.length, 10);
+  CHAPTERS.forEach((c, i) => {
+    assert.equal(c.from, i ? CHAPTERS[i - 1].to : 0);
+    assert.ok(c.name && c.line && c.id);
+    if (i >= 3) assert.ok(c.to - c.from >= 10 && c.to - c.from <= 12, `${c.id}: ${c.to - c.from} paintings`);
+    for (let k = c.from; k < c.to; k++) { assert.equal(LEVELS[k].chapter, c.id); assert.equal(chapterIndex(LEVELS[k].id), i); }
+  });
+  assert.equal(CHAPTERS[CHAPTERS.length - 1].to, LEVELS.length);
 });
 
-test('stored solutions replay to a clear picture with the shipped rules (a handful; proto covers all)', () => {
-  for (const id of ['sun', 'tulip', 'skein', 'cherries', 'quilt', 'birdhouse']) {
+test('stored solutions replay to a clear picture with the shipped rules (a sample from every chapter; proto covers all)', () => {
+  const sample = ['sun', 'skein', 'cherries', 'quilt', 'birdhouse', 'dyepot'];
+  for (const c of CHAPTERS.slice(3)) sample.push(LEVEL_IDS[c.from], LEVEL_IDS[c.to - 1]);
+  sample.push('crock', 'reels', 'knitting');
+  for (const id of sample) {
     const L = levelById(id);
     const s = R.replay(L, L.solution);
     assert.ok(R.isDone(s), `${id} clears`);
-    assert.equal(s.extra, 0);
-    assert.equal(s.shelf.length, L.lanes.reduce((a, l) => a + l.length, 0));
+    assert.equal(s.extra, 0, `${id}: no spare bench spot`);
+    assert.equal(s.shelf.length, L.lanes.reduce((a, l) => a + l.length, 0) + L.left.length);
   }
+});
+
+test('rules: crocks never rest on the bench; jars left out start on the bench and count toward the colors', () => {
+  const C = R.buildLevel({ id: 'c', name: 'C', slots: 1, bench: 1, art: ['b', 'a'], queues: ['!b1 a1'] });
+  assert.ok(R.mechanicsOf(C).has('crock'));
+  assert.equal(R.laneString(C.lanes[0]), '!b1 a1');
+  const c1 = R.apply(C, R.newState(C), { t: 'place', i: 0 }).state;
+  assert.equal(c1.belt[0].heavy, true);
+  assert.equal(R.blockedReason(C, c1, { t: 'park', i: 0 }), 'crock');
+  assert.ok(!R.legalMoves(C, c1).some((m) => m.t === 'park'));
+  assert.ok(R.isStuck(C, c1), 'a crock that cannot lift and cannot rest: stuck');
+  const J = R.buildLevel({ id: 'j', name: 'J', slots: 1, bench: 1, art: ['b', 'a'], queues: ['b1 a1'] });
+  assert.ok(!R.isStuck(J, R.apply(J, R.newState(J), { t: 'place', i: 0 }).state), 'a plain jar could rest instead');
+  assert.notEqual(R.stateKey(c1), R.stateKey(R.apply(J, R.newState(J), { t: 'place', i: 0 }).state));
+  const Lo = R.buildLevel({ id: 'l', name: 'L', slots: 2, bench: 2, art: ['b', 'a'], queues: ['a1'], left: ['b1'] });
+  assert.ok(R.capacitiesMatch(Lo) && R.mechanicsOf(Lo).has('leftover'));
+  const s0 = R.newState(Lo);
+  assert.deepEqual(s0.bench.map((j) => [j.id, j.c, j.n]), [['b.0', 'b', 0]]);
+  assert.ok(R.isDone(R.replay(Lo, 'L0 U0')));
+  assert.notEqual(R.levelSig(Lo), R.levelSig({ ...Lo, left: [] }), 'jars left out are part of the signature');
+  assert.throws(() => R.buildLevel({ id: 'x', name: 'X', bench: 1, art: ['a'], queues: [], left: ['a1', 'a1'] }), /left out/);
+  assert.equal(R.parseRow('s3o2s3'), 'sssoosss');
+  assert.equal(R.rowString('sssoosss'), 's3o2s3');
 });
 
 test('rules: nothing lifts through muslin, keys lock lanes, tied jars need two places, the nudge is once', () => {
@@ -131,6 +178,8 @@ test('moves through the sim: legal checks with reasons, undo, the spare spot onc
   assert.ok(T.restart(s).ok);
   assert.deepEqual(s.lift.game.moves, []);
   assert.equal(T.startPainting(s, { levelId: 'nope' }).reason, 'unknown');
+  assert.equal(T.startPainting(s, { levelId: 'teacup' }).reason, 'closed', 'teacup opens once tulip is lifted');
+  s.lift.done.tulip = 1;
   assert.ok(T.startPainting(s, { levelId: 'teacup' }).ok);
   assert.equal(s.lift.cur, 'teacup');
   assert.equal(T.current(s).L.id, 'teacup');
@@ -219,8 +268,73 @@ test('pay stays modest: at most 1.2 income-minutes per estimated active minute, 
   assert.ok(T.paintMinutes(levelById('fox')) > T.paintMinutes(levelById('sun')) * 10);
 });
 
+/** Mark every painting before `id` lifted, so `id` is open. */
+function liftedUpTo(s, id) {
+  for (const x of LEVEL_IDS.slice(0, LEVEL_IDS.indexOf(id))) s.lift.done[x] = 1;
+}
+
+test('chapters: paintings open in order inside a chapter, a chapter once the one before is all lifted', () => {
+  const s = opened();
+  const open = () => LEVEL_IDS.filter((id) => T.paintingOpen(s, id));
+  assert.deepEqual(open(), ['sun'], 'a new table: the first painting');
+  assert.equal(T.chapterOpen(s, 0), true);
+  assert.equal(T.chapterOpen(s, 1), false);
+  // Lifting chapter 1 in order opens it painting by painting, then chapter 2.
+  const ch1 = LEVEL_IDS.slice(CHAPTERS[0].from, CHAPTERS[0].to);
+  ch1.forEach((id, k) => {
+    assert.ok(T.paintingOpen(s, id), `${id} is open`);
+    if (k + 1 < ch1.length) assert.ok(!T.paintingOpen(s, ch1[k + 1]), `${ch1[k + 1]} waits for ${id}`);
+    s.lift.done[id] = 1;
+  });
+  assert.ok(T.chapterDone(s, 0) && T.chapterOpen(s, 1));
+  assert.ok(T.paintingOpen(s, LEVEL_IDS[CHAPTERS[1].from]) && !T.paintingOpen(s, LEVEL_IDS[CHAPTERS[1].from + 1]));
+  assert.equal(T.nextLevelId(s, ch1[ch1.length - 1]), LEVEL_IDS[CHAPTERS[1].from], 'the last of a chapter leads to the next room');
+  assert.equal(T.continueId(s), LEVEL_IDS[CHAPTERS[1].from], 'the easel holds sun, lifted: continue with the next one');
+  T.openEasel(s);
+  assert.equal(T.continueId(s), LEVEL_IDS[CHAPTERS[1].from], 'a fresh repeat of sun not begun yet: still the next one');
+  T.move(s, { move: levelById('sun').solution.split(' ')[0] }, NOW);
+  assert.equal(T.continueId(s), 'sun', 'a repeat under way: continue it');
+  T.undo(s);
+  // The wall read, room by room.
+  const w = T.wall(s);
+  assert.equal(w.length, CHAPTERS.length);
+  assert.deepEqual([w[0].done, w[0].lifted, w[1].open, w[1].lifted, w[2].open], [true, 10, true, 0, false]);
+  assert.equal(w.flatMap((r) => r.paintings).filter((p) => p.next).length, 1, 'one painting is next up');
+  assert.ok(w[1].paintings[0].next && w[1].paintings[0].open && !w[1].paintings[1].open);
+  assert.ok(w[0].paintings[0].current);
+  // A painting she lifted (or the one on her easel) stays open, as does its chapter: older saves picked any painting.
+  const o = opened();
+  o.lift.done.fox = 2;
+  o.lift.cur = 'owl';
+  assert.ok(T.paintingOpen(o, 'fox') && T.paintingOpen(o, 'owl'));
+  assert.ok(T.chapterOpen(o, 2) && T.paintingOpen(o, 'harbor'), 'the painting after fox opens');
+  assert.ok(!T.paintingOpen(o, 'wheel') && !T.chapterOpen(o, 3));
+  assert.equal(T.nextLevelId(o, 'fox'), 'harbor');
+  assert.equal(T.startPainting(o, { levelId: 'sunflower' }).reason, 'closed');
+  // Everything lifted: the next one simply follows on (a repeat).
+  const all = opened();
+  for (const id of LEVEL_IDS) all.lift.done[id] = 1;
+  assert.equal(T.nextLevelId(all, LEVEL_IDS[LEVEL_IDS.length - 1]), 'sun');
+  assert.ok(LEVEL_IDS.every((id) => T.paintingOpen(all, id)));
+});
+
+test('saves from before the chapters keep the done marks of the first 27 by id, and their game', () => {
+  const s = opened();
+  s.lift.done = Object.fromEntries(Object.keys(SIGS_0_4_1).map((id) => [id, 1]));
+  s.lift.cur = 'sampler';
+  s.lift.game = { level: 'sampler', sig: SIGS_0_4_1.sampler, moves: levelById('sampler').solution.split(' ').slice(0, 5), paid: false };
+  const back = deserialize(serialize(s, NOW), NOW);
+  T.ensureLift(back);
+  assert.equal(Object.keys(back.lift.done).length, 27);
+  assert.ok(back.lift.game && back.lift.game.moves.length === 5, 'the game on the easel is kept');
+  assert.ok(T.chapterOpen(back, 3), 'all 27 lifted: the first new room is open');
+  assert.equal(T.nextLevelId(back, 'sampler'), LEVEL_IDS[27]);
+  assert.equal(T.summary(back).chapter, 2);
+});
+
 test('save round trip mid-painting: reload resumes exactly and plays on identically', () => {
   const s = opened();
+  liftedUpTo(s, 'skein');
   T.startPainting(s, { levelId: 'skein' });
   const L = levelById('skein');
   const moves = L.solution.split(' ');
@@ -234,10 +348,11 @@ test('save round trip mid-painting: reload resumes exactly and plays on identica
   assert.equal(back.lift.done.skein, 1);
   // Settings and intro cards persist.
   T.setSetting(s, { key: 'fast', value: true });
-  T.seeIntro(s, { mechanics: ['mystery'] });
+  T.seeIntro(s, { mechanics: ['mystery', 'chapter:garden'] });
   const b2 = deserialize(serialize(s, NOW), NOW);
   assert.equal(b2.lift.settings.fast, true);
   assert.equal(b2.lift.seenIntro.mystery, true);
+  assert.equal(b2.lift.seenIntro['chapter:garden'], true, 'a chapter card, once seen, stays seen');
   assert.equal(T.setSetting(s, { key: 'nope', value: true }).ok, false);
 });
 
@@ -303,8 +418,11 @@ test('the summary read for the Puzzles hub, and the next painting', () => {
   T.move(s, { move: 'L1' }, NOW);
   const sum = T.summary(s);
   assert.ok(sum.playing && sum.progress > 0 && sum.progress < 1 && sum.h.length === 8);
+  assert.equal(T.nextLevelId(s, 'sun'), 'sun', 'sun not lifted yet: tulip is not open, sun is the first open one');
+  s.lift.done.sun = 1;
   assert.equal(T.nextLevelId(s, 'sun'), 'tulip');
   s.lift.done.tulip = 1;
   assert.equal(T.nextLevelId(s, 'sun'), 'teacup');
-  assert.equal(T.nextLevelId(s, 'sampler'), 'sun');
+  assert.equal(T.nextLevelId(s, 'sampler'), 'teacup', 'past the end: the first open painting not yet lifted');
+  assert.deepEqual([sum.chapter, sum.chapterName, sum.inChapter, sum.chapterSize], [0, CHAPTERS[0].name, 0, 10]);
 });

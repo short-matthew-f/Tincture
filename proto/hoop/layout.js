@@ -110,9 +110,12 @@ export function eulerOk(M) {
 }
 
 /**
- * layout(L, s, { iters }) -> { strands: { i: [[x,y]...] smoothed, unit disk },
- *   raw: { i: [[x,y]] }, crossings: [{ c, p, a, b, top, ka, kb }], map }
- * ka/kb: index of the crossing in each strand's smoothed polyline.
+ * layout(L, s, { iters, tol }) -> { strands: { i: [[x,y]...] smoothed, unit disk },
+ *   raw: { i: [[x,y]] }, crossings: [{ c, p, a, b, top, ka, kb }], map, sweeps }
+ * ka/kb: index of the crossing in each strand's smoothed polyline. sweeps:
+ * how many Gauss-Seidel sweeps it took to settle (about 60 to 100 on the
+ * biggest hoops: the over-relaxation does the work, so a warm start from the
+ * last picture was measured to save nothing).
  */
 export function layout(L, s, { iters = 4000, tol = 1e-9, prev = null, wf = W_FACE } = {}) {
   const M = planarMap(L, s);
@@ -201,8 +204,8 @@ export function layout(L, s, { iters = 4000, tol = 1e-9, prev = null, wf = W_FAC
     }
   }
   const fixed = (v) => (v < nFixed && V[v].fixed) || pin.has(v);
-  // start: each strand's points along its chord (a warm start from prev if given)
-  for (const [i, path] of Object.entries(M.paths)) {
+  // start: each strand's points along its chord
+  for (const path of Object.values(M.paths)) {
     const A = V[path[0]].p, B = V[path[path.length - 1]].p;
     path.forEach((v, k) => {
       if (fixed(v)) return;
@@ -210,7 +213,6 @@ export function layout(L, s, { iters = 4000, tol = 1e-9, prev = null, wf = W_FAC
       const q = [A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t];
       if (V[v].crossing !== undefined) { P[v][0] += q[0] / 2; P[v][1] += q[1] / 2; } else P[v] = q;
     });
-    void i;
   }
   for (let h = nFixed; h < P.length; h++) {
     let x = 0, y = 0, c = 0;
@@ -223,7 +225,9 @@ export function layout(L, s, { iters = 4000, tol = 1e-9, prev = null, wf = W_FAC
   const free = [];
   for (let v = 0; v < P.length; v++) if (!fixed(v)) free.push(v);
   const om = 1.7;
+  let sweeps = 0;
   for (let it = 0; it < iters; it++) {
+    sweeps = it + 1;
     let delta = 0;
     for (const v of free) {
       const a = nb[v];
@@ -250,7 +254,7 @@ export function layout(L, s, { iters = 4000, tol = 1e-9, prev = null, wf = W_FAC
     const X = s.x[c];
     crossings.push({ c: +c, p: P[v].slice(), a: X[0], b: X[1], top: X[2], ka: at[X[0]].get(+c), kb: at[X[1]].get(+c) });
   }
-  return { strands, raw, crossings, map: M, P };
+  return { strands, raw, crossings, map: M, P, sweeps };
 }
 
 // Centripetal Catmull-Rom through the points, k samples per span. Returns the

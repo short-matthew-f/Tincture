@@ -11,12 +11,43 @@ import { stationOutput, rates } from './economy.js';
 import { commissionReserve, commissionReserves } from './commission-rules.js';
 
 export const PURITY_ORDER = Object.freeze(['muddy', 'standard', 'pure', 'flawless']);
+const PURITY_HIGH_FIRST = Object.freeze([...PURITY_ORDER].reverse());
 const EPS = 1e-9;
 
 const num = (x) => (Number.isFinite(x) ? x : 0);
 
-/** capacity(state) -> {display, cellar, total} in jars. */
+/**
+ * capacity(state) -> {display, cellar, total} in jars. Remembered per stations object
+ * while the vat levels, cellar level and rooms are unchanged (the flow meter and every
+ * factory step ask). Callers share the returned object and must only read it.
+ */
 export function capacity(state) {
+  const st = state?.stations;
+  if (!st || typeof st !== 'object') return computeCapacity(state);
+  const k = CAP_KEY;
+  k.length = 0;
+  for (const v of st.vats ?? []) k.push(v?.level);
+  k.push(CAP_SEP, state.cellarLevel);
+  for (const id of state.rooms ?? []) k.push(id);
+  const memo = CAP_MEMO.get(st);
+  if (memo && sameKey(memo.key, k)) return memo.value;
+  const saved = k.slice(); // the scratch key is reused by the next call
+  const value = computeCapacity(state);
+  CAP_MEMO.set(st, { key: saved, value });
+  return value;
+}
+
+function sameKey(a, b) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+const CAP_MEMO = new WeakMap();
+const CAP_KEY = [];
+const CAP_SEP = Object.freeze({});
+
+function computeCapacity(state) {
   let display = 0;
   for (const v of state?.stations?.vats ?? []) display += stationOutput('vat', v?.level ?? 1);
   const lvl = Math.max(1, num(state?.cellarLevel) || 1);
@@ -98,7 +129,7 @@ export function takeStock(state, colorId, jars, opts = {}) {
   let want = Math.max(0, num(jars));
   const e = entry(state, colorId, false);
   if (!e || want <= 0) return { taken: 0, byPurity };
-  let order = opts.prefer === 'high' ? [...PURITY_ORDER].reverse() : [...PURITY_ORDER];
+  let order = opts.prefer === 'high' ? PURITY_HIGH_FIRST : PURITY_ORDER;
   if (opts.purity) order = [opts.purity];
   if (opts.minPurity) {
     const i = PURITY_ORDER.indexOf(opts.minPurity);

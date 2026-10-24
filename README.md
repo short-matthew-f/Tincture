@@ -47,7 +47,7 @@ walk go to `$E2E_SHOTS` (default: `<tmpdir>/tincture-e2e-shots`).
 ## Shipping a new version
 
 ```sh
-node tools/bump-version.js 0.4.0
+node tools/bump-version.js 0.5.0
 ```
 
 Run it whenever shipped files change. It rewrites `src/version.js`,
@@ -111,6 +111,14 @@ and its offline cache: https://short-matthew-f.github.io/Tincture/proto/
 
 ## Status
 
+- **0.5.0** (100+ levels each, two more rooms): the Tangle Basket (28 colors
+  / 9,000; 109 baskets in 11 chapters) and the Hoop (34 colors / 14,000;
+  103 hoops in 11 chapters, real hooking topology, yarn pulls taut) join
+  the game. The Winding Room grows to 112 levels (11 chapters, new board
+  shapes and mechanics), the Lifting Table to 104 paintings (10 chapters,
+  54 from painted sources), and the Dye Garden gains the Garden Path (108
+  gardens in 9 seasonal chapters). Rooms open their levels in order with a
+  Continue button. npm test is faster, with a balance digest check.
 - **0.4.1** (playtest: stuck in the vial and sand art games): the Lifting
   Table's Hint answers every time. Tapped while the belt was still running it
   used to only fast-forward the belt; now it waits for the belt, glows the jar

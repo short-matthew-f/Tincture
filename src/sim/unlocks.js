@@ -30,6 +30,10 @@ export const UNLOCKS = Object.freeze([
   // The Dye Garden (src/sim/garden.js): after the Tile Room, before the Gallery.
   { id: 'garden', name: 'Dye Garden', revealColors: 22, cost: 6000, object: 'garden-basket' },
   { id: 'gallery', name: 'Gallery Wing', revealColors: 25, cost: 8000, room: 'gallery-wing' }, // the room IS the purchase
+  // The Tangle Basket (src/sim/tangle.js): after the Gallery Wing, before Commissions.
+  { id: 'tangle', name: 'Tangle Basket', revealColors: 28, cost: 9000, object: 'yarn-basket' },
+  // The Hoop (src/sim/hoop.js): after the Tangle Basket, on the way to the Loading Yard.
+  { id: 'hoop', name: 'Hoop', revealColors: 34, cost: 14000, object: 'embroidery-hoop' },
   { id: 'shipping', name: 'Loading Yard', revealColors: 50, cost: 40000, room: 'loading-yard' }, // the room IS the purchase
   { id: 'commissions', name: 'Commissions', revealColors: 30, cost: 20000, requiresPhase: 3 },
 ].map((u) => Object.freeze(u)));

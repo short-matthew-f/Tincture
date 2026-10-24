@@ -92,8 +92,10 @@ function nextRoom(state) {
 function nextSkipping(state, now) {
   // The Dye Garden (22 colors / 6,000) is skipped the same way: optional active play.
   // The Lifting Table (18 colors / 3,500) too: optional active play.
-  if (state.unlocks?.skeins && state.unlocks?.garden && state.unlocks?.lift) return sim.next(state, now);
-  return sim.next({ ...state, unlocks: { ...state.unlocks, skeins: true, garden: true, lift: true } }, now);
+  // The Tangle Basket (28 colors / 9,000) too: optional active play.
+  // The Hoop (34 colors / 14,000) too: optional active play.
+  if (state.unlocks?.skeins && state.unlocks?.garden && state.unlocks?.lift && state.unlocks?.tangle && state.unlocks?.hoop) return sim.next(state, now);
+  return sim.next({ ...state, unlocks: { ...state.unlocks, skeins: true, garden: true, lift: true, tangle: true, hoop: true } }, now);
 }
 
 function savingGoal(state) {
@@ -105,7 +107,7 @@ function savingGoal(state) {
     goals.push({ kind: 'room', id: room.id, cost: room.cost });
   }
   for (const u of unlocks.statusAll(state)) {
-    if (u && !u.open && u.revealed && u.id !== 'tiles' && u.id !== 'skeins' && u.id !== 'garden' && u.id !== 'lift') goals.push({ kind: 'unlock', id: u.id, cost: u.cost });
+    if (u && !u.open && u.revealed && u.id !== 'tiles' && u.id !== 'skeins' && u.id !== 'garden' && u.id !== 'lift' && u.id !== 'tangle' && u.id !== 'hoop') goals.push({ kind: 'unlock', id: u.id, cost: u.cost });
   }
   if (goals.length) return goals.sort((a, b) => a.cost - b.cost)[0];
   const disp = APPRENTICES_BY_ID.dispatcher;
@@ -144,11 +146,13 @@ function buyOption(state, o, now) {
 export function buyGreedy(state, now, ctx) {
   let bought = 0;
   for (let guard = 0; guard < 2000; guard++) {
-    const fm = economy.flowMeter(state, now);
+    // The flow meter's Make rate and Store window (economy.flowMeter), read directly:
+    // she only looks at those two (flowMeter would also price every upgrade for its suggestion).
+    const R = economy.rates(state, now).jars;
+    const windowMs = R > 0 ? storage.capacity(state).total / R * 1000 : Infinity;
     if (ctx) ctx.meterCalls++;
     // 1. Offline window. Storage never changes production, so buy it against a fixed rate.
-    const R = fm.make.rate;
-    if (R > 0 && fm.store.windowMs < WINDOW_TARGET_MS) {
+    if (R > 0 && windowMs < WINDOW_TARGET_MS) {
       const need = R * WINDOW_TARGET_MS / 1000;
       let ok = true;
       while (storage.capacity(state).total < need) {

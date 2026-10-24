@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   LEVELS, COLORS, HANK, geometry, board, resolve, topRun, newLevel, place, clearPeg, swapTray,
   situation, emptyPegs, goalMet, botPlay, newSession, sessionPlace, sessionUndo, sessionClear, sessionSwap,
-  genStack, hankName,
+  genStack, hankName, botSolve, goalOf, CHAPTERS,
 } from '../skeins/rules.js';
 
 // A straight row of 5 pegs: 0-1-2-3-4 (each touches only its row neighbors).
@@ -22,14 +22,15 @@ test('geometry: odd-r neighbors and knots', () => {
   for (let li = 0; li < LEVELS.length; li++) {
     const b = board(li);
     const pegs = b.cells.filter((c) => !c.knot).length;
-    assert.ok(pegs >= 19 && pegs <= 30, `${LEVELS[li].id} has ${pegs} pegs`);
+    assert.ok(pegs >= 19 && pegs <= 41, `${LEVELS[li].id} has ${pegs} pegs`);
     // symmetric neighbors
     b.nbr.forEach((ns, i) => ns.forEach((j) => assert.ok(b.nbr[j].includes(i))));
   }
 });
 
-test('levels: 12, colors rise 3 -> 6, goals rise', () => {
-  assert.equal(LEVELS.length, 12);
+test('levels: 112 in chapters; the first 12 (the playtested ones): colors rise 3 -> 6, goals rise', () => {
+  assert.equal(LEVELS.length, 112);
+  assert.equal(CHAPTERS.reduce((a, c) => a + c.levels, 0), LEVELS.length);
   assert.equal(LEVELS[0].colors, 3);
   assert.equal(LEVELS[11].colors, 6);
   for (let i = 1; i < 12; i++) {
@@ -195,9 +196,9 @@ test('nudges: clear a peg, swap the tray, stuck and tight', () => {
   assert.deepEqual(sess.stats, { moves: 0, undos: 0, clears: 1, swaps: 1 });
 });
 
-test('the greedy bot finishes every level with few nudges', () => {
+test('the greedy bot finishes the first 12 levels with few nudges', () => {
   const report = [];
-  for (let li = 0; li < LEVELS.length; li++) {
+  for (let li = 0; li < 12; li++) {
     const runs = [11, 222, 3333, 44444, 555555].map((seed) => botPlay(li, seed));
     for (const r of runs) assert.ok(r.done, `${LEVELS[li].id} finishes`);
     const nudges = runs.map((r) => r.nudges);
@@ -206,4 +207,16 @@ test('the greedy bot finishes every level with few nudges', () => {
     report.push(`${LEVELS[li].id}: moves ${runs.map((r) => r.moves).join('/')}, nudges ${nudges.join('/')}`);
   }
   if (process.env.SKEINS_REPORT) console.log(report.join('\n'));
+});
+
+// Every level, two seeds, with the planning bot (the full table, ten seeds: node proto/skeins/survey.mjs).
+test('the planning bot finishes every level with at most 3 nudges', () => {
+  for (let li = 0; li < LEVELS.length; li++) {
+    for (const seed of [222, 44444]) {
+      const r = botSolve(li, seed);
+      assert.ok(r.done, `${LEVELS[li].id} finishes (seed ${seed})`);
+      assert.ok(r.nudges <= 3, `${LEVELS[li].id}: ${r.nudges} nudges (seed ${seed})`);
+      assert.ok(r.hanks >= goalOf(li).hanks);
+    }
+  }
 });

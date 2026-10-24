@@ -146,12 +146,19 @@ export function commissionReserves(state, getDef = getCommission) {
   const out = {};
   const open = (state && state.commissions && Array.isArray(state.commissions.open)) ? state.commissions.open : [];
   if (!open.length) return out;
-  const ids = new Set(Object.keys((state && state.stock) || {}));
-  for (const m of (state.stations && state.stations.mixers) || []) if (m && m.recipe) ids.add(m.recipe);
-  // Called on every factory step: memo per (progress, colors) so a tick costs one string build.
-  const key = progressStamp(open) + '#' + [...ids].join(',');
+  // Called on every factory step and Dispatcher load: memo per (progress, colors). The
+  // key is a flat list of ids and numbers compared item by item (no string building);
+  // after KEY_SEP come the colors considered: stock, then mixer recipes not yet listed.
+  const key = progressKey(open, SCRATCH_KEY);
+  key.push(KEY_SEP);
+  const from = key.length;
+  const stock = (state && state.stock) || {};
+  for (const id in stock) if (Object.hasOwn(stock, id)) key.push(id);
+  for (const m of (state.stations && state.stations.mixers) || []) if (m && m.recipe && key.indexOf(m.recipe, from) < 0) key.push(m.recipe);
   const memo = reservesCache.get(state);
-  if (memo && memo.key === key && memo.getDef === getDef) return memo.out;
+  if (memo && memo.getDef === getDef && sameKey(memo.key, key)) return memo.out;
+  const saved = key.slice(); // the scratch key is reused by the next call
+  const ids = saved.slice(from);
   for (const rec of open) {
     const def = rec && getDef(rec.id);
     if (!def) continue;
@@ -165,19 +172,31 @@ export function commissionReserves(state, getDef = getCommission) {
       }
     });
   }
-  reservesCache.set(state, { key, getDef, out });
+  reservesCache.set(state, { key: saved, getDef, out });
   return out;
 }
 const reservesCache = new WeakMap();
 
 const reserveCache = new WeakMap();
-function progressStamp(open) {
-  let k = '';
+const SCRATCH_KEY = []; // refilled by every progressKey() call
+const KEY_SEP = Object.freeze({});
+const DONE = Object.freeze({});
+
+/** Open commissions' progress as a flat key into `k` (cleared first): per step done, or jars delivered and colors so far. */
+function progressKey(open, k) {
+  k.length = 0;
   for (const rec of open) {
-    k += rec.id + ':';
-    for (const p of rec.steps || []) k += (p && p.done ? 'd' : fin(p && p.delivered)) + '/' + (p && p.colors ? Object.keys(p.colors).length : 0) + ',';
+    const steps = rec.steps || [];
+    k.push(rec.id, steps.length);
+    for (const p of steps) k.push(p && p.done ? DONE : fin(p && p.delivered), p && p.colors ? Object.keys(p.colors).length : 0);
   }
   return k;
+}
+
+function sameKey(a, b) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
 }
 
 /** commissionReserve(state, colorId) -> jars kept of one color for open commission steps (0 if none). */
@@ -185,9 +204,9 @@ export function commissionReserve(state, colorId, getDef = getCommission) {
   const open = (state && state.commissions && Array.isArray(state.commissions.open)) ? state.commissions.open : [];
   if (!open.length) return 0;
   // The shop and the Dispatcher ask for many colors in a row: memo per progress stamp.
-  const stamp = progressStamp(open);
+  const stamp = progressKey(open, SCRATCH_KEY);
   let memo = reserveCache.get(state);
-  if (!memo || memo.stamp !== stamp || memo.getDef !== getDef) { memo = { stamp, getDef, map: new Map() }; reserveCache.set(state, memo); }
+  if (!memo || memo.getDef !== getDef || !sameKey(memo.stamp, stamp)) { memo = { stamp: stamp.slice(), getDef, map: new Map() }; reserveCache.set(state, memo); }
   if (memo.map.has(colorId)) return memo.map.get(colorId);
   let best = 0;
   for (const rec of open) {

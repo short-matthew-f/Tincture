@@ -99,10 +99,16 @@ function postcardList() {
   return Array.isArray(PC.POSTCARDS) ? PC.POSTCARDS : [];
 }
 
-/** Postcards of a region's set (8 for home and event regions). */
+/** Postcards of a region's set (8 for home and event regions). Content is static: one frozen list per region. */
 export function postcardsForRegion(regionId) {
-  return postcardList().filter((c) => c.region === regionId);
+  let set = REGION_CARDS.get(regionId);
+  if (!set) {
+    set = Object.freeze(postcardList().filter((c) => c.region === regionId));
+    REGION_CARDS.set(regionId, set);
+  }
+  return set;
 }
+const REGION_CARDS = new Map();
 
 function canvasList() {
   const cv = CV.CANVASES;

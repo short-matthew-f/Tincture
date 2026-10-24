@@ -76,12 +76,14 @@ export const SCREEN_IDS = Object.freeze([
   'settings', 'naming', 'phase-beat', 'onboarding',
   'garden',
   'lift',
+  'tangle',
+  'hoop',
 ]);
 
 /** Screens that are ceremonies: one at a time, others wait in a queue. */
 const CEREMONY_IDS = new Set(['naming', 'phase-beat', 'onboarding']);
 /** News toasts wait behind these (nothing blocks a ceremony or a puzzle board). */
-const NEWS_WAITS_FOR = new Set([...CEREMONY_IDS, 'grading', 'purify', 'packing', 'tiles', 'skeins', 'garden', 'lift']);
+const NEWS_WAITS_FOR = new Set([...CEREMONY_IDS, 'grading', 'purify', 'packing', 'tiles', 'skeins', 'garden', 'lift', 'tangle', 'hoop']);
 
 const TITLES = {
   workshop: 'Workshop', ledger: 'Morning Ledger', orders: 'Orders', matching: 'Matching', bench: 'Mixing Bench',
@@ -90,6 +92,8 @@ const TITLES = {
   paint: 'Painting', shelf: 'Merge Shelf', heritage: 'Heritage', settings: 'Settings', naming: 'A new color',
   'phase-beat': 'Something new', onboarding: 'Welcome',
   garden: 'Dye Garden',
+  tangle: 'Tangle Basket',
+  hoop: 'The Hoop',
 };
 
 // ---------------------------------------------------------------------------

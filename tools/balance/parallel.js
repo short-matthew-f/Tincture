@@ -1,14 +1,16 @@
 // tools/balance/parallel.js — run many simulate() jobs across worker threads.
-// The engine's tick is closed form but a 21-day run still takes 0.3–1.4 s
+// The engine's tick is closed form but a 21-day run still takes 0.3–0.8 s
 // (Dispatcher sub-steps, one flow-meter read per purchase), so the balance test
 // and run.js spread their seeds over the machine's cores.
 //
-// runJobs([{profile, seed, days, puzzles, tier}], {threads}) -> Promise<RunSummary[]>
-// (same order as the jobs; RunSummary = simulate() result without `state`).
+// runJobs([{profile, seed, days, puzzles, tier}], {threads, stateDigest}) -> Promise<RunSummary[]>
+// (same order as the jobs; RunSummary = simulate() result without `state`;
+// stateDigest: true adds `stateDigest`, a sha256 of the final state's JSON).
 
 import { Worker } from 'node:worker_threads';
 import os from 'node:os';
 import { simulate, summarize } from './sim-player.js';
+import { jsonDigest } from './report.js';
 
 /** Rough relative cost of a job, so the slowest start first. */
 function weight(job) {
@@ -25,7 +27,11 @@ export async function runJobs(jobs, opts = {}) {
   const threads = Math.max(1, Math.min(jobs.length, opts.threads ?? defaultThreads()));
   const results = new Array(jobs.length);
   if (threads <= 1) {
-    jobs.forEach((job, i) => { results[i] = summarize(simulate(job)); });
+    jobs.forEach((job, i) => {
+      const run = simulate(job);
+      results[i] = summarize(run);
+      if (opts.stateDigest) results[i].stateDigest = jsonDigest(run.state);
+    });
     return results;
   }
   const order = jobs.map((job, i) => i).sort((a, b) => weight(jobs[b]) - weight(jobs[a]));
@@ -35,7 +41,7 @@ export async function runJobs(jobs, opts = {}) {
     const feed = () => {
       if (next >= order.length) { w.terminate().then(() => resolve(), resolve); return; }
       const i = order[next++];
-      w.postMessage({ i, job: jobs[i] });
+      w.postMessage({ i, job: jobs[i], stateDigest: !!opts.stateDigest });
     };
     w.on('message', (msg) => {
       if (msg.error) { w.terminate(); reject(new Error(msg.error)); return; }

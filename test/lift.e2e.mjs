@@ -10,7 +10,13 @@
 //  - painting 1 finished by taps on the lanes (the stored solution), with a
 //    reload in the middle that resumes exactly (moves, columns, belt);
 //  - the finish sheet: coins and stock land (state and the reward line);
-//  - the gallery wall opens and lists 27 paintings; Undo and Hint work;
+//  - the gallery wall opens room by room: ten chapters, the first open with
+//    its tick, the next painting ringed, closed ones veiled (a tap says what
+//    opens them), "Continue" on top; Undo and Hint work;
+//  - chapters: with the first 27 lifted (an older save), "Continue" leads into
+//    chapter 4, whose card greets her once; a late painting (crocks, a jar left
+//    out, a short belt, a small bench) plays mid-way at both sizes; the wall
+//    folds finished rooms; the hub card names the chapter;
 //  - 0.4.1: Hint always gives visible feedback within about 300 ms on the
 //    biggest painting (the jar glows and one line names it), also when tapped
 //    while the belt is still running and off the stored solution; a dead end
@@ -169,6 +175,20 @@ async function newPage(viewport) {
   return { context, page };
 }
 
+/** Mark every painting before `id` lifted (paintings open in order), and the given intro cards seen. */
+async function liftedUpTo(page, id, seen = []) {
+  await page.evaluate(({ id, seen }) => {
+    const { game, ctx } = window.tincture;
+    const ids = ctx.puzzles.liftLevels.LEVEL_IDS;
+    game.act((st) => {
+      for (const x of ids.slice(0, ids.indexOf(id))) st.lift.done[x] = st.lift.done[x] || 1;
+      for (const k of seen) st.lift.seenIntro[k] = true;
+      return {};
+    }, {});
+  }, { id, seen });
+}
+const OLD_INTROS = ['mystery', 'linked', 'mixing', 'cloth', 'key', 'belt3', 'bench2'];
+
 /** Tap the move a stored-solution step names: L<i> a lane's front jar, P<i> a belt jar, U<i> a bench jar. */
 async function tapMove(page, m) {
   const i = m.slice(1);
@@ -314,17 +334,31 @@ async function walk(viewport, tag) {
   // The gallery wall from the finish sheet.
   await tap(page, '#lf-finAll');
   await page.waitForSelector('#lf-levelSheet:not([hidden])', { state: 'visible' });
-  check(await page.locator('#lf-wall [data-level]').count() === 27, `${tag}: the gallery wall shows 27 paintings`);
+  const wall = await page.evaluate(() => ({
+    rooms: document.querySelectorAll('#lf-wall .lf-room').length,
+    shut: document.querySelectorAll('#lf-wall .lf-room.lf-shut').length,
+    open: [...document.querySelectorAll('#lf-wall [data-level]')].map((b) => b.dataset.level),
+    closed: document.querySelectorAll('#lf-wall [data-closed]').length,
+    next: document.querySelector('#lf-wall .lf-nextup')?.dataset.level,
+    cont: document.querySelector('#lf-contBtn')?.dataset.level,
+  }));
+  check(wall.rooms === 10 && wall.shut === 9, `${tag}: the gallery wall hangs ten rooms, the first one open (${wall.rooms}, ${wall.shut} not open yet)`);
+  check(wall.open.join() === 'sun,tulip' && wall.closed === 8, `${tag}: in the first room, the lifted painting and the next are open, the rest veiled (${wall.open.join()}; ${wall.closed} veiled)`);
   check(await page.locator('#lf-wall .lf-tick').count() === 1, `${tag}: painting 1 carries its tick`);
+  check(wall.next === 'tulip' && wall.cont === 'tulip', `${tag}: the next painting is ringed and Continue leads to it`);
   await page.waitForTimeout(350);
   await shot('11-gallery');
-  await tap(page, '#lf-wall [data-level="tulip"]');
+  await tap(page, '#lf-wall [data-closed="teacup"]');
+  check(/opens once you lift Tulip/.test(await page.locator('#lf-wallNote').textContent()), `${tag}: a veiled painting says what opens it ("${(await page.locator('#lf-wallNote').textContent()).trim()}")`);
+  check((await liftState(page)).cur === 'sun', `${tag}: and does not open`);
+  await tap(page, '#lf-contBtn');
   await page.waitForSelector('#lf-levelSheet', { state: 'hidden' });
-  check((await liftState(page)).cur === 'tulip', `${tag}: any painting, in any order`);
+  check((await liftState(page)).cur === 'tulip', `${tag}: Continue opens the next painting`);
   await geometry(page, `${tag} tulip`);
   await shot('12-tulip');
 
   // A painting with a new mechanic introduces it once, then plays (the late, big pictures fit too).
+  await liftedUpTo(page, 'skein');
   await tap(page, '#lf-levelsBtn');
   await page.waitForSelector('#lf-levelSheet:not([hidden])', { state: 'visible' });
   await tap(page, '#lf-wall [data-level="skein"]');
@@ -336,7 +370,8 @@ async function walk(viewport, tag) {
   check((await liftState(page)).seenIntro.mystery === true, `${tag}: the intro card is remembered`);
   await tapMove(page, (await page.evaluate(() => window.tincture.ctx.puzzles.liftLevels.levelById('skein').solution.split(' ')[0])));
   check((await liftState(page)).game.moves.length === 1, `${tag}: skein plays`);
-  await page.evaluate(() => { window.tincture.game.act(window.tincture.ctx.sim.lift.startPainting, { levelId: 'sampler' }); });
+  await liftedUpTo(page, 'sampler');
+  check(await page.evaluate(() => window.tincture.game.act(window.tincture.ctx.sim.lift.startPainting, { levelId: 'sampler' }).ok), `${tag}: the sampler opens once the paintings before it are lifted`);
   await page.evaluate(() => window.tincture.ctx.navigate('puzzles'));
   await tap(page, '#pz-lift [data-action="open-lift"]');
   await page.waitForSelector('#lf-introSheet:not([hidden])', { state: 'visible' });
@@ -365,6 +400,7 @@ async function hintWalk(viewport, tag) {
       st.onboarding.seen = { ...(st.onboarding.seen || {}), lift: true };
       st.lift = st.lift || {};
       st.lift.seenIntro = { mystery: true, linked: true, mixing: true, cloth: true, key: true, belt3: true, bench2: true };
+      for (const id of window.tincture.ctx.puzzles.liftLevels.LEVEL_IDS.slice(0, 27)) st.lift.done[id] = 1;
       return {};
     }, {});
     game.save();
@@ -515,6 +551,144 @@ async function hintWalk(viewport, tag) {
   await context.close();
 }
 
+/**
+ * Chapters: an older save with the first 27 paintings lifted. The finish sheet
+ * says a new room is open, the wall folds the finished rooms and rings the next
+ * painting, Continue leads into chapter 4 and its card greets her once; a late
+ * painting with crocks and a jar left out plays mid-way and fits the screen.
+ */
+async function chapterWalk(viewport, tag) {
+  const { context, page } = await newPage(viewport);
+  const errors = watchErrors(page);
+  const shot = (name) => page.screenshot({ path: path.join(SHOTS, `${tag}-${name}.png`) });
+  await page.goto(URL_, { waitUntil: 'load' });
+  await boot(page);
+  await seed(page);
+  await page.evaluate((old) => {
+    const { game, ctx } = window.tincture;
+    game.act((st) => {
+      st.unlocks.lift = true;
+      st.onboarding.seen = { ...(st.onboarding.seen || {}), lift: true };
+      for (const id of ctx.puzzles.liftLevels.LEVEL_IDS.slice(0, 26)) st.lift.done[id] = 1;
+      for (const k of old) st.lift.seenIntro[k] = true;
+      return {};
+    }, {});
+    // The sampler, played to the end through the sim, as she would have.
+    game.act(ctx.sim.lift.startPainting, { levelId: 'sampler' });
+    for (const m of ctx.puzzles.liftLevels.levelById('sampler').solution.split(' ')) game.act(ctx.sim.lift.move, { move: m });
+    game.save();
+  }, OLD_INTROS);
+  await page.reload({ waitUntil: 'load' });
+  await boot(page);
+  check(await page.evaluate(() => Object.keys(window.tincture.game.state.lift.done).length === 27), `${tag}: the first 27 paintings lifted`);
+
+  // The hub card, then the table: the finish sheet says a new room is open.
+  await tap(page, '#tabbar [data-tab="puzzles"]');
+  await page.waitForSelector('#pz-lift [data-action="open-lift"]', { state: 'visible' });
+  const card = (await page.locator('#pz-lift').textContent()).replace(/\s+/g, ' ');
+  check(/27 paintings lifted/.test(card), `${tag}: the hub card counts the lifted paintings ("${card.trim().slice(0, 90)}")`);
+  await tap(page, '#pz-lift [data-action="open-lift"]');
+  await page.waitForSelector('#lf-finishSheet:not([hidden])', { state: 'visible', timeout: 8000 });
+  const room = (await page.locator('#lf-finRoom').textContent()).trim();
+  check(/The whole table is lifted\. A new room is open: The kitchen garden/.test(room) && await page.locator('#lf-finRoom').isVisible(), `${tag}: the finish sheet opens the next room ("${room}")`);
+  check(/Sunflower/.test(await page.locator('#lf-finNext').textContent()), `${tag}: and offers its first painting`);
+  await page.waitForTimeout(700);
+  await shot('c1-finish-new-room');
+
+  // The wall: finished rooms fold, the next painting is ringed, Continue on top.
+  await tap(page, '#lf-finAll');
+  await page.waitForSelector('#lf-levelSheet:not([hidden])', { state: 'visible' });
+  const w = await page.evaluate(() => ({
+    folded: [...document.querySelectorAll('#lf-wall [data-room-show]')].map((b) => b.dataset.roomShow),
+    open: document.querySelectorAll('#lf-wall .lf-room:not(.lf-shut)').length,
+    next: document.querySelector('#lf-wall .lf-nextup')?.dataset.level,
+    cont: document.querySelector('#lf-contBtn')?.dataset.level,
+    contText: document.querySelector('#lf-contBtn')?.textContent,
+    ticks: document.querySelectorAll('#lf-wall .lf-tick').length,
+  }));
+  check(w.folded.join() === 'first,tricks', `${tag}: finished rooms fold away (${w.folded.join()})`);
+  check(w.open === 4 && w.ticks === 8, `${tag}: four rooms open; the whole table shows its eight ticks (${w.open}, ${w.ticks})`);
+  check(w.next === 'sunflower' && w.cont === 'sunflower' && /Kitchen garden/i.test(w.contText), `${tag}: Continue leads into chapter 4 ("${(w.contText || '').trim()}")`);
+  await page.evaluate(() => document.querySelector('#lf-wall .lf-nextup')?.scrollIntoView({ block: 'center' }));
+  await page.waitForTimeout(350);
+  await shot('c2-gallery-chapters');
+  await tap(page, '#lf-wall [data-room-show="first"]');
+  check(await page.locator('#lf-wall [data-room="first"] .lf-tick').count() === 10, `${tag}: a folded room unfolds with its ten ticks`);
+
+  // Into the new room: its card, once.
+  await tap(page, '#lf-contBtn');
+  await page.waitForSelector('#lf-chapterSheet:not([hidden])', { state: 'visible', timeout: 4000 });
+  const ch = await page.evaluate(() => ({ no: document.querySelector('#lf-chNo').textContent, name: document.querySelector('#lf-chName').textContent, thumbs: document.querySelectorAll('#lf-chStrip canvas').length }));
+  check(ch.name === 'The kitchen garden' && /Chapter 4 of 10/.test(ch.no) && ch.thumbs === 11, `${tag}: chapter 4's card (${ch.no}, ${ch.name}, ${ch.thumbs} paintings)`);
+  await page.waitForTimeout(300);
+  await shot('c3-chapter-intro');
+  await tap(page, '#lf-chOk');
+  check(await page.evaluate(() => window.tincture.game.state.lift.seenIntro['chapter:garden'] === true), `${tag}: the chapter card is remembered`);
+  check(await page.locator('#screen-lift .lf-sheet:not([hidden])').count() === 0, `${tag}: no other card (the mechanics are old friends)`);
+  check((await page.locator('#lf-lvNo').textContent()).trim() === '4·1', `${tag}: the head reads chapter 4, painting 1`);
+  const sol = await page.evaluate(() => window.tincture.ctx.puzzles.liftLevels.levelById('sunflower').solution.split(' '));
+  for (const m of sol.slice(0, 3)) await tapMove(page, m);
+  check((await liftState(page)).game.moves.length === 3, `${tag}: the sunflower plays`);
+  await page.reload({ waitUntil: 'load' });
+  await boot(page);
+  await page.evaluate(() => window.tincture.ctx.navigate('lift'));
+  await page.waitForSelector('#screen-lift #lf-lanes .lf-front', { state: 'visible' });
+  await page.waitForTimeout(300);
+  check(await page.locator('#screen-lift .lf-sheet:not([hidden])').count() === 0, `${tag}: after a reload, no card again; the sunflower waits as it was`);
+  check((await liftState(page)).game.moves.length === 3, `${tag}: three moves kept`);
+  await page.evaluate(() => window.tincture.ctx.navigate('puzzles'));
+  await page.waitForSelector('#pz-lift [data-action="open-lift"]', { state: 'visible' });
+  const card2 = (await page.locator('#pz-lift').textContent()).replace(/\s+/g, ' ');
+  check(/Chapter 4, The kitchen garden · Sunflower · \d+% lifted/.test(card2) && /Continue lifting/.test(card2), `${tag}: the hub card names the chapter ("${card2.trim().slice(0, 100)}")`);
+
+  // A late painting mid-play: crocks, a jar left out, a short belt and a small bench.
+  await liftedUpTo(page, 'gingerbread', ['crock', 'leftover', 'chapter:kitchen', 'chapter:wool', 'chapter:water', 'chapter:woodland', 'chapter:winter']);
+  const start = await page.evaluate(() => {
+    const { game, ctx } = window.tincture;
+    const r = game.act(ctx.sim.lift.startPainting, { levelId: 'gingerbread' });
+    const L = ctx.puzzles.liftLevels.levelById('gingerbread');
+    return { ok: r.ok, left: L.left.length, crocks: L.lanes.flat().filter((j) => j.heavy).length, slots: L.slots, bench: L.bench, n: L.solution.split(' ').length };
+  });
+  check(start.ok && start.left === 1 && start.crocks > 0 && start.slots === 3 && start.bench === 2, `${tag}: the gingerbread house: ${start.crocks} crocks, a jar left out, belt 3, bench 2`);
+  await tap(page, '#pz-lift [data-action="open-lift"]');
+  await page.waitForSelector('#screen-lift #lf-lanes .lf-front', { state: 'visible' });
+  await idle(page);
+  check(await page.locator('#lf-bench .lf-jar[data-id="b.0"]').count() === 1, `${tag}: the jar left out rests on the bench from the start`);
+  check(await page.locator('#lf-lanes .lf-jar.lf-crock').count() > 0 || start.crocks > 0, `${tag}: crocks wait in the lanes`);
+  await page.evaluate((n) => {
+    const { game, ctx } = window.tincture;
+    for (const m of ctx.puzzles.liftLevels.levelById('gingerbread').solution.split(' ').slice(0, n)) game.act(ctx.sim.lift.move, { move: m });
+  }, Math.floor(start.n / 2));
+  await page.evaluate(() => { window.tincture.ctx.navigate('puzzles'); });
+  await page.waitForSelector('#pz-lift [data-action="open-lift"]', { state: 'visible' });
+  await tap(page, '#pz-lift [data-action="open-lift"]');
+  await page.waitForSelector('#screen-lift #lf-lanes .lf-front', { state: 'visible' });
+  await idle(page);
+  await geometry(page, `${tag} gingerbread (27 x 36)`);
+  const crockOnBelt = await page.evaluate(() => { const b = [...document.querySelectorAll('#lf-belt .lf-slotbtn')]; const k = b.findIndex((el) => el.querySelector('.lf-crock')); return k >= 0 ? b[k].dataset.i : null; });
+  if (crockOnBelt !== null) {
+    await tap(page, `#lf-belt .lf-slotbtn[data-i="${crockOnBelt}"]`);
+    check(/too heavy for the bench/.test(await page.locator('#lf-msg').textContent()), `${tag}: a crock tapped on the belt explains itself`);
+    await page.waitForTimeout(250);
+  }
+  await page.evaluate(() => { const m = document.querySelector('#lf-msg'); if (m && /too heavy/.test(m.textContent)) return; });
+  await shot('c4-late-painting-mid-play');
+  const cs = await page.evaluate(() => window.__lf.debugLift().painter.cs);
+  check(cs >= 6, `${tag}: the gingerbread house's cells are ${cs.toFixed(1)} px`);
+
+  // The wall late on: nine rooms folded, Continue still on top.
+  await tap(page, '#lf-levelsBtn');
+  await page.waitForSelector('#lf-levelSheet:not([hidden])', { state: 'visible' });
+  const w2 = await page.evaluate(() => ({ folded: document.querySelectorAll('#lf-wall [data-room-show]').length, cont: document.querySelector('#lf-contBtn')?.dataset.level, contText: document.querySelector('#lf-contBtn')?.textContent }));
+  check(w2.folded === 9 && w2.cont === 'gingerbread' && /Continue lifting/.test(w2.contText), `${tag}: late on, nine rooms folded and Continue lifting the gingerbread house (${w2.folded})`);
+  await page.waitForTimeout(350);
+  await shot('c5-gallery-late');
+  await geometry(page, `${tag} late wall`);
+
+  check(errors.length === 0, `${tag}: no page or console errors (${errors.slice(0, 3).join(' | ')})`);
+  await context.close();
+}
+
 /** From the workshop: Next names the Lifting Table, the sheet buys it, the ceremony plays, a two-choice card offers the way in. */
 async function workshopWalk(viewport, tag) {
   const { context, page } = await newPage(viewport);
@@ -561,6 +735,8 @@ try {
   await walk({ width: 390, height: 844 }, '390');
   await walk({ width: 360, height: 740 }, '360');
   await hintWalk({ width: 390, height: 844 }, '390');
+  await chapterWalk({ width: 390, height: 844 }, '390');
+  await chapterWalk({ width: 360, height: 740 }, '360');
 } catch (e) {
   failures++;
   console.error('FAIL', e && e.stack ? e.stack : e);

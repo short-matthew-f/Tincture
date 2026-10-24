@@ -7,6 +7,7 @@ import { writeFileSync, mkdirSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
 import { mulberry } from './rules.js';
 import { PALETTE } from './palette.js';
+import { addChapterPictures } from './art-gen-chapters.mjs';
 
 // ---------- the little canvas of letters ----------
 const BAYER = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
@@ -20,10 +21,10 @@ export function ramp(letters, t, x, y) {
   return f - i > bay(x, y) ? letters[Math.min(n - 1, i + 1)] : letters[i];
 }
 
-class Pic {
+export class Pic {
   constructor(W, H, bg) { this.W = W; this.H = H; this.g = Array.from({ length: H }, () => Array(W).fill(bg)); }
   in(x, y) { return x >= 0 && y >= 0 && x < this.W && y < this.H; }
-  set(x, y, ch) { if (ch && this.in(x, y)) this.g[y][x] = ch; }
+  set(x, y, ch) { x = Math.floor(x); y = Math.floor(y); if (ch && this.in(x, y)) this.g[y][x] = ch; }
   get(x, y) { return this.in(x, y) ? this.g[y][x] : null; }
   // Fill every cell where test(x, y) holds. fill: a letter or (x, y, u, v) => letter|null,
   // u, v in [-1, 1] across the shape's box.
@@ -673,6 +674,9 @@ def('sampler', 30, 34, (P) => {
   for (const [x, y] of [[4, 25], [24, 25]]) { P.set(x, y, 'b'); P.set(x + 1, y - 1, 'b'); P.set(x + 2, y, 'b'); }
   for (const x of [3, 7, 22, 26]) { P.set(x, 29, 'u'); P.set(x, 30, 'g'); P.set(x, 31, 'g'); }
 });
+
+// The gap pictures of chapters 4 to 10 (art-gen-chapters.mjs).
+addChapterPictures(def, { mulberry });
 
 // ---------- output ----------
 export function renderAll() {

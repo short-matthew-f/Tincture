@@ -24,7 +24,8 @@ import {
   W, SPOOL, COLORS, HIDDEN_HEX, newGame, play, playNudge, undo, whyNot, canPull, isUncovered,
   isPinned, isPegged, showsColor, isDone, isStuck, canNudge, hint, groupOf, colorsOf, knitsInto, remaining, pickStrand, nearDist,
 } from './rules.js';
-import { LEVELS, MECHANICS, BANDS, levelById, readSave } from './levels.js';
+import { LEVELS, MECHANICS, CHAPTERS, levelById, readSave } from './levels.js';
+import { HEAPS } from './heaps.js';
 import { fitView, clampView, toBoard, toScreen, zoomAt, panBy, pinchView, reachUnits, isFit } from './view.js';
 
 const KEY = 'tincture.proto.tangle';
@@ -1724,6 +1725,8 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') for (const sh of $$('.sheet')) if (!sh.hidden && sh.id !== 'introSheet') closeSheet(sh);
 });
 
+// Drawn from the packed control points (smoothed through their midpoints), so
+// the list never builds the 109 heaps it only shows.
 function thumb(Lv) {
   const cv = document.createElement('canvas');
   cv.width = 80; cv.height = 112;
@@ -1731,14 +1734,15 @@ function thumb(Lv) {
   const k = 80 / Lv.board.w;
   c.scale(k, k);
   c.lineCap = c.lineJoin = 'round';
-  Lv.poly.forEach((p, i) => {
-    const s = Lv.strands[i];
+  for (const s of HEAPS[Lv.id].strands) {
+    const p = [];
+    for (let q = 0; q < s.p.length; q += 2) p.push([s.p[q], s.p[q + 1]]);
     c.beginPath(); c.moveTo(p[0][0], p[0][1]);
-    for (let q = 3; q < p.length; q += 3) c.lineTo(p[q][0], p[q][1]);
+    for (let q = 1; q < p.length - 1; q++) c.quadraticCurveTo(p[q][0], p[q][1], (p[q][0] + p[q + 1][0]) / 2, (p[q][1] + p[q + 1][1]) / 2);
     c.lineTo(p[p.length - 1][0], p[p.length - 1][1]);
     c.strokeStyle = TONE[s.c].edge; c.lineWidth = W * 0.95; c.stroke();
     c.strokeStyle = s.q ? HIDDEN_HEX : COLORS[s.c].hex; c.lineWidth = W * 0.7; c.stroke();
-  });
+  }
   return cv;
 }
 function openLevels() {
@@ -1746,11 +1750,12 @@ function openLevels() {
   box.innerHTML = '';
   const firstOf = {};
   LEVELS.forEach((Lv, i) => { for (const m of Lv.mechanics) if (!(m in firstOf)) firstOf[m] = i; });
-  BANDS.forEach((band, bi) => {
-    const to = bi + 1 < BANDS.length ? BANDS[bi + 1].from : LEVELS.length;
+  CHAPTERS.forEach((band, bi) => {
+    const to = Math.min(LEVELS.length, bi + 1 < CHAPTERS.length ? CHAPTERS[bi + 1].from : LEVELS.length);
+    if (band.from >= LEVELS.length) return;
     const h = document.createElement('h3');
     h.className = 'band';
-    h.textContent = band.name;
+    h.textContent = `${bi + 1} · ${band.name}`;
     const ul = document.createElement('ul');
     ul.className = 'lvls';
     for (let i = band.from; i < to; i++) {
@@ -1817,6 +1822,7 @@ const ICON = {
   tuck: `<svg viewBox="0 0 56 56">${yarnIcon('M4 40C16 34 24 30 31 28', '#D6A92E')}${yarnIcon('M30 4C26 20 28 36 34 52', '#34588E')}<path d="M37 27l5-2M37 29l6 1M36 31l4 3" stroke="#B48A1E" stroke-width="1.4" stroke-linecap="round"/></svg>`,
   peg: `<svg viewBox="0 0 56 56">${yarnIcon('M4 44C14 40 22 34 24 28A6.5 6.5 0 1 1 34 32C38 40 46 44 52 46', '#5F8A3A')}<circle cx="29" cy="27" r="5.5" fill="#C99A5E" stroke="#8E6A42" stroke-width="1"/><circle cx="29" cy="27" r="3.6" fill="none" stroke="#B9473A" stroke-width="2.2"/></svg>`,
   snarl3: `<svg viewBox="0 0 56 56">${yarnIcon('M8 40C18 12 34 10 46 26', '#B9473A', 6)}${yarnIcon('M44 14C40 40 22 48 10 34', '#34588E', 6)}${yarnIcon('M16 14C32 18 48 28 40 48', '#D6A92E', 6)}<circle cx="28" cy="29" r="23" fill="none" stroke="#F2BE46" stroke-width="2" stroke-dasharray="3 4" opacity=".8"/></svg>`,
+  rack3: `<svg viewBox="0 0 56 56"><rect x="11" y="12" width="34" height="32" rx="6" fill="#C9AA7C"/>${['#B9473A', '#34588E', '#D6A92E'].map((c, i) => spoolIcon(18 + i * 10, c, 0.6)).join('')}</svg>`,
 };
 function maybeIntro() {
   if (!data.seenHow) return;

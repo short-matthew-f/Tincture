@@ -6,7 +6,10 @@ import {
   decodeMove, encodeMove, stateKey, parseRow, parseLane, laneString, generateQueues, chooseCap, fitCap, mulberry,
   mechanicsOf, casualRate, levelSig, solutionStep, intendedOrder, minParks, firstMoveSurvey, CAPS,
 } from '../lift/rules.js';
-import { LEVELS, LEVEL_DEFS, PALETTE, MECHANICS, BANDS } from '../lift/levels.js';
+import { LEVELS, LEVEL_DEFS, PALETTE, MECHANICS, CHAPTERS } from '../lift/levels.js';
+import { SOURCES } from '../lift/art-sources.js';
+import { ART as ART_GEN } from '../lift/art.js';
+import { ART_IMPORTED } from '../lift/art-imported.js';
 import { QUEUES } from '../lift/queues.js';
 import { decodePNG, encodePNG, importPNG, quantize, downsample } from '../lift/import-art.mjs';
 import { deflateSync } from 'node:zlib';
@@ -17,8 +20,8 @@ const run = (L, str, s = newState(L)) => replay(L, str, s);
 
 // ---------- the level list ----------
 
-test('the level list: 24 to 30 paintings, palette colors, capacities match, mechanics known', () => {
-  assert.ok(LEVELS.length >= 24 && LEVELS.length <= 30, `${LEVELS.length} levels`);
+test('the level list: 100 to 110 paintings, palette colors, capacities match, mechanics known', () => {
+  assert.ok(LEVELS.length >= 100 && LEVELS.length <= 110, `${LEVELS.length} levels`);
   assert.equal(new Set(LEVELS.map((L) => L.id)).size, LEVELS.length, 'ids are unique');
   for (const L of LEVELS) {
     assert.ok(L.colors.length >= 3 && L.colors.length <= 10, `${L.id} has ${L.colors.length} colors`);
@@ -28,9 +31,44 @@ test('the level list: 24 to 30 paintings, palette colors, capacities match, mech
     for (const m of L.mechanics) assert.ok(MECHANICS[m], `${L.id}: ${m} has an intro line`);
     assert.ok(L.stats && L.solution, `${L.id}: generated`);
   }
-  // later pictures are denser: mid and late levels are at least 22 columns and 24 rows
-  for (const L of LEVELS.slice(8)) assert.ok(L.W >= 22 && L.H >= 24, `${L.id} is ${L.W}x${L.H}`);
-  assert.ok(LEVELS.slice(-8).every((L) => L.W * L.H >= 800), 'late pictures are big');
+  // later pictures are denser: the first chapters' mid and late levels are at
+  // least 22 columns and 24 rows; from chapter 4 on, every picture is at least
+  // 18x24 with 6 to 10 colors, and each chapter ends on big pictures
+  for (const L of LEVELS.slice(8, 27)) assert.ok(L.W >= 22 && L.H >= 24, `${L.id} is ${L.W}x${L.H}`);
+  assert.ok(LEVELS.slice(19, 27).every((L) => L.W * L.H >= 800), 'the whole table: big pictures');
+  for (const c of CHAPTERS.slice(3)) {
+    const ls = LEVELS.slice(c.from, c.to);
+    for (const L of ls) {
+      assert.ok(L.W >= 18 && L.H >= 24, `${L.id} is ${L.W}x${L.H}`);
+      assert.ok(L.colors.length >= 6 && L.colors.length <= 10, `${L.id} has ${L.colors.length} colors`);
+    }
+    assert.ok(ls.slice(-3).every((L) => L.W * L.H >= 900), `${c.id} ends on big pictures`);
+  }
+});
+
+test('chapters: ten rooms that tile the list; each new painting has a picture, a slot size and knobs', () => {
+  assert.equal(CHAPTERS.length, 10);
+  CHAPTERS.forEach((c, i) => {
+    assert.equal(c.from, i ? CHAPTERS[i - 1].to : 0);
+    for (const L of LEVELS.slice(c.from, c.to)) assert.equal(L.chapter, c.id);
+  });
+  assert.equal(CHAPTERS[9].to, LEVELS.length);
+  assert.deepEqual(CHAPTERS.slice(0, 3).map((c) => c.to - c.from), [10, 9, 8], 'the first 27 keep their order');
+  for (const d of LEVEL_DEFS.slice(27)) {
+    assert.ok(Array.isArray(d.size) && d.art.length === d.size[1] && d.art[0].length >= d.size[0], `${d.id}: drawn at its slot size`);
+    assert.ok(ART_GEN[d.id] || ART_IMPORTED[d.id], `${d.id} has a picture`);
+    assert.ok(!(ART_GEN[d.id] && ART_IMPORTED[d.id] && SOURCES[d.id] === undefined), `${d.id}: one source of truth`);
+    assert.ok(d.gen && d.gen.target > 0 && d.gen.target < 1 && d.gen.caps.length, `${d.id} has knobs`);
+  }
+  for (const id of Object.keys(SOURCES)) assert.ok(LEVEL_DEFS.some((d) => d.id === id && d.size), `${id}: an imported picture has a painting and a slot size`);
+  // no near-duplicates among the pictures: no two share more than half their cells at the same size
+  const sameSize = {};
+  for (const L of LEVELS) (sameSize[`${L.W}x${L.H}`] ||= []).push(L);
+  for (const group of Object.values(sameSize)) for (let a = 0; a < group.length; a++) for (let b = a + 1; b < group.length; b++) {
+    let same = 0;
+    for (let r = 0; r < group[a].H; r++) for (let c = 0; c < group[a].W; c++) if (group[a].cells[r][c] === group[b].cells[r][c]) same++;
+    assert.ok(same / (group[a].W * group[a].H) < 0.5, `${group[a].id} and ${group[b].id} look alike`);
+  }
 });
 
 test('mechanics arrive one at a time, in band order, each with its intro level', () => {
@@ -40,9 +78,13 @@ test('mechanics arrive one at a time, in band order, each with its intro level',
   const intros = Object.values(firstAt).sort((a, b) => a - b);
   for (let i = 1; i < intros.length; i++) assert.ok(intros[i] > intros[i - 1], 'never two new mechanics on one painting');
   assert.ok(firstAt.mystery >= 4 && firstAt.linked > firstAt.mystery && firstAt.mixing > firstAt.linked &&
-    firstAt.cloth > firstAt.mixing && firstAt.key > firstAt.cloth && firstAt.belt3 > firstAt.key && firstAt.bench2 > firstAt.belt3);
+    firstAt.cloth > firstAt.mixing && firstAt.key > firstAt.cloth && firstAt.belt3 > firstAt.key && firstAt.bench2 > firstAt.belt3 &&
+    firstAt.crock > firstAt.bench2 && firstAt.leftover > firstAt.crock);
   for (const L of LEVELS.slice(0, 4)) assert.equal(L.mechanics.length, 0, `${L.id} teaches the basics only`);
-  assert.equal(BANDS[0].from, 0);
+  // the two newer mechanics are introduced alone, each on its own painting
+  assert.deepEqual(LEVELS[firstAt.crock].mechanics, ['crock']);
+  assert.deepEqual(LEVELS[firstAt.leftover].mechanics, ['leftover']);
+  assert.ok(firstAt.crock >= CHAPTERS[3].to, 'new mechanics wait until the remix chapters have warmed up');
 });
 
 test('every level is solvable with no nudge: the stored solution replays to a clear picture', () => {
@@ -50,7 +92,7 @@ test('every level is solvable with no nudge: the stored solution replays to a cl
     const s = run(L, L.solution);
     assert.ok(isDone(s), `${L.id} clears`);
     assert.equal(s.extra, 0, 'no spare bench spot used');
-    assert.equal(s.shelf.length, L.lanes.reduce((a, l) => a + l.length, 0), `${L.id}: every jar ends on the shelf`);
+    assert.equal(s.shelf.length, L.lanes.reduce((a, l) => a + l.length, 0) + L.left.length, `${L.id}: every jar ends on the shelf`);
     assert.equal(s.belt.length + s.bench.length, 0);
     assert.equal(L.solution.split(' ').length, L.stats.moves);
   }
@@ -64,10 +106,11 @@ test('the solver independently solves the early levels within a small node cap',
   }
 });
 
-test('difficulty climbs across the bands (casual clears, traps, parking, length)', () => {
+test('difficulty climbs across the first 27 paintings\' mechanic bands (casual clears, traps, parking, length)', () => {
   const band = (a, b) => LEVELS.slice(a, b).map((L) => L.stats);
   const mean = (xs, k) => xs.reduce((s, x) => s + x[k], 0) / xs.length;
-  const early = band(0, BANDS[1].from), mid = band(BANDS[1].from, BANDS[4].from), late = band(BANDS[6].from, LEVELS.length);
+  // bands: learning the table 0-3, mystery/tied/mixing 4-12, the whole table 19-26
+  const early = band(0, 4), mid = band(4, 13), late = band(19, 27);
   assert.ok(mean(early, 'casual') >= 0.8, 'early levels teach: casual players nearly always clear');
   assert.ok(mean(early, 'casual') > mean(mid, 'casual') && mean(mid, 'casual') > mean(late, 'casual'), 'casual clears fall band by band');
   assert.ok(Math.max(...late.map((x) => x.casual)) < 0.1, 'the hardest levels: under 10% for a random player');
@@ -75,6 +118,22 @@ test('difficulty climbs across the bands (casual clears, traps, parking, length)
   assert.ok(mean(early, 'moves') < mean(mid, 'moves') && mean(mid, 'moves') < mean(late, 'moves'), 'longer paintings');
   assert.ok(late.every((x) => x.parks >= 1), 'every late level needs parking');
   assert.ok(early.every((x) => x.parks === 0 && x.trapSteps === 0), 'early levels need no parking');
+});
+
+test('chapters 4 to 10: each starts gentler than the last ended, then climbs', () => {
+  const mean = (xs, k) => xs.reduce((s, x) => s + x[k], 0) / xs.length;
+  CHAPTERS.slice(3).forEach((c, i) => {
+    const st = LEVELS.slice(c.from, c.to).map((L) => L.stats);
+    const first = st.slice(0, 4), last = st.slice(-4);
+    assert.ok(mean(first, 'casual') > 2 * mean(last, 'casual'), `${c.id}: casual clears fall`);
+    assert.ok(mean(first, 'trapSteps') < mean(last, 'trapSteps'), `${c.id}: more traps to dodge`);
+    assert.ok(mean(first, 'moves') < mean(last, 'moves'), `${c.id}: longer paintings`);
+    assert.ok(Math.max(...last.map((x) => x.casual)) <= 0.1, `${c.id}: its last paintings need planning`);
+    assert.ok(last.some((x) => x.parks >= 1), `${c.id}: something to park by the end`);
+    const prev = LEVELS[c.from - 1].stats;
+    assert.ok(st[0].casual > prev.casual + 0.1, `${c.id} starts gentler than the room before ended`);
+    if (i > 0) assert.ok(st[0].casual <= LEVELS[CHAPTERS[i + 2].from].stats.casual + 0.05, `${c.id} starts a little firmer than the room before started`);
+  });
 });
 
 test('stored casual rates are honest (recomputed for two levels)', () => {
@@ -87,6 +146,8 @@ test('stored casual rates are honest (recomputed for two levels)', () => {
 test('art parsing: run-length and literal rows', () => {
   assert.equal(parseRow('s3 r s2'), 'sssrss');
   assert.equal(parseRow('ssr rr'), 'ssrrr');
+  assert.equal(parseRow('s3rs2'), 'sssrss', 'run-length without spaces');
+  assert.equal(parseRow('s12'), 's'.repeat(12));
   assert.throws(() => buildLevel({ id: 'x', name: 'X', art: ['s3', 's2'] }), /wide/);
   assert.throws(() => parseRow('s3 R'), /bad art/);
   for (const d of LEVEL_DEFS) assert.ok(QUEUES[d.id], `${d.id} has queues`);
@@ -333,6 +394,22 @@ test('generator: intended orders play out, dealt lanes match, keys and mystery a
   assert.ok(isDone(replay(L, g.moves)), 'the intended play clears it: solvable by construction');
   // deterministic
   assert.deepEqual(generateQueues(base, { lanes: 4, seed: 9, ...def.gen, mystery: 0.5, locks: 1 }), g);
+});
+
+test('generator: muslin it chooses, crocks and jars left out stay solvable by construction', () => {
+  const def = LEVEL_DEFS.find((d) => d.id === 'snail');
+  const base = buildLevel(def);
+  for (const knobs of [{ cloth: 2 }, { crock: 0.4 }, { left: 2 }, { left: 1, crock: 0.3, cloth: 1, locks: 1, mystery: 0.3 }]) {
+    const g = generateQueues(base, { lanes: 4, seed: 5, ...def.gen, ...knobs });
+    assert.ok(g, JSON.stringify(knobs));
+    const L = buildLevel({ ...def, queues: g.queues, locks: g.locks, cover: g.cover || undefined, left: g.left });
+    assert.ok(capacitiesMatch(L), 'capacities equal cell counts');
+    assert.ok(isDone(replay(L, g.moves)), `the intended play clears it (${JSON.stringify(knobs)})`);
+    if (knobs.cloth) assert.equal(g.cover.length, knobs.cloth);
+    if (knobs.left) assert.equal(L.left.length, knobs.left);
+    if (knobs.crock) assert.ok(g.queues.join(' ').includes('!'), 'some crocks');
+    assert.deepEqual(generateQueues(base, { lanes: 4, seed: 5, ...def.gen, ...knobs }), g, 'deterministic');
+  }
 });
 
 test('difficulty tools: parking and first-move surveys on small boards', () => {

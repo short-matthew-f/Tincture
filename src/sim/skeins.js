@@ -1,15 +1,18 @@
 // sim/skeins.js — the Winding Room (Skein Stacks) as sim actions on state (pure).
-// The rules live in src/puzzles/skeins.js (ported from proto/skeins/rules.js);
-// this module owns the save shape, her yarn colors, level progress, the
-// session (undo and the quiet stats), the coins, and the hooks for quests and
-// events.
+// The rules live in src/puzzles/skeins.js (mirrored in proto/skeins/rules.js),
+// the 112 levels in eleven chapters in src/puzzles/skeins-levels.js; this
+// module owns the save shape, her yarn colors, level progress, the newer
+// mechanics' intro cards she has seen, the session (undo and the quiet stats),
+// the coins, and the hooks for quests and events.
 //
 // state.skeins = {
 //   li: 0,                     // the level on the table (index into LEVELS)
 //   sess: Session|null,        // the level in play (see below); null: none yet
 //   other: { [li]: Parked },   // unfinished levels she stepped away from (resume where she was)
 //   finished: { [li]: true },  // levels finished at least once (level li+1 opens after li)
-//   notes: { [li]: {finishes, moves, undos, clears, swaps} },  // quiet stats, never shown as a cost
+//   notes: { [li]: {finishes, moves, undos, clears, swaps, neat?} },  // quiet stats, never shown as a cost;
+//                              // neat: finished within the level's basket of trays (its ribbon)
+//   seen: { [mechanic]: true }, // intro cards she has read (snarl, order, basket, felt, spindle, preview, untie)
 //   glyphs: null|boolean,      // color symbols; null follows settings.colorblind
 //   hanks: 0, levels: 0,       // hanks tied and levels finished, in all
 // }
@@ -32,7 +35,8 @@
 // Hooks for quests and events (only existing exports are called):
 //   questEvent(state, 'hankTied', 1, {colorId}) per newly tied hank
 //   eventPoints(state, 'hank', 1, {colors: [colorId]}) per newly tied hank
-// Domain events (bus): 'hankTied' {colorId, coins}, 'skeinLevelDone' {level, coins, bonus, hanks}.
+// Domain events (bus): 'hankTied' {colorId, coins}, 'skeinLevelDone' {level, coins, bonus, hanks,
+// neat, chapterDone}.
 
 import * as R from '../puzzles/skeins.js';
 import { emit } from './bus.js';
@@ -62,7 +66,7 @@ const zeroStats = () => ({ moves: 0, undos: 0, clears: 0, swaps: 0 });
 
 /** Fresh state.skeins (createInitialState mirrors it). */
 export function initialSkeins() {
-  return { li: 0, sess: null, other: {}, finished: {}, notes: {}, glyphs: null, hanks: 0, levels: 0 };
+  return { li: 0, sess: null, other: {}, finished: {}, notes: {}, glyphs: null, hanks: 0, levels: 0, seen: {} };
 }
 
 function cleanStats(x) {
@@ -107,6 +111,8 @@ export function ensureSkeins(state) {
   if (!isObj(k.finished)) k.finished = {};
   for (const key of Object.keys(k.finished)) if (!(+key >= 0 && +key < LEVEL_COUNT) || !k.finished[key]) delete k.finished[key];
   if (!isObj(k.notes)) k.notes = {};
+  if (!isObj(k.seen)) k.seen = {};
+  for (const key of Object.keys(k.seen)) if (!R.MECHANICS[key] || k.seen[key] !== true) delete k.seen[key];
   if (!isObj(k.other)) k.other = {};
   for (const key of Object.keys(k.other)) if (!repairRecord(k.other[key], +key, { withPast: false })) delete k.other[key];
   if (k.sess !== null && !repairRecord(k.sess, k.li, { withPast: true })) k.sess = null;
@@ -211,6 +217,45 @@ export function maxOpen(state) {
   return li;
 }
 
+/**
+ * nextLevel(state) -> the level "Continue" plays: the level on the table while
+ * it is unfinished, else the first open level she has not finished yet (the
+ * newest one), else -1 when every level is finished.
+ */
+export function nextLevel(state) {
+  const k = state && state.skeins;
+  if (k && k.sess && k.sess.state && !k.sess.state.done && Number.isInteger(k.li)) return k.li;
+  const f = (k && k.finished) || {};
+  const top = maxOpen(state);
+  if (!f[top]) return top;
+  for (let li = 0; li < LEVEL_COUNT; li++) if (!f[li] && isOpen(state, li)) return li;
+  return -1;
+}
+
+/** chapters(state) -> [{index, id, name, blurb, first, count, finished, open}] for the level list. */
+export function chapters(state) {
+  const f = (state && state.skeins && state.skeins.finished) || {};
+  return R.CHAPTERS.map((c, index) => {
+    const first = R.chapterStart(index);
+    let finished = 0;
+    for (let li = first; li < first + c.levels; li++) if (f[li]) finished++;
+    return { index, id: c.id, name: c.name, blurb: c.blurb, first, count: c.levels, finished, open: isOpen(state, first) };
+  });
+}
+
+/** introsFor(state, li) -> the mechanics level li uses that she has not read the card for yet. */
+export function introsFor(state, li = state && state.skeins ? state.skeins.li : 0) {
+  const seen = (state && state.skeins && state.skeins.seen) || {};
+  return R.levelMechanics(li).filter((m) => !seen[m]);
+}
+
+/** seeIntro(state, {mechanics}) -> {ok}: she has read these intro cards. */
+export function seeIntro(state, { mechanics } = {}) {
+  const k = ensureSkeins(state);
+  for (const m of Array.isArray(mechanics) ? mechanics : []) if (R.MECHANICS[m]) k.seen[m] = true;
+  return { ok: true };
+}
+
 function newSess(state, li) {
   const seed = (Math.floor(stateRng(state)() * 4294967296) >>> 0) || 1;
   const sess = R.newSession(li, seed);
@@ -292,11 +337,15 @@ function finishLevel(state, now) {
     k.levels = num(k.levels) + 1;
     if (state.lifetime) state.lifetime.puzzles = num(state.lifetime.puzzles) + 1;
     const n = isObj(k.notes[li]) ? k.notes[li] : { finishes: 0, moves: 0, undos: 0, clears: 0, swaps: 0 };
+    const neat = R.goalOf(li).trays > 0 && R.withinBasket(sess.state);
     k.notes[li] = {
       finishes: num(n.finishes) + 1, moves: num(n.moves) + sess.stats.moves, undos: num(n.undos) + sess.stats.undos,
       clears: num(n.clears) + sess.stats.clears, swaps: num(n.swaps) + sess.stats.swaps,
     };
-    emit(state, 'skeinLevelDone', { level: li, coins: Math.round(num(sess.paid)), bonus, hanks: sess.state.hanks.length });
+    if (n.neat || neat) k.notes[li].neat = true;
+    const ch = R.chapterOf(li);
+    const chapterDone = li === R.chapterStart(ch) + R.CHAPTERS[ch].levels - 1;
+    emit(state, 'skeinLevelDone', { level: li, coins: Math.round(num(sess.paid)), bonus, hanks: sess.state.hanks.length, neat, chapterDone });
   }
   k.finished[li] = true;
   return bonus;
@@ -322,13 +371,14 @@ export function place(state, args = {}, now = 0) {
 }
 
 /** clearPeg(state, {cell}) -> {ok, removed}: the free nudge, a stack set aside. */
-export function clearPeg(state, args = {}) {
+export function clearPeg(state, args = {}, now = 0) {
   const k = ensureSkeins(state);
   if (!k.sess) return { ok: false, reason: 'none' };
   const r = R.clearPeg(k.sess.state, num(args.cell, -1));
   if (!r.ok) return { ok: false, reason: 'peg' };
   record(k.sess, r, 'clears');
-  return { ok: true, removed: r.removed };
+  const bonus = k.sess.state.done ? finishLevel(state, now) : 0;
+  return { ok: true, removed: r.removed, done: k.sess.state.done, bonus };
 }
 
 /** swapTray(state) -> {ok}: the free nudge, three fresh stacks. */
@@ -377,16 +427,20 @@ export function summary(state) {
   const k = state && state.skeins;
   const s = k && k.sess && R.isValidLevel(k.sess.state) ? k.sess.state : null;
   const li = k && Number.isInteger(k.li) && k.li >= 0 && k.li < LEVEL_COUNT ? k.li : 0;
-  const L = R.LEVELS[li] || R.LEVELS[0];
+  const ch = R.chapterOf(li);
   return {
     open: unlocked(state),
     level: li,
     playing: !!(s && !s.done),
     done: !!(s && s.done),
     hanks: s ? s.hanks.length : 0,
-    goal: L.goal.hanks,
+    goal: R.goalOf(li).hanks,
     finished: k && isObj(k.finished) ? Object.keys(k.finished).length : 0,
     hanksAll: k ? num(k.hanks) : 0,
     maxOpen: maxOpen(state),
+    next: nextLevel(state),
+    levels: LEVEL_COUNT,
+    chapter: ch,
+    chapterName: R.CHAPTERS[ch].name,
   };
 }

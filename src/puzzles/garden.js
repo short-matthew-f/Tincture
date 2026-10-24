@@ -1,7 +1,13 @@
 // puzzles/garden.js — The Dye Garden's rules (pure). Ported from
-// proto/garden/rules.js (playtested); the only additions are each place's
-// `region` (the map region it sits by, src/content/regions.js) and gardenFor(),
-// a small memo so the screen and the sim share one generated garden.
+// proto/garden/rules.js (playtested); the additions are each place's
+// `region` (the map region it sits by, src/content/regions.js), gardenFor(),
+// a small memo so the screen and the sim share one generated garden, and what
+// the Garden Path (src/puzzles/garden-path.js) needs: more dyes, plants and
+// landmarks (appended: the five places generate exactly as before),
+// generateFrom(place, ...) for a recipe that is not one of the five places,
+// keep-out areas (a stream, hedges, a napping cat), a stream's floating
+// plants, and plants behind a closed gate (`need`: the basket mass that opens
+// them; gather and nearestGatherable respect it).
 // No window/document/Date.now/Math.random.
 // A garden is generated from (place id, seed) with a seeded mulberry32 RNG.
 // Plants are circles in world units; the basket is a circle whose radius grows
@@ -54,6 +60,8 @@ export function hashStr(s) {
 export const MODES = Object.freeze({
   wander: Object.freeze({ id: 'wander', name: 'Wander', timed: false, secs: 0, goat: false, landAt: 0.92, scale: 1 }),
   harvest: Object.freeze({ id: 'harvest', name: 'Harvest before dusk', timed: true, secs: 120, goat: true, landAt: 0.6, scale: 1.45 }),
+  // a Garden Path garden: a fixed recipe (src/puzzles/garden-path.js); the recipe sets the goat, the clock and landAt
+  path: Object.freeze({ id: 'path', name: 'Garden Path', timed: false, secs: 0, goat: false, landAt: 0.92, scale: 1 }),
 });
 /** The seed for a place and mode. Wander takes any seed; a harvest is fixed per place (or per day). */
 export function harvestSeed(placeId, day = '') {
@@ -81,6 +89,22 @@ export const DYES = Object.freeze({
   walnut: { name: 'Walnut brown', hex: '#6B4A2B' },
   cochineal: { name: 'Cochineal crimson', hex: '#B5213F' },
   indigo: { name: 'Indigo blue', hex: '#2E3F6E' },
+  // the Garden Path's dyes
+  tansy: { name: 'Tansy yellow', hex: '#C9B43A' },
+  tagetes: { name: 'French marigold gold', hex: '#E3A63E' },
+  crottle: { name: 'Crottle brown', hex: '#8E6A46' },
+  goldenrod: { name: 'Goldenrod yellow', hex: '#E6C02E' },
+  rudbeckia: { name: 'Black-eyed Susan olive', hex: '#8F8A3C' },
+  safflower: { name: 'Safflower pink', hex: '#E0607A' },
+  orchil: { name: 'Orchil purple', hex: '#8A3F7E' },
+  alkanet: { name: 'Alkanet gray-purple', hex: '#76608C' },
+  japindigo: { name: 'Japanese indigo blue', hex: '#3F7F95' },
+  hibiscus: { name: 'Hibiscus pink', hex: '#B84A7A' },
+  elderberry: { name: 'Elderberry lavender', hex: '#8A6E9E' },
+  rhubarb: { name: 'Rhubarb root gold', hex: '#C99A38' },
+  pokeweed: { name: 'Pokeweed magenta', hex: '#C2307A' },
+  osage: { name: 'Osage orange yellow', hex: '#D9B62A' },
+  cutch: { name: 'Cutch brown', hex: '#7E4E30' },
 });
 
 // ---------- facts (short, true, conservative) ----------
@@ -104,6 +128,24 @@ export const FACTS = Object.freeze({
   walnut: 'Walnut hulls give rich browns with no mordant at all, because they carry their own tannins.',
   cochineal: 'Cochineal is a tiny insect that lives on prickly-pear pads. It takes tens of thousands of them to make a pound of dye.',
   indigo: 'Indigo does not dissolve in plain water. In the vat it turns yellow-green, and cloth turns blue as it meets the air.',
+  // the Garden Path's plants
+  tansy: 'Tansy flower heads give bright yellows, and with a little iron, olive greens. Tansy is not a plant for eating.',
+  tagetes: 'French marigolds are the small, bushy cousins of the tall marigolds, and their flower heads give the same warm golds.',
+  crottle: 'Crottle, a lichen of rocks and old walls, once gave the warm browns of island tweeds. It grows very slowly, so take only loose pieces that have already fallen, and leave the rest.',
+  goldenrod: 'Goldenrod flowers give clear, bright yellows, and the bees love them too. Picked in full bloom, they give the strongest color.',
+  rudbeckia: 'Black-eyed Susan flower heads can give golds and olive greens.',
+  safflower: 'Safflower petals hold two dyes: a yellow that rinses out in plain water, and a rarer pinkish red that dyers draw out afterwards.',
+  orchil: 'Orchil purples come from lichens soaked for weeks in an ammonia bath. Lichens can take decades to grow back, so gather only what the wind has already brought down.',
+  alkanet: 'Alkanet roots hold a red-purple dye that dissolves far better in oil or alcohol than in plain water. On wool it gives soft purples and grays.',
+  japindigo: 'Japanese indigo is sown fresh each spring. Its leaves, picked and blended straight from the plant, can dye silk soft sky blues.',
+  hibiscus: 'Hibiscus flowers give pinks and purples, but the color fades in sunlight, so dyers enjoy it as a gentle, short-lived shade.',
+  elderberry: 'Elderberries give lavenders and purples, though the color fades in sunlight. Raw elderberries are not for eating.',
+  rhubarb: 'Dried rhubarb root gives yellows and golds. Only the cooked stalks are eaten; the leaves are not for eating.',
+  pokeweed: 'Pokeweed berries give a vivid magenta that fades in light. Every part of the plant is poisonous: it is not for eating, and dyers wear gloves.',
+  osage: 'Osage orange wood gives strong, lasting yellows. Farmers once planted the thorny trees in rows as living hedges.',
+  cutch: 'Cutch comes from the heartwood of an acacia tree. Rich in tannin, it gives warm browns that hold up well in light.',
+  hive: 'Bees visit many dye flowers, goldenrod and weld among them. A hive near the dye beds helps the flowers set seed for next year.',
+  dyehouse: 'Old dye-houses were built beside rivers and streams, because dyeing takes a great deal of water for the baths and the rinsing.',
 });
 
 // ---------- species ----------
@@ -147,6 +189,32 @@ export const SPECIES = Object.freeze({
   cochVat: sp({ name: 'Cochineal dye vat', the: 'the cochineal vat', many: 'vats', dye: 'cochineal', fact: 'cochineal', r: 54, shape: 'vat', landmark: true }),
   oak: sp({ name: 'Old oak tree', the: 'the old oak', many: 'oaks', dye: 'oaktan', fact: 'oak', r: 62, shape: 'oak', landmark: true }),
   boat: sp({ name: 'Rowing boat of bladderwrack', the: 'the rowing boat', many: 'boats', dye: 'seaweed', fact: 'seaweed', r: 54, shape: 'boat', landmark: true }),
+  // ---- the Garden Path's plants (new: introduced one or two at a time along the path) ----
+  crottle: sp({ name: 'Crottle lichen', many: 'crottle', dye: 'crottle', fact: 'crottle', r: 6.0, shape: 'lichen' }),
+  tansy: sp({ name: 'Tansy', many: 'tansy heads', dye: 'tansy', fact: 'tansy', r: 6.6, shape: 'buttons', note: 'not for eating' }),
+  frenchMarigold: sp({ name: 'French marigolds', many: 'French marigolds', dye: 'tagetes', fact: 'tagetes', r: 7.6, shape: 'frilly' }),
+  orchil: sp({ name: 'Orchil lichen', many: 'orchil tufts', dye: 'orchil', fact: 'orchil', r: 8.4, shape: 'fruticose' }),
+  susan: sp({ name: 'Black-eyed Susans', many: 'black-eyed Susans', dye: 'rudbeckia', fact: 'rudbeckia', r: 8.8, shape: 'susan' }),
+  safflower: sp({ name: 'Safflower', many: 'safflowers', dye: 'safflower', fact: 'safflower', r: 9.2, shape: 'thistle' }),
+  goldenrod: sp({ name: 'Goldenrod', many: 'goldenrod sprays', dye: 'goldenrod', fact: 'goldenrod', r: 9.6, shape: 'plume' }),
+  alkanet: sp({ name: 'Alkanet', many: 'alkanet plants', dye: 'alkanet', fact: 'alkanet', r: 10.8, shape: 'borage' }),
+  japIndigo: sp({ name: 'Japanese indigo', many: 'Japanese indigo plants', dye: 'japindigo', fact: 'japindigo', r: 12.4, shape: 'polygonum' }),
+  hibiscus: sp({ name: 'Hibiscus', many: 'hibiscus flowers', dye: 'hibiscus', fact: 'hibiscus', r: 14.2, shape: 'hibiscus' }),
+  osage: sp({ name: 'Osage orange', many: 'Osage oranges', dye: 'osage', fact: 'osage', r: 16.8, shape: 'hedgeapple' }),
+  elder: sp({ name: 'Elderberries', many: 'elderberry bushes', dye: 'elderberry', fact: 'elderberry', r: 17.5, shape: 'elder', note: 'raw berries are not for eating' }),
+  rhubarb: sp({ name: 'Rhubarb root', many: 'rhubarb crowns', dye: 'rhubarb', fact: 'rhubarb', r: 18.2, shape: 'rhubarb', note: 'the leaves are not for eating' }),
+  poke: sp({ name: 'Pokeweed', many: 'pokeweed plants', dye: 'pokeweed', fact: 'pokeweed', r: 20.5, shape: 'poke', note: 'poisonous: not for eating' }),
+  cutch: sp({ name: 'Cutch blocks', many: 'cutch blocks', dye: 'cutch', fact: 'cutch', r: 23.5, shape: 'blocks' }),
+  goldenrodDrift: sp({ name: 'Drift of goldenrod', many: 'goldenrod drifts', dye: 'goldenrod', fact: 'goldenrod', r: 40, shape: 'drift', grand: true }),
+  elderTree: sp({ name: 'Old elder tree', many: 'elder trees', dye: 'elderberry', fact: 'elderberry', r: 43, shape: 'eldertree', grand: true }),
+  osageTree: sp({ name: 'Osage orange tree', many: 'Osage orange trees', dye: 'osage', fact: 'osage', r: 46, shape: 'osagetree', grand: true }),
+  // the Garden Path's landmarks
+  hive: sp({ name: 'Beehive in the goldenrod', the: 'the beehive', many: 'hives', dye: 'goldenrod', fact: 'hive', r: 52, shape: 'hive', landmark: true }),
+  barrow: sp({ name: 'Wheelbarrow of marigolds', the: 'the wheelbarrow', many: 'wheelbarrows', dye: 'tagetes', fact: 'tagetes', r: 53, shape: 'barrow', landmark: true }),
+  scarecrow: sp({ name: 'Scarecrow in a woad-blue coat', the: 'the scarecrow', many: 'scarecrows', dye: 'woad', fact: 'woad', r: 54, shape: 'scarecrow', landmark: true }),
+  well: sp({ name: 'Old well, walnut hulls soaking by it', the: 'the old well', many: 'wells', dye: 'walnut', fact: 'walnut', r: 55, shape: 'well', landmark: true }),
+  bales: sp({ name: 'Hay bales stacked with weld', the: 'the hay bales', many: 'hay bales', dye: 'weld', fact: 'weld', r: 58, shape: 'bales', landmark: true }),
+  dyehouse: sp({ name: 'The dye-house and its indigo vats', the: 'the dye-house', many: 'dye-houses', dye: 'indigo', fact: 'dyehouse', r: 66, shape: 'dyehouse', landmark: true }),
 });
 export const isBig = (s) => SPECIES[s].grand || SPECIES[s].landmark;
 
@@ -233,7 +301,12 @@ function computeG(plants, landAt) {
     if (SPECIES[p.s].landmark) top = Math.max(top, p.r);
     else wNon += growthOf(p);
   }
-  if (!top) top = Math.max(...plants.map((p) => p.r));
+  if (!top) {
+    // No landmark (some Garden Path gardens): the biggest size class comes in after landAt of everything smaller.
+    top = Math.max(...plants.map((p) => p.r));
+    wNon = 0;
+    for (const p of plants) if (p.r < top / 1.12) wNon += growthOf(p);
+  }
   return ((top / OPENING) ** 2 - R0 * R0) / (landAt * wNon);
 }
 
@@ -257,7 +330,8 @@ export function buildGrid(plants, W, H, cell = 64) {
   const cols = Math.max(1, Math.ceil(W / cell)), rows = Math.max(1, Math.ceil(H / cell));
   const cells = Array.from({ length: cols * rows }, () => []);
   const grid = { cell, cols, rows, cells, maxR: 0 };
-  plants.forEach((p, i) => gridAdd(grid, p, i));
+  // floating plants (a stream's) move, so they are never in the grid
+  plants.forEach((p, i) => { if (!p.fl) gridAdd(grid, p, i); });
   return grid;
 }
 function gridAdd(grid, p, i) {
@@ -290,9 +364,49 @@ export const FIND_KINDS = Object.freeze({
 export function generate(placeId, seed, mode = 'wander') {
   const place = PLACE_BY_ID[placeId];
   if (!place) throw new RangeError('unknown place ' + placeId);
-  const M = MODES[mode] || MODES.wander;
+  return generateFrom(place, seed, mode);
+}
+
+// ---------- keep-out areas and the stream (Garden Path recipes) ----------
+/** The stream's middle line at x (world units). st: g.stream {y, amp, k, ph, w, v}. */
+export const streamY = (st, x) => st.y + st.amp * Math.sin(st.k * x + st.ph);
+/** Is a plant of radius r at (x, y) inside a keep-out area (the stream, a hedge line, the cat's nap spot)? */
+export function keptOut(areas, x, y, r) {
+  for (const a of areas) {
+    if (a.kind === 'stream') { if (Math.abs(y - streamY(a, x)) < a.w + r + 4) return true; } else if (a.kind === 'hedge') { if (Math.abs(y - a.y) < r + 14) return true; } else if (a.kind === 'disc') { if ((x - a.x) ** 2 + (y - a.y) ** 2 < (a.r + r) ** 2) return true; }
+  }
+  return false;
+}
+/** Where a floating plant is after t seconds: it drifts along the stream and comes round again. */
+export function floatPos(g, p, t) {
+  const st = g.stream, span = g.W + 80;
+  let x = (p.x + 40 + st.v * t) % span;
+  if (x < 0) x += span;
+  x -= 40;
+  return { x, y: streamY(st, x) + (p.dy || 0) };
+}
+
+/**
+ * generateFrom(place, seed, mode) -> a garden from a place-shaped recipe: {id, size, mix, zones?, rows?,
+ * ground} as in PLACES, plus (Garden Path only) landAt, finds:[kinds], spindle (chance),
+ * stream:{y, amp, k, ph, w, v, s, n} (fractions of the field for y/amp/w), hedges:[{y}] and cat:{x, y}
+ * (fractions). Without those extras it is exactly the prototype's generator.
+ */
+export function generateFrom(place, seed, mode = 'wander') {
+  const placeId = place.id;
+  const M = (typeof mode === 'object' && mode ? mode : MODES[mode]) || MODES.wander;
   const rnd = mulberry32((seed >>> 0) ^ hashStr(placeId + (M.scale !== 1 ? ':' + M.id : '')));
   const W = Math.round(place.size[0] * M.scale), H = Math.round(place.size[1] * M.scale);
+  const keep = [];
+  let stream = null, cat = null;
+  const hedges = [];
+  if (place.stream) {
+    const f = place.stream;
+    stream = { kind: 'stream', y: Math.round(H * f.y), amp: Math.round(H * (f.amp ?? 0.03)), k: (Math.PI * 2 * (f.waves ?? 1.2)) / W, ph: f.ph ?? 0.7, w: Math.round(f.w ?? 22), v: f.v ?? 16 };
+    keep.push(stream);
+  }
+  for (const h of place.hedges || []) { const e = { kind: 'hedge', y: Math.round(H * h.y) }; hedges.push(e); keep.push(e); }
+  if (place.cat) { cat = { x: Math.round(W * place.cat.x), y: Math.round(H * place.cat.y) }; keep.push({ kind: 'disc', x: cat.x, y: cat.y, r: 26 }); }
   const area = M.scale * M.scale;
   const start = { x: W / 2, y: H / 2 };
   const plants = [];
@@ -307,6 +421,7 @@ export function generate(placeId, seed, mode = 'wander') {
   const clear = (x, y, r, s) => {
     const m = r + 10;
     if (x < m || y < m || x > W - m || y > H - m) return false;
+    if (keep.length && keptOut(keep, x, y, r)) return false;
     // keep the starting spot open for the first little ones
     if (tierOf(r) > 1 && Math.hypot(x - start.x, y - start.y) < 46 + r) return false;
     const reach = r + grid.maxR;
@@ -411,9 +526,23 @@ export function generate(placeId, seed, mode = 'wander') {
     }
   }
 
+  // 4b. A stream's floating plants (Garden Path): spaced along it, drifting; never in the grid.
+  if (stream) {
+    const f = place.stream, n = f.n || 0;
+    for (let k = 0; k < n; k++) {
+      const x = W * ((k + 0.2 + rnd() * 0.6) / n), dy = (rnd() - 0.5) * stream.w * 0.9;
+      const r = SPECIES[f.s].r * (0.95 + rnd() * 0.1);
+      plants.push({ s: f.s, x: Math.round(x * 10) / 10, y: Math.round((streamY(stream, x) + dy) * 10) / 10, r: Math.round(r * 100) / 100, v: Math.floor(rnd() * VARIANTS), f: rnd() < 0.5 ? 1 : 0, fl: 1, dy: Math.round(dy * 10) / 10 });
+    }
+  }
+
   // Draw order: back to front.
   plants.sort((a, b) => a.y - b.y || a.x - b.x);
   const g = { v: GEN, place: placeId, seed: seed >>> 0, mode: M.id, W, H, start, plants, G: 0, finds: [] };
+  if (stream) g.stream = { y: stream.y, amp: stream.amp, k: stream.k, ph: stream.ph, w: stream.w, v: stream.v };
+  if (hedges.length) g.hedges = hedges.map((e) => ({ y: e.y }));
+  if (cat) g.cat = cat;
+  const landAt = place.landAt || M.landAt;
   // Balance with Wander's growth (the slowest), so the garden is finishable in either mode.
   g.G = computeG(plants, MODES.wander.landAt);
 
@@ -432,23 +561,23 @@ export function generate(placeId, seed, mode = 'wander') {
     g.G = computeG(plants, MODES.wander.landAt);
   }
   plants.forEach((p, i) => { p.id = i; });
-  g.G = computeG(plants, M.landAt);
+  g.G = computeG(plants, landAt);
 
   // 6. Sparkly finds: two wide brims, two breezes, and sometimes a lost spindle far out.
   const finds = [];
   const farOK = (x, y, d) => finds.every((f) => Math.hypot(f.x - x, f.y - y) > d);
-  for (const k of ['brim', 'breeze', 'brim', 'breeze']) {
+  for (const k of place.finds || ['brim', 'breeze', 'brim', 'breeze']) {
     for (let t = 0; t < 200; t++) {
       const x = 40 + rnd() * (W - 80), y = 40 + rnd() * (H - 80);
-      if (Math.hypot(x - start.x, y - start.y) < 150 || !farOK(x, y, 200)) continue;
+      if (Math.hypot(x - start.x, y - start.y) < 150 || !farOK(x, y, 200) || (keep.length && keptOut(keep, x, y, 12))) continue;
       finds.push({ k, x: Math.round(x), y: Math.round(y) });
       break;
     }
   }
-  if (rnd() < 0.45) {
+  if (rnd() < (place.spindle ?? 0.45)) {
     for (let t = 0; t < 200; t++) {
       const x = 40 + rnd() * (W - 80), y = 40 + rnd() * (H - 80);
-      if (Math.hypot(x - start.x, y - start.y) < Math.max(W, H) * 0.36 || !farOK(x, y, 120)) continue;
+      if (Math.hypot(x - start.x, y - start.y) < Math.max(W, H) * 0.36 || !farOK(x, y, 120) || (keep.length && keptOut(keep, x, y, 12))) continue;
       finds.push({ k: 'spindle', x: Math.round(x), y: Math.round(y) });
       break;
     }
@@ -462,7 +591,7 @@ export const newVisit = () => ({ got: [], mass: 0 });
 /** Gather plant i. Returns a new visit; unchanged if it does not fit or is already in. */
 export function gather(g, visit, i, open = OPENING) {
   const p = g.plants[i];
-  if (!p || visit.got.includes(i) || !fits(g, p, visit.mass, open)) return visit;
+  if (!p || visit.got.includes(i) || !fits(g, p, visit.mass, open) || (p.need && visit.mass < p.need)) return visit;
   return { got: [...visit.got, i], mass: visit.mass + growthOf(p) };
 }
 /** Done when nothing is left: everything gathered (or, in a harvest, nibbled by the goat). */
@@ -492,7 +621,7 @@ export function nearestGatherable(g, visit, x, y, taken = null) {
   let best = -1, bd = Infinity;
   for (let i = 0; i < g.plants.length; i++) {
     const p = g.plants[i];
-    if (p.r > lim || have(i)) continue;
+    if (p.r > lim || have(i) || (p.need && visit.mass < p.need)) continue;
     const d = (p.x - x) ** 2 + (p.y - y) ** 2;
     if (d < bd) { bd = d; best = i; }
   }
@@ -764,7 +893,7 @@ export function pickFact(g, ids, n = 0) {
     seen.set(f, Math.max(seen.get(f) || 0, SPECIES[p.s].r));
   }
   let keys = [...seen.entries()].sort((a, b) => b[1] - a[1]).map(([f]) => f).slice(0, 3);
-  if (!keys.length) keys = PLACE_BY_ID[g.place].mix.map(([s]) => SPECIES[s].fact);
+  if (!keys.length) keys = (PLACE_BY_ID[g.place] ? PLACE_BY_ID[g.place].mix.map(([s]) => s) : [...new Set(g.plants.map((p) => p.s))]).map((s) => SPECIES[s].fact);
   const key = keys[Math.abs(n) % keys.length];
   return { key, text: FACTS[key] };
 }

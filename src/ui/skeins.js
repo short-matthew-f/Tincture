@@ -10,9 +10,12 @@
  * Owns: her six yarns (her own discovered colors, one per hue family, chosen
  * by the sim), the honeycomb of pegs, the tray of three stacks, the dock with
  * the one next step (Undo / Clear a peg / Swap the tray / See your shelf), the
- * coins chip, the level list (each finished level opens the next) and the
- * finished-level shelf. Also exports the Puzzle table's card
- * (skeinsCardHtml / skeinsCardSig).
+ * coins chip, the level list (112 levels in chapter sections: Continue, done
+ * ticks, basket ribbons, the next level highlighted; each finished level opens
+ * the next), the newer mechanics on the board (snarls, felted stacks, spindle
+ * pegs, the next-tray peek, the order slip, the basket and untangle chips) and
+ * their intro cards (shown once each, `skeins.seen`), and the finished-level
+ * shelf. Also exports the Puzzle table's card (skeinsCardHtml / skeinsCardSig).
  *
  * Rules: src/puzzles/skeins.js (pure). Every move is a sim action in
  * src/sim/skeins.js run through ctx.game.act, so it is saved at once and a
@@ -35,6 +38,23 @@ const GLYPH_SVG = {
   heart: '<path d="M12 20 4.6 12.8A4.4 4.4 0 0 1 12 7.2a4.4 4.4 0 0 1 7.4 5.6z"/>',
   leaf: '<path d="M5.5 18.5C5 10 10 5 19 5.2 19.3 13.5 14 18.8 5.5 18.5z"/>',
 };
+
+// The newer mechanics' icons (intro cards, level list), drawn in ink and walnut.
+const MECH_ICON = {
+  snarl: '<svg viewBox="0 0 48 48" aria-hidden="true"><path d="M24 10c-9 0-14 6-12 12s12 6 14 0-6-10-10-6 2 12 10 12 14-6 12-13-10-9-15-5" fill="none" stroke="#7B5236" stroke-width="3" stroke-linecap="round"/><path d="M30 34c4 2 8 1 9-2M14 33c-2 3-1 6 2 7" fill="none" stroke="#B89A6E" stroke-width="2.5" stroke-linecap="round"/></svg>',
+  order: '<svg viewBox="0 0 48 48" aria-hidden="true"><path d="M12 6h20l6 6v30H12z" fill="#FBF8F1" stroke="#7B5236" stroke-width="2.5" stroke-linejoin="round"/><path d="M17 17h14M17 23h14M17 29h9" stroke="#B89A6E" stroke-width="2.5" stroke-linecap="round"/><circle cx="32" cy="34" r="5" fill="#C0573B"/></svg>',
+  basket: '<svg viewBox="0 0 48 48" aria-hidden="true"><path d="M14 20c0-8 20-8 20 0" fill="none" stroke="#7B5236" stroke-width="3"/><path d="M7 20h34l-4 20H11z" fill="#D8C29C" stroke="#7B5236" stroke-width="2.5" stroke-linejoin="round"/><path d="M12 27h24M13 33h22M18 20l2 20M30 20l-2 20" stroke="#9C7F55" stroke-width="1.8"/></svg>',
+  felt: '<svg viewBox="0 0 48 48" aria-hidden="true"><path d="M24 8 38 16v16L24 40 10 32V16z" fill="#C7B9A6" stroke="#7B5236" stroke-width="2.5" stroke-linejoin="round"/><g fill="#FBF8F1"><circle cx="18" cy="20" r="1.6"/><circle cx="26" cy="17" r="1.6"/><circle cx="31" cy="24" r="1.6"/><circle cx="22" cy="27" r="1.6"/><circle cx="17" cy="31" r="1.6"/><circle cx="28" cy="32" r="1.6"/></g></svg>',
+  spindle: '<svg viewBox="0 0 48 48" aria-hidden="true"><path d="M24 4v40" stroke="#7B5236" stroke-width="3" stroke-linecap="round"/><ellipse cx="24" cy="34" rx="12" ry="4.5" fill="#C9A55E" stroke="#7B5236" stroke-width="2.5"/><path d="M18 12c4 2 8 2 12 0M17 18c5 2.5 9 2.5 14 0M17 24c5 2.5 9 2.5 14 0" stroke="#4C76A6" stroke-width="3" stroke-linecap="round" fill="none"/></svg>',
+  preview: '<svg viewBox="0 0 48 48" aria-hidden="true"><rect x="8" y="22" width="32" height="18" rx="5" fill="#EFE6D2" stroke="#B89A6E" stroke-width="2.5"/><rect x="5" y="8" width="38" height="18" rx="5" fill="#FBF8F1" stroke="#7B5236" stroke-width="2.5"/><circle cx="15" cy="17" r="4" fill="#C0573B"/><circle cx="24" cy="17" r="4" fill="#D5AE3C"/><circle cx="33" cy="17" r="4" fill="#4C76A6"/></svg>',
+  untie: '<svg viewBox="0 0 48 48" aria-hidden="true"><path d="M8 18c6-8 14-8 16 6s10 14 16 6" fill="none" stroke="#7B5236" stroke-width="3" stroke-linecap="round"/><path d="M10 34c5 4 10 4 13-2" fill="none" stroke="#B89A6E" stroke-width="2.5" stroke-linecap="round"/><circle cx="40" cy="30" r="3" fill="#E2B04A"/></svg>',
+};
+const TICK_SVG = '<svg class="tick" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" fill="#E2B04A"/><path d="m7 12.5 3.2 3.2L17 9" fill="none" stroke="#3A2A10" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const RIBBON_SVG = '<svg class="ribbon" viewBox="0 0 16 22" aria-hidden="true"><path d="M3 10 1 21l4-2 3 3 1-12M13 10l2 11-4-2-3 3-1-12" fill="#B04F7A"/><circle cx="8" cy="7" r="6" fill="#C0573B" stroke="#8E3A2A" stroke-width="1"/></svg>';
+// A snarl on a peg: a little tangle of undyed yarn.
+const SNARL_MARK = '<svg viewBox="0 0 40 40" aria-hidden="true"><path d="M20 9c-8 0-12 5-10 10s10 5 12 0-5-8-8-5 2 10 8 10 12-5 10-11-8-8-13-4" fill="none" stroke="#7B5236" stroke-width="2.6" stroke-linecap="round"/><path d="M25 30c3 2 7 1 8-2M10 29c-2 3-1 5 2 6" fill="none" stroke="#EFE6D2" stroke-width="2" stroke-linecap="round"/></svg>';
+const SPINDLE_MARK = '<svg viewBox="0 0 40 40" aria-hidden="true"><path d="M20 6v28" stroke="#7B5236" stroke-width="2.4" stroke-linecap="round"/><ellipse cx="20" cy="27" rx="8" ry="3" fill="#C9A55E" stroke="#7B5236" stroke-width="1.8"/></svg>';
+const CHEV_SVG = '<svg class="chev" viewBox="0 0 14 14" aria-hidden="true"><path d="m5 3 4 4-4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
 
 const CSS = `
 #screen-skeins { --sk-card: #FBF8F1; --sk-line: rgba(42,38,34,.14); --sk-gold: #E2B04A; --sk-gold-soft: #F3E3B8; --sk-wood-dark: #B89A6E; --sk-shadow: 0 3px 0 rgba(42,38,34,.18); }
@@ -151,6 +171,61 @@ const CSS = `
 #screen-skeins .sk-btnrow .btn { width: 100%; min-height: 52px; font-size: 17px; }
 #screen-skeins .sk-locked { padding: 16px; gap: 10px; }
 
+/* the newer mechanics on the board */
+#screen-skeins .sk-peg.snarl { cursor: default; }
+#screen-skeins .sk-peg.snarl .sk-hole { background: radial-gradient(circle at 50% 42%, #BDA27A, #A68A60 70%); }
+#screen-skeins .sk-peg.snarl .sk-hole::after { display: none; }
+#screen-skeins .sk-mark { position: absolute; inset: 8%; pointer-events: none; }
+#screen-skeins .sk-mark svg { width: 100%; height: 100%; overflow: visible; }
+#screen-skeins .sk-peg.spindle .sk-hole { background: radial-gradient(circle at 50% 42%, #E9D3A2, #C9A55E 72%); box-shadow: inset 0 0 0 2px rgba(140,101,18,.35); }
+#screen-skeins .sk-peg.spindle .sk-hole::after { display: none; }
+#screen-skeins .sk-peg .sk-eight { position: absolute; right: 4%; bottom: 2%; min-width: 15px; height: 15px; border-radius: 8px; padding: 0 3px; background: #8C6512; color: #FBF3DE; font: 700 10px/15px var(--font-ui); text-align: center; pointer-events: none; z-index: 2; }
+.sk-stack.felt .sk-ly { filter: saturate(.55) brightness(1.04); }
+.sk-stack.felt .sk-ly.top::after { content: ''; position: absolute; inset: 0; background: radial-gradient(circle, rgba(255,250,235,.55) 0 1px, transparent 1.6px) 0 0 / 5px 5px, radial-gradient(circle, rgba(42,38,34,.18) 0 1px, transparent 1.6px) 2.5px 2.5px / 5px 5px; }
+.sk-badge.felt { background: #EFE6D2; color: var(--ink-soft); font-weight: 600; }
+#screen-skeins .sk-peg.pulse .sk-hole, #screen-skeins .sk-peg.pulse .sk-stack { animation: sk-pulse .6s ease-out; }
+@keyframes sk-pulse { 0% { transform: scale(1); } 40% { transform: scale(1.12); } 100% { transform: scale(1); } }
+
+/* the next tray, peeking out under this one */
+#screen-skeins .sk-next { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 12px; color: var(--ink-soft); font-weight: 600; }
+#screen-skeins .sk-next .mini { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; flex: 1; }
+#screen-skeins .sk-next .mini span { position: relative; height: 34px; border-radius: 10px; background: rgba(42,38,34,.035); box-shadow: inset 0 0 0 1px rgba(42,38,34,.08); }
+#screen-skeins .sk-next .mini .sk-stack { left: 50%; top: auto; bottom: 3px; transform: translateX(-50%); }
+
+/* order slip, untangle and basket chips */
+#screen-skeins .sk-slot.want { background: transparent; box-shadow: inset 0 0 0 2px var(--c); opacity: .55; }
+#screen-skeins .sk-chip .ic { width: 18px; height: 18px; flex: none; }
+#screen-skeins .sk-chip.order { font-weight: 600; background: #F1E9D6; }
+
+/* level list: Continue, chapters */
+#screen-skeins .sk-continue { width: 100%; min-height: 52px; margin: 10px 0 4px; font-size: 16px; }
+#screen-skeins .sk-chapters { list-style: none; margin: 8px 0 10px; padding: 0; display: grid; gap: 8px; }
+#screen-skeins .sk-chhead { width: 100%; min-height: 56px; display: flex; align-items: center; gap: 10px; text-align: left; border: 0; border-radius: 12px; padding: 8px 12px; background: #F1E9D6; color: var(--ink); font: inherit; cursor: pointer; }
+#screen-skeins .sk-chhead[aria-expanded="true"] { background: #EADBBE; }
+#screen-skeins .sk-chhead:disabled { cursor: default; opacity: .62; }
+#screen-skeins .sk-chhead .cn { font: 400 18px var(--font-display); width: 26px; text-align: center; flex: none; }
+#screen-skeins .sk-chhead .ct { flex: 1; min-width: 0; }
+#screen-skeins .sk-chhead .ct b { display: block; font: 400 17px var(--font-display); }
+#screen-skeins .sk-chhead .ct small { display: block; color: var(--ink-soft); font-size: 12px; line-height: 1.3; }
+#screen-skeins .sk-chhead .cp { flex: none; font-size: 12px; font-weight: 700; color: var(--ink-soft); text-align: right; }
+#screen-skeins .sk-chhead .chev { flex: none; width: 14px; height: 14px; transition: transform .15s; }
+#screen-skeins .sk-chhead[aria-expanded="true"] .chev { transform: rotate(90deg); }
+#screen-skeins .sk-chapters .sk-levellist { margin: 6px 0 2px; }
+#screen-skeins .sk-levellist button.next { box-shadow: 0 0 0 2.5px var(--sk-gold); background: var(--sk-gold-soft); }
+#screen-skeins .sk-levellist .tagnext { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 6px; background: var(--sk-gold); color: #3A2A10; font-size: 11px; font-weight: 700; vertical-align: 1px; }
+#screen-skeins .sk-levellist .mark { display: inline-flex; align-items: center; gap: 2px; flex: none; }
+#screen-skeins .sk-levellist .tick { width: 22px; height: 22px; }
+#screen-skeins .sk-levellist .ribbon { width: 16px; height: 22px; }
+#screen-skeins .sk-levellist .mech { display: inline-flex; gap: 3px; margin-left: 4px; vertical-align: -3px; }
+#screen-skeins .sk-levellist .mech svg { width: 15px; height: 15px; }
+
+/* intro cards */
+#screen-skeins .sk-intro .sk-item { display: flex; gap: 12px; align-items: center; margin: 12px 0; }
+#screen-skeins .sk-intro .sk-item svg { flex: none; width: 52px; height: 52px; }
+#screen-skeins .sk-intro .sk-item p { margin: 0; font-size: 15px; line-height: 1.4; }
+#screen-skeins .sk-intro .sk-item strong { display: block; font: 400 17px var(--font-display); }
+#screen-skeins .sk-ribbonline { text-align: center; margin: -4px 0 10px; font-size: 14px; color: var(--ink-soft); }
+
 #sk-fx { position: fixed; inset: 0; pointer-events: none; z-index: 1000; }
 #sk-fx .sk-ghost { position: fixed; z-index: 1000; pointer-events: none; left: 0; top: 0; filter: drop-shadow(0 10px 10px rgba(42,38,34,.3)); }
 
@@ -171,6 +246,7 @@ const U = {
   visible: false, busy: false, sel: -1, clearMode: false, drag: null,
   view: null, trayView: null, hanksView: null, note: '', busyMsg: '', doneShown: false,
   L: null, sig: null, gen: 0, guide: null, confirmRestart: 0, coinsShown: null, resizeT: 0,
+  marks: null, nextView: null, introOpen: false, introFresh: [], openCh: -1,
 };
 
 const K = () => C.sim.skeins;
@@ -240,7 +316,8 @@ const skeinSVG = (c) => skeinSvgHex(hex(c));
 
 function layout() {
   const b = R().board(st().level);
-  const units = Math.max(...b.cells.map((c) => c.col + (c.row & 1) * 0.5)) + 1;
+  const x0 = b.minX || 0; // a silhouette whose left edge sits half a peg in
+  const units = Math.max(...b.cells.map((c) => c.col + (c.row & 1) * 0.5)) - x0 + 1;
   const KH = 0.98; // a slightly tilted table: hexes a touch shorter than true
   const body = $('[data-body]');
   const wrap = $('[data-boardwrap]');
@@ -257,27 +334,37 @@ function layout() {
   const hs = w * KH;
   const step = hs * 0.75;
   const pad = w * rise;
-  const pos = b.cells.map((c) => ({ x: (c.col + (c.row & 1) * 0.5) * w + w / 2, y: pad + c.row * step + hs / 2 }));
+  const pos = b.cells.map((c) => ({ x: (c.col + (c.row & 1) * 0.5 - x0) * w + w / 2, y: pad + c.row * step + hs / 2 }));
   return { b, w, hs, pw: w * 0.93, ph: hs * 0.93, W: units * w, H: pad + (b.rows - 1) * step + hs, pos };
 }
 const dl = (len, w = U.L.w) => Math.min(w * 0.08, (w * 0.6) / Math.max(1, len));
 
-function stackHTML(stack, { pw, ph, w, badge = true, lit = 0, d } = {}) {
+function stackHTML(stack, { pw, ph, w, badge = true, lit = 0, d, felt = false, need = 10 } = {}) {
   if (!stack || !stack.length) return '';
   const n = stack.length;
   const step = d ?? dl(n, w);
-  let out = `<div class="sk-stack" style="width:${pw}px;height:${ph}px">`;
+  let out = `<div class="sk-stack${felt ? ' felt' : ''}" style="width:${pw}px;height:${ph}px">`;
   stack.forEach((c, i) => {
     const isTop = i === n - 1;
     out += `<div class="sk-ly${isTop ? ' top' : ''}${i >= n - lit ? ' lit' : ''}" style="--c:${hex(c)};transform:translateY(${(-i * step).toFixed(1)}px)"></div>`;
   });
-  if (badge) {
+  if (badge && felt) {
+    out += `<span class="sk-badge felt" style="margin-top:${(-(n - 1) * step).toFixed(1)}px">felted</span>`;
+  } else if (badge) {
     const run = R().topRun(stack);
     const c = stack[n - 1];
-    out += `<span class="sk-badge${run >= R().HANK - 3 ? ' near' : ''}" style="--c:${hex(c)};margin-top:${(-(n - 1) * step).toFixed(1)}px">${glyphsOn() ? glyph(c) : ''}${run}</span>`;
+    out += `<span class="sk-badge${run >= need - 3 ? ' near' : ''}" style="--c:${hex(c)};margin-top:${(-(n - 1) * step).toFixed(1)}px">${glyphsOn() ? glyph(c) : ''}${run}</span>`;
   }
   return `${out}</div>`;
 }
+
+// Snarls and felted stacks as they read right now (a step behind while a move animates).
+const marksNow = () => U.marks || { felt: st().felt || [], snarl: st().snarl || [] };
+const isSnarl = (i) => marksNow().snarl.includes(i);
+const isFelt = (i) => marksNow().felt.includes(i);
+const isSpindle = (i) => { const b = R().board(st().level); return !!(b.spin && b.spin.has(i)); };
+const needAt = (i) => R().hankAt(st().level, i);
+const cellStack = (i, lit = 0) => stackHTML(stacksNow()[i], { ...U.L, lit, felt: isFelt(i), need: needAt(i) });
 
 // ---------------------------------------------------------------------------
 // Rendering
@@ -287,17 +374,23 @@ const stacksNow = () => U.view || st().stacks;
 function pegLabel(i) {
   const s = stacksNow()[i];
   if (s === null) return `Knot ${i + 1}`;
-  if (!s.length) return `Peg ${i + 1}, empty`;
-  return `Peg ${i + 1}: ${R().topRun(s)} ${cname(s[s.length - 1])} on top, ${s.length} in all`;
+  if (isSnarl(i)) return `Peg ${i + 1}, snarled. A hank tied beside it loosens it.`;
+  const sp = isSpindle(i) ? `Spindle peg ${i + 1}, twists ${needAt(i)} into a hank` : `Peg ${i + 1}`;
+  if (!s.length) return `${sp}, empty`;
+  if (isFelt(i)) return `${sp}: a felted stack of ${s.length}, resting until a hank is tied beside it`;
+  return `${sp}: ${R().topRun(s)} ${cname(s[s.length - 1])} on top, ${s.length} in all`;
 }
 function pegClass(i) {
   const s = stacksNow()[i];
   let c = 'sk-peg';
   if (s === null) c += ' knot';
+  else if (isSnarl(i)) c += ' snarl';
   else if (!s.length && (U.sel >= 0 || U.drag) && !U.busy) c += ' open';
+  if (s && isSpindle(i)) c += ' spindle';
   if (U.drag && U.drag.target === i) c += ' target';
   return c;
 }
+const pegMark = (i) => (isSnarl(i) ? `<span class="sk-mark">${SNARL_MARK}</span>` : isSpindle(i) ? `<span class="sk-mark">${SPINDLE_MARK}</span><span class="sk-eight" aria-hidden="true">${needAt(i)}</span>` : '');
 
 function renderBoard() {
   const boardEl = $('[data-board]');
@@ -312,7 +405,7 @@ function renderBoard() {
     const p = L.pos[i];
     out += `<button type="button" class="${pegClass(i)}" data-cell="${i}" ${cell.knot ? 'disabled' : ''} aria-label="${esc(pegLabel(i))}"
       style="left:${(p.x - L.pw / 2).toFixed(1)}px;top:${(p.y - L.ph / 2).toFixed(1)}px;width:${L.pw.toFixed(1)}px;height:${L.ph.toFixed(1)}px;z-index:${cell.row * 2 + 1}">
-      <span class="sk-hole"></span>${stackHTML(stacks[i], L)}</button>`;
+      <span class="sk-hole"></span>${pegMark(i)}${cellStack(i)}</button>`;
   });
   boardEl.innerHTML = out;
 }
@@ -321,7 +414,8 @@ function renderCell(i, lit = 0) {
   if (!el) return;
   const old = $('.sk-stack', el);
   if (old) old.remove();
-  el.insertAdjacentHTML('beforeend', stackHTML(stacksNow()[i], { ...U.L, lit }));
+  $$('.sk-mark, .sk-eight', el).forEach((m) => m.remove());
+  el.insertAdjacentHTML('beforeend', pegMark(i) + cellStack(i, lit));
   el.setAttribute('aria-label', pegLabel(i));
   el.className = pegClass(i);
 }
@@ -346,6 +440,20 @@ function renderTray() {
     return `<button type="button" class="sk-tslot${U.sel === t ? ' sel' : ''}${U.drag && U.drag.t === t && U.drag.moved ? ' lifted' : ''}" data-t="${t}" data-tap aria-pressed="${U.sel === t}" aria-label="Tray stack: ${esc(desc)}">
       <span style="position:absolute;left:50%;bottom:${lift}px;transform:translateX(-50%);width:${opts.pw}px;height:${opts.ph}px;display:block">${stackHTML(s, opts)}</span>${bl}</button>`;
   }).join('');
+  renderNext();
+}
+
+/** The next tray, peeking out under this one (levels with a preview). */
+function renderNext() {
+  const el = $('[data-next]');
+  if (!el) return;
+  const next = U.nextView || st().next;
+  if (!next) { el.hidden = true; el.innerHTML = ''; return; }
+  el.hidden = false;
+  const w = 26;
+  const opts = { pw: w * 0.93, ph: w * 0.98 * 0.93, w, d: 3.2, badge: false };
+  const desc = next.map((x) => R().bands(x).slice().reverse().map((b) => `${b.n} ${cname(b.c)}`).join(' over ')).join('; ');
+  el.innerHTML = `<span>Next</span><span class="mini" role="img" aria-label="${esc(`The next tray: ${desc}`)}">${next.map((x) => `<span>${stackHTML(x, opts)}</span>`).join('')}</span>`;
 }
 
 function renderCoins() {
@@ -358,27 +466,51 @@ function renderCoins() {
 
 function renderGoal() {
   const s = st();
-  const lv = R().LEVELS[s.level];
+  const g = R().goalOf(s.level);
   const hanks = U.hanksView || s.hanks;
+  const ch = R().chapterOf(s.level);
   const lb = $('[data-levelbtn]');
   if (lb) lb.textContent = `Level ${s.level + 1}`;
   const nm = $('[data-lvlname]');
   if (nm) nm.textContent = `Level ${s.level + 1} · ${levelTitleOf(s.level)}`;
   const sub = $('[data-subtitle]');
-  if (sub) sub.textContent = `Skein Stacks · Level ${s.level + 1}`;
+  if (sub) sub.textContent = `${R().CHAPTERS[ch].name} · Level ${s.level + 1}`;
+  const want = g.colors;
+  const haveOf = (c) => hanks.filter((x) => x === +c).length;
   const cnt = $('[data-count]');
-  if (cnt) cnt.innerHTML = `${Math.min(hanks.length, lv.goal.hanks)}<small>of ${lv.goal.hanks} hanks</small>`;
   let sl = '';
-  for (let i = 0; i < lv.goal.hanks; i++) sl += i < hanks.length ? `<span class="sk-slot on" style="--c:${hex(hanks[i])}"></span>` : '<span class="sk-slot"></span>';
+  if (g.order) {
+    // the order slip: one slot per hank asked for, in its color, filled as she ties them
+    const got = Object.keys(want).reduce((a, c) => a + Math.min(haveOf(c), want[c]), 0);
+    if (cnt) cnt.innerHTML = `${got}<small>of ${g.hanks} for ${esc(g.who || 'the order')}</small>`;
+    for (const c of Object.keys(want)) {
+      const have = haveOf(c);
+      for (let i = 0; i < want[c]; i++) sl += `<span class="sk-slot ${i < have ? 'on' : 'want'}" style="--c:${hex(+c)}"></span>`;
+    }
+  } else {
+    if (cnt) cnt.innerHTML = `${Math.min(hanks.length, g.hanks)}<small>of ${g.hanks} hanks</small>`;
+    for (let i = 0; i < g.hanks; i++) sl += i < hanks.length ? `<span class="sk-slot on" style="--c:${hex(hanks[i])}"></span>` : '<span class="sk-slot"></span>';
+  }
   const slots = $('[data-slots]');
   if (slots) slots.innerHTML = sl;
-  const want = lv.goal.colors || {};
   const chips = $('[data-chips]');
   if (chips) {
-    chips.innerHTML = Object.keys(want).map((c) => {
-      const have = hanks.filter((x) => x === +c).length;
+    let out = Object.keys(want).map((c) => {
+      const have = haveOf(c);
       return `<span class="sk-chip${have >= want[c] ? ' met' : ''}"><span class="sk-dot" style="--c:${hex(+c)}">${glyphsOn() ? glyph(+c) : ''}</span>${esc(cname(+c))}: ${Math.min(have, want[c])} of ${want[c]}</span>`;
     }).join('');
+    const m = marksNow();
+    if (g.untie) {
+      const n = m.snarl.length + m.felt.length;
+      const what = [m.snarl.length ? `${m.snarl.length} ${m.snarl.length === 1 ? 'snarl' : 'snarls'} to loosen` : '', m.felt.length ? `${m.felt.length} felted to wake` : ''].filter(Boolean).join(', ');
+      out += `<span class="sk-chip${n ? '' : ' met'}"><span class="ic">${MECH_ICON.untie}</span>${n ? esc(what) : 'All untangled'}</span>`;
+    }
+    if (g.trays) {
+      const left = R().traysLeft(s);
+      const words = !R().withinBasket(s) ? 'Spare trays from here on' : left ? `${left} more ${left === 1 ? 'tray' : 'trays'} in the basket` : 'The last tray from the basket';
+      out += `<span class="sk-chip"><span class="ic">${MECH_ICON.basket}</span>${words}</span>`;
+    }
+    chips.innerHTML = out;
   }
   renderCoins();
 }
@@ -399,9 +531,12 @@ function renderActions() {
     msg = 'Tap a stack to set it aside. It just leaves the board.';
     btns.push('<button type="button" class="btn btn-paper small" data-act="cancel" data-tap>Keep them all</button>');
   } else {
+    const g = R().goalOf(s.level);
+    const locks = (s.snarl ? s.snarl.length : 0) + (s.felt ? s.felt.length : 0);
     if (sit === 'stuck') msg = 'The board is full. Undo, or take a free nudge.';
     else if (sit === 'tight') msg = 'Getting snug. A free nudge is here if you like.';
     else if (U.sel >= 0) msg = 'Now tap an empty peg for that stack.';
+    else if (!U.note && g.untie && locks && s.hanks.length >= g.hanks) msg = 'The hanks are done. Tie one beside each snarl or felted stack to finish.';
     if (canUndo) btns.push('<button type="button" class="btn btn-paper small" data-act="undo" data-tap>Undo</button>');
     if (sit === 'stuck' || sit === 'tight') {
       btns.push('<button type="button" class="btn btn-primary small" data-act="clear" data-tap>Clear a peg</button>');
@@ -458,23 +593,32 @@ function skeleton() {
 <li>Neighbors with the <b>same top color</b> slide together. What is underneath can slide on, so chains happen.</li>
 <li>When <b>10 or more</b> of one color sit on top, they twist into a hank. Bundle enough hanks to finish the level. Board full? Undo as much as you like, or take a free nudge.</li>
 <li>Each hank pays a few coins, and a finished level pays a little extra. Each level you finish opens the next.</li>
+<li>Later chapters bring snarls, orders, a basket of trays, felted stacks, spindle pegs and a peek at the next tray. Each one has a card the first time it shows up.</li>
 </ol></details>
 </div>
 <div class="sk-dock" data-dock>
 <div class="sk-tray" data-tray role="group" aria-label="Tray" data-coach="skeins-tray"></div>
+<div class="sk-next" data-next hidden></div>
 <div class="sk-actions" data-actions><span class="msg" role="status" data-msg></span><span class="btns" data-btns></span></div>
 </div>
 <div class="sk-sheet" data-levels hidden role="dialog" aria-modal="true" aria-labelledby="sk-levels-title"><div class="sk-card">
 <h2 id="sk-levels-title">Levels</h2>
-<p class="hint">Each level you finish opens the next.</p>
-<ul class="sk-levellist" data-levellist></ul>
+<p class="hint" data-levelshint>Each level you finish opens the next.</p>
+<div data-continuewrap></div>
+<ul class="sk-chapters" data-chapters></ul>
 <button type="button" class="btn btn-paper block tall" data-act="levels-close" data-tap>Back to the board</button>
+</div></div>
+<div class="sk-sheet" data-intro hidden role="dialog" aria-modal="true" aria-labelledby="sk-intro-title"><div class="sk-card sk-intro">
+<h2 id="sk-intro-title" data-introtitle>Something new on the table</h2>
+<div data-introbody></div>
+<button type="button" class="btn btn-primary block tall" data-act="intro-ok" data-tap>Lovely, let's wind</button>
 </div></div>
 <div class="sk-sheet" data-done hidden role="dialog" aria-modal="true" aria-labelledby="sk-done-title"><div class="sk-card">
 <h2 id="sk-done-title" data-donetitle>Level finished</h2>
 <p class="hint" data-donesub></p>
 <div class="sk-shelf" data-shelf></div>
 <p class="sk-earned" data-earned></p>
+<p class="sk-ribbonline" data-ribbonline hidden></p>
 <div class="sk-btnrow">
 <button type="button" class="btn btn-primary" data-act="next" data-nextbtn data-tap>Next level</button>
 <button type="button" class="btn btn-paper" data-act="again" data-tap>Play this level again</button>
@@ -661,6 +805,19 @@ async function playSteps(steps, coinsFor) {
       await sleep(110);
     } else if (step.type === 'bundle') {
       await bundleFx(step, coinsFor(U.hanksView.length));
+    } else if (step.type === 'wake' || step.type === 'loosen') {
+      // a hank tied beside it: the felted stack wakes, the snarl comes loose
+      const key = step.type === 'wake' ? 'felt' : 'snarl';
+      if (U.marks) U.marks = { ...U.marks, [key]: U.marks[key].filter((i) => i !== step.cell) };
+      renderCell(step.cell);
+      const el = $(`.sk-peg[data-cell="${step.cell}"]`);
+      if (el && !reduced()) { el.classList.add('pulse'); setTimeout(() => el.classList.remove('pulse'), 650); }
+      chainPop(step.cell, step.type === 'wake' ? 'Awake!' : 'Loose!');
+      U.busyMsg = step.type === 'wake' ? 'A felted stack wakes up.' : 'A snarl comes loose.';
+      const msg = $('[data-msg]');
+      if (msg) msg.textContent = U.busyMsg;
+      safe(() => C.audio.tink(0.7));
+      await sleep(reduced() ? 160 : 420);
     }
   }
   return moves;
@@ -684,6 +841,8 @@ async function run(fn) {
     U.view = null;
     U.trayView = null;
     U.hanksView = null;
+    U.marks = null;
+    U.nextView = null;
     U.coinsShown = null;
     if (gen === U.gen && U.visible) renderAll();
   }
@@ -707,6 +866,8 @@ function doPlace(t, cell) {
     U.view[cell] = before.tray[t].slice();
     U.trayView = before.tray.map((s, i) => (i === t ? null : s));
     U.hanksView = before.hanks.slice();
+    U.marks = { felt: (before.felt || []).slice(), snarl: (before.snarl || []).slice() };
+    U.nextView = before.next || null;
     renderBoard();
     renderTray();
     renderActions();
@@ -719,15 +880,18 @@ function doPlace(t, cell) {
     const firstPaid = total - r.paid.length;
     const coinsFor = (i) => (i >= firstPaid && r.paid[i - firstPaid] ? r.paid[i - firstPaid].coins : 0);
     const moves = await playSteps(r.steps, coinsFor);
-    const lv = R().LEVELS[before.level];
-    const owedLeft = lv.goal.hanks - (before.hanks.length + r.hanks.length);
-    if (r.hanks.length) U.note = owedLeft > 0 ? `${r.hanks.map(hankName).join(', ')}! ${owedLeft} more to go.` : `${hankName(r.hanks.at(-1))}! That is the goal.`;
-    else if (moves > 1) U.note = `A chain of ${moves} slides.`;
-    else U.note = '';
+    const g = R().goalOf(before.level);
     const now = st();
     const owed = R().goalOwed(now);
     const still = Object.keys(owed).filter((c) => owed[c] > 0);
+    const owedLeft = g.order ? still.reduce((a, c) => a + owed[c], 0) : g.hanks - (before.hanks.length + r.hanks.length);
+    const locks = (now.snarl ? now.snarl.length : 0) + (now.felt ? now.felt.length : 0);
+    if (r.hanks.length) U.note = owedLeft > 0 ? `${r.hanks.map(hankName).join(', ')}! ${owedLeft} more to go.` : `${hankName(r.hanks.at(-1))}! That is the goal.`;
+    else if (moves > 1) U.note = `A chain of ${moves} slides.`;
+    else U.note = '';
     if (r.hanks.length && owedLeft <= 0 && still.length) U.note = `Lovely. Still to bundle: ${still.map((c) => `${owed[c]} ${cname(+c)}`).join(', ')}.`;
+    else if (r.hanks.length && g.order && owedLeft > 0) U.note = `${r.hanks.map(hankName).join(', ')}! The order still wants ${still.map((c) => `${owed[c]} ${cname(+c)}`).join(', ')}.`;
+    if (!now.done && g.untie && locks && r.hanks.length && owedLeft <= 0) U.note = `Lovely. Now tie a hank beside ${locks === 1 ? 'the last snarl or felted stack' : `the ${locks} snarls and felted stacks left`}.`;
     if (r.bonus > 0) {
       const chip = $('[data-coins-chip]');
       const from = $('[data-count]');
@@ -739,6 +903,7 @@ function doPlace(t, cell) {
     }
     if (r.refilled) {
       U.trayView = null;
+      U.nextView = null;
       renderTray();
       if (!reduced()) await Promise.all($$('[data-tray] .sk-tslot .sk-stack').map((el, i) => waapi(el, [{ opacity: 0, transform: 'translateY(16px)' }, { opacity: 1, transform: 'none' }], { duration: 220, delay: i * 60, fill: 'backwards' })));
     }
@@ -792,6 +957,30 @@ function startLevel(li, { fresh = false } = {}) {
   renderAll();
   const body = $('[data-body]');
   if (body) body.scrollTop = 0;
+  maybeIntro();
+}
+
+/** The intro card(s) for what this level brings that she has not met yet. */
+function maybeIntro() {
+  const box = $('[data-intro]');
+  if (!box || !sess() || st().done) return false;
+  const fresh = safe(() => K().introsFor(S(), st().level)) || [];
+  if (!fresh.length) return false;
+  const M = R().MECHANICS;
+  U.introFresh = fresh;
+  U.introOpen = true;
+  $('[data-introtitle]').textContent = fresh.length > 1 ? 'Some new things on the table' : 'Something new on the table';
+  $('[data-introbody]').innerHTML = fresh.map((m) => `<div class="sk-item">${MECH_ICON[m] || ''}<p><strong>${esc(M[m].name)}</strong>${esc(M[m].line)}</p></div>`).join('');
+  box.hidden = false;
+  safe(() => $('[data-act="intro-ok"]').focus());
+  return true;
+}
+function closeIntro() {
+  const box = $('[data-intro]');
+  if (box) box.hidden = true;
+  if (U.introFresh.length) C.game.act(K().seeIntro, { mechanics: U.introFresh });
+  U.introFresh = [];
+  U.introOpen = false;
 }
 
 function showDone() {
@@ -805,12 +994,21 @@ function showDone() {
   let rows = '';
   for (let i = 0; i < piles.length; i += 3) rows += `<div class="row">${piles.slice(i, i + 3).join('')}</div>`;
   $('[data-shelf]').innerHTML = rows;
-  $('[data-donetitle]').textContent = `${levelTitleOf(s.level)}: finished`;
-  $('[data-donesub]').textContent = `You bundled ${s.hanks.length} hanks. Here they are on the shelf.`;
+  const ch = R().chapterOf(s.level);
+  const chEnd = s.level === R().chapterStart(ch) + R().CHAPTERS[ch].levels - 1;
+  $('[data-donetitle]').textContent = chEnd ? `${R().CHAPTERS[ch].name}: chapter finished` : `${levelTitleOf(s.level)}: finished`;
+  $('[data-donesub]').textContent = `You bundled ${s.hanks.length} hanks${chEnd ? ` and finished the chapter with ${levelTitleOf(s.level)}` : ''}. Here they are on the shelf.`;
   const paid = num(sess().paid);
   $('[data-earned]').textContent = paid > 0 ? `This level earned ${coinsText(C, paid)} coins.` : '';
+  const rib = $('[data-ribbonline]');
+  if (rib) {
+    const g = R().goalOf(s.level);
+    rib.hidden = !(g.trays && R().withinBasket(s));
+    rib.innerHTML = rib.hidden ? '' : `${RIBBON_SVG} Finished within the basket: a ribbon for this level.`;
+  }
   const last = s.level === R().LEVELS.length - 1;
-  $('[data-nextbtn]').textContent = last ? 'Back to level 1' : `Next: level ${s.level + 2}`;
+  const nextCh = !last && chEnd ? R().CHAPTERS[ch + 1].name : '';
+  $('[data-nextbtn]').textContent = last ? 'Back to level 1' : nextCh ? `Next: ${nextCh}, level ${s.level + 2}` : `Next: level ${s.level + 2}`;
   box.hidden = false;
   safe(() => C.audio.chord([0.45, 0.6, 0.75, 0.9], 0.8));
   safe(() => C.haptics.success());
@@ -818,18 +1016,63 @@ function showDone() {
   safe(() => $('[data-nextbtn]').focus());
 }
 
-function openLevels() {
-  const k = S().skeins || {};
+/** The goal of level li in a few words, for the level list. */
+function goalWords(li) {
+  const g = R().goalOf(li);
+  const L = R().LEVELS[li];
+  if (g.order) return `An order for ${g.who || 'a customer'}: ${g.hanks} hanks, ${L.colors} colors`;
+  let w = `${g.hanks} hanks, ${L.colors} colors`;
+  if (Object.keys(g.colors).length) w += ', some in set colors';
+  if (g.untie) w += ', untangle it all';
+  return w;
+}
+
+function levelRow(i, k, nextLi) {
   const fin = k.finished || {};
-  $('[data-levellist]').innerHTML = R().LEVELS.map((lv, i) => {
-    const open = K().isOpen(S(), i);
-    const goal = open
-      ? `${lv.goal.hanks} hanks, ${lv.colors} colors${lv.goal.colors ? ', some in set colors' : ''}`
-      : `Opens after level ${i}`;
-    return `<li><button type="button" data-level="${i}" class="${i === k.li ? 'cur' : ''}" ${open ? 'data-tap' : 'disabled'}><span class="n">${i + 1}</span><span class="t">${esc(levelTitleOf(i))}<small>${esc(goal)}</small></span><span class="mark">${fin[i] ? skeinSVG(i % R().COLORS.length) : ''}</span></button></li>`;
+  const notes = k.notes || {};
+  const open = K().isOpen(S(), i);
+  const mech = R().levelMechanics(i).filter((m) => MECH_ICON[m]);
+  const marks = `${fin[i] ? TICK_SVG : ''}${notes[i] && notes[i].neat ? RIBBON_SVG : ''}`;
+  const cls = [i === k.li ? 'cur' : '', i === nextLi ? 'next' : ''].filter(Boolean).join(' ');
+  const sub = open ? goalWords(i) : `Opens after level ${i}`;
+  const label = `Level ${i + 1}, ${levelTitleOf(i)}${fin[i] ? ', finished' : ''}${notes[i] && notes[i].neat ? ', with a ribbon' : ''}${i === nextLi ? ', next up' : ''}. ${sub}`;
+  return `<li><button type="button" data-level="${i}" class="${cls}" ${open ? 'data-tap' : 'disabled'} aria-label="${esc(label)}"><span class="n">${i + 1}</span><span class="t">${esc(levelTitleOf(i))}${i === nextLi ? '<span class="tagnext">Next</span>' : ''}<small>${esc(sub)}${mech.length ? `<span class="mech">${mech.map((m) => MECH_ICON[m]).join('')}</span>` : ''}</small></span><span class="mark">${marks}</span></button></li>`;
+}
+
+function renderLevels() {
+  const k = S().skeins || {};
+  const nextLi = safe(() => K().nextLevel(S()));
+  const chs = K().chapters(S());
+  if (U.openCh < 0) U.openCh = R().chapterOf(nextLi >= 0 ? nextLi : k.li || 0);
+  const cw = $('[data-continuewrap]');
+  if (cw) {
+    if (nextLi >= 0) {
+      const resume = k.sess && !k.sess.state.done && k.li === nextLi && k.sess.state.moves > 0;
+      cw.innerHTML = `<button type="button" class="btn btn-primary sk-continue" data-act="continue" data-level-go="${nextLi}" data-tap>${resume ? 'Continue' : 'Play'} level ${nextLi + 1}: ${esc(levelTitleOf(nextLi))}</button>`;
+    } else cw.innerHTML = '';
+  }
+  const hint = $('[data-levelshint]');
+  const done = Object.keys(k.finished || {}).length;
+  if (hint) hint.textContent = done >= R().LEVELS.length ? `All ${R().LEVELS.length} levels are wound. Play any of them again.` : done ? `${done} ${done === 1 ? 'level' : 'levels'} wound so far. Each one you finish opens the next.` : 'Each level you finish opens the next.';
+  $('[data-chapters]').innerHTML = chs.map((c) => {
+    const expanded = c.index === U.openCh;
+    const prog = !c.open ? `Opens after level ${c.first}` : c.finished >= c.count ? 'All finished' : c.finished ? `${c.finished} finished` : 'Ready';
+    let rows = '';
+    if (expanded) {
+      rows = `<ul class="sk-levellist" id="sk-ch-${c.index}">`;
+      for (let i = c.first; i < c.first + c.count; i++) rows += levelRow(i, k, nextLi);
+      rows += '</ul>';
+    }
+    const label = `Chapter ${c.index + 1}, ${c.name}. ${prog}`;
+    return `<li><button type="button" class="sk-chhead" data-chapter="${c.index}" aria-expanded="${expanded}" aria-controls="sk-ch-${c.index}" ${c.open ? 'data-tap' : 'disabled'} aria-label="${esc(label)}"><span class="cn">${c.index + 1}</span><span class="ct"><b>${esc(c.name)}</b><small>${esc(c.blurb)}</small></span><span class="cp">${esc(prog)}</span>${c.open ? CHEV_SVG : ''}</button>${rows}</li>`;
   }).join('');
+}
+
+function openLevels() {
+  U.openCh = -1;
+  renderLevels();
   $('[data-levels]').hidden = false;
-  const cur = $('[data-levellist] .cur');
+  const cur = $('[data-chapters] .next') || $('[data-chapters] .cur') || $('[data-act="continue"]');
   if (cur) { cur.focus(); if (cur.scrollIntoView) cur.scrollIntoView({ block: 'nearest' }); }
 }
 
@@ -968,8 +1211,19 @@ function onClick(e) {
     if (U.busy || st().done) return;
     const i = +peg.dataset.cell;
     const s = st().stacks[i];
+    if (R().isSnarled(st(), i)) { U.note = 'A snarl. Tie a hank on a peg beside it and it comes loose.'; renderActions(); return; }
     if (U.clearMode) { if (s && s.length) doClear(i); return; }
     if (U.sel >= 0 && s && !s.length) doPlace(U.sel, i);
+    else if (U.sel < 0 && R().isFelted(st(), i)) { U.note = 'A felted stack. It wakes when a hank is tied beside it.'; renderActions(); }
+    return;
+  }
+  const chh = e.target.closest('[data-chapter]');
+  if (chh && ROOT.contains(chh)) {
+    const c = +chh.dataset.chapter;
+    U.openCh = U.openCh === c ? -2 : c;
+    renderLevels();
+    const head = $(`[data-chapter="${c}"]`);
+    if (head) { head.focus(); if (head.scrollIntoView) head.scrollIntoView({ block: 'nearest' }); }
     return;
   }
   const lv = e.target.closest('[data-level]');
@@ -977,12 +1231,20 @@ function onClick(e) {
     $('[data-levels]').hidden = true;
     const li = +lv.dataset.level;
     if (li !== S().skeins.li) startLevel(li);
+    else maybeIntro();
     return;
   }
   const b = e.target.closest('[data-act]');
   if (!b || !ROOT.contains(b)) return;
   const a = b.dataset.act;
   if (a === 'levels-close') { $('[data-levels]').hidden = true; return; }
+  if (a === 'intro-ok') { closeIntro(); return; }
+  if (a === 'continue') {
+    $('[data-levels]').hidden = true;
+    const li = +b.dataset.levelGo;
+    if (li !== S().skeins.li || !sess() || st().done) startLevel(li);
+    return;
+  }
   if (a === 'next') { $('[data-done]').hidden = true; startLevel((st().level + 1) % R().LEVELS.length, { fresh: true }); return; }
   if (a === 'again') { $('[data-done]').hidden = true; startLevel(st().level, { fresh: true }); return; }
   if (U.busy) return;
@@ -1004,7 +1266,8 @@ function onClick(e) {
 function onKey(e) {
   if (e.key !== 'Escape' || !U.visible || !ROOT) return;
   const lv = $('[data-levels]');
-  if (lv && !lv.hidden) lv.hidden = true;
+  if (U.introOpen) closeIntro();
+  else if (lv && !lv.hidden) lv.hidden = true;
   else if (U.sel >= 0 || U.clearMode) { U.sel = -1; U.clearMode = false; renderAll(); }
 }
 
@@ -1049,13 +1312,15 @@ export function skeinsCardHtml(ctx, state) {
   const ids = Ks.yarns(state);
   const nm = (k) => nameOfId(ctx, ids[k]);
   const title = Rs.levelTitle(sum.level, nm);
+  const chOf = (li) => Rs.CHAPTERS[Rs.chapterOf(li)].name;
   let line;
-  if (sum.playing) line = `Level ${sum.level + 1} · ${title} · ${sum.hanks} of ${sum.goal} hanks`;
-  else if (sum.done) line = sum.level + 1 < Rs.LEVELS.length ? `Level ${sum.level + 1} is finished. Level ${sum.level + 2} is ready when you are.` : 'Every level is finished. Wind any of them again.';
+  if (sum.playing) line = `${chOf(sum.level)} · Level ${sum.level + 1} · ${title} · ${sum.hanks} of ${sum.goal} hanks`;
+  else if (sum.next >= 0 && (sum.done || sum.finished)) line = `${chOf(sum.next)}: level ${sum.next + 1}, ${Rs.levelTitle(sum.next, nm)}, is ready when you are.`;
+  else if (sum.next < 0) line = `All ${sum.levels} levels are wound. Wind any of them again.`;
   else line = 'Twist yarn in your colors into hanks, a few calm moves at a time.';
   const stats = sum.finished ? `${sum.finished} ${sum.finished === 1 ? 'level' : 'levels'} finished` : '';
   const mini = raw(`<div class="sk-mini" aria-hidden="true">${[0, 1, 2].map((k) => skeinSvgHex(hexOfId(ctx, ids[k]))).join('')}</div>`);
-  const label = sum.playing ? `Continue level ${sum.level + 1}` : 'Wind some yarn';
+  const label = sum.playing ? `Continue level ${sum.level + 1}` : sum.next >= 0 && sum.finished ? `Play level ${sum.next + 1}` : 'Wind some yarn';
   return h`<div class="card" id="pz-skeins" data-coach="skeins-card">
 <div class="row between"><div class="h3">Winding Room</div>${stats ? h`<span class="chip">${stats}</span>` : ''}</div>
 <div class="sk-cardrow">${mini}<div class="hint grow">${line}</div></div>
@@ -1077,7 +1342,7 @@ export function skeinsCardSig(ctx, state) {
 /** debugSkeins() -> a read for tests (test/skeins.e2e.mjs). */
 export function debugSkeins() {
   return {
-    busy: U.busy, sel: U.sel, clearMode: U.clearMode, drag: !!U.drag, visible: U.visible, doneShown: U.doneShown,
+    busy: U.busy, sel: U.sel, clearMode: U.clearMode, drag: !!U.drag, visible: U.visible, doneShown: U.doneShown, introOpen: U.introOpen,
     liftPx: LIFT,
     pegCenter(i) {
       const b = $('[data-board]');
@@ -1145,18 +1410,26 @@ export default {
     if (unlocked()) {
       C.game.act(K().ensureSkeins);
       C.game.act(K().ensureLevel, {});
+      // Back after finishing a level (its shelf was shown then): the next one is on the table.
+      const k = S().skeins;
+      const nx = k.sess && k.sess.state.done ? K().nextLevel(S()) : -1;
+      if (nx >= 0 && nx !== k.li) C.game.act(K().startLevel, { level: nx });
     }
     skeleton();
     renderAll();
     // A finished level waits on the board; the dock offers "See your shelf".
     U.doneShown = !!(sess() && st().done);
+    U.introOpen = false;
     if (U.guide && unlocked()) U.guide.start();
+    if (unlocked()) maybeIntro();
   },
 
   hide() {
     U.visible = false;
     U.gen += 1;
     U.busy = false;
+    U.introOpen = false;
+    U.introFresh = [];
     clearTimeout(U.confirmRestart);
     U.confirmRestart = 0;
     if (U.drag && U.drag.ghost) U.drag.ghost.remove();

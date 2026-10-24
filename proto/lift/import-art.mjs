@@ -14,8 +14,18 @@
 //  --write    store the grid in art-imported.js under --id (levels.js picks it up as ART[id])
 //  --gen      then deal jars and solve it: runs gen-levels.mjs for that id (needs a
 //             LEVEL_DEFS entry with that id; prints one to paste if there isn't)
-// Without --write the grid is printed, ready to paste into levels.js.
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+//  --chroma   weight of hue against lightness when matching colors (default 1)
+//  --tone     stretch the picture's lightness onto the palette's range first
+// Without --write the grid is printed, ready to paste into chapters.js.
+// --size defaults to the painting's slot size when --id names one in chapters.js.
+//
+//   node proto/lift/import-art.mjs --batch <dir> [--only id,id] [--png <dir>] [--write] [--gen]
+//
+// imports every picture listed in art-sources.js (file, crop, chroma, colors)
+// from the PNGs in <dir> at its painting's slot size; --png writes a preview of
+// each and a contact sheet; --write stores them all in art-imported.js; --gen
+// then re-deals the jars for exactly those paintings (gen-levels.mjs ONLY=...).
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { inflateSync, deflateSync } from 'node:zlib';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -124,8 +134,14 @@ export function downsample(img, W, H, crop) {
 // Nearest palette letter in OKLab, then a color budget (the rarest color's
 // cells move to their own nearest remaining color), then small regions merge
 // into the neighbor they share the most edge with. Deterministic.
-export function quantize(labs, W, H, { letters = Object.keys(PALETTE), colors = 10, min = 3, minColor = 8 } = {}) {
+// Options for painted sources whose darks and brights go past the palette's:
+//   tone   stretch the picture's lightness (2nd to 98th percentile) onto the
+//          palette's range first, so a deep navy band lands on Navy, not Charcoal;
+//   chroma weight of hue against lightness when matching (1 = plain OKLab).
+export function quantize(labs, W, H, { letters = Object.keys(PALETTE), colors = 10, min = 3, minColor = 8, tone = false, chroma = 1 } = {}) {
   const pal = Object.fromEntries(letters.map((k) => [k, oklab(hexLin(PALETTE[k].hex))]));
+  if (tone) labs = toneMap(labs, Object.values(pal));
+  const d2 = (a, b) => (a[0] - b[0]) ** 2 + chroma * ((a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2);
   const nearest = (lab, allowed) => { let best = null, bd = Infinity; for (const k of allowed) { const d = d2(lab, pal[k]); if (d < bd) { bd = d; best = k; } } return best; };
   let allowed = letters.slice();
   const g = labs.map((lab) => nearest(lab, allowed));
@@ -186,47 +202,105 @@ export function quantize(labs, W, H, { letters = Object.keys(PALETTE), colors = 
   return rows;
 }
 
+export function toneMap(labs, pal) {
+  const Ls = labs.map((l) => l[0]).sort((a, b) => a - b);
+  const lo = Ls[Math.floor(Ls.length * 0.02)], hi = Ls[Math.floor(Ls.length * 0.98)];
+  const pl = pal.map((p) => p[0]), plo = Math.min(...pl) + 0.02, phi = Math.max(...pl) - 0.01;
+  if (hi - lo < 0.05) return labs;
+  return labs.map(([L, a, b]) => [plo + ((Math.min(hi, Math.max(lo, L)) - lo) / (hi - lo)) * (phi - plo), a, b]);
+}
+
 export function importPNG(buf, { W = 28, H = 36, crop, ...opts } = {}) {
   return quantize(downsample(decodePNG(buf), W, H, crop), W, H, opts);
 }
 
 // ---------- command line ----------
+function previewPNG(rows, S = 8) {
+  const W = rows[0].length, H = rows.length, buf = new Uint8Array(W * S * H * S * 4);
+  for (let y = 0; y < H * S; y++) for (let x = 0; x < W * S; x++) {
+    const n = parseInt(PALETTE[rows[Math.floor(y / S)][Math.floor(x / S)]].hex.slice(1), 16), o = (y * W * S + x) * 4;
+    buf[o] = n >> 16; buf[o + 1] = (n >> 8) & 255; buf[o + 2] = n & 255; buf[o + 3] = 255;
+  }
+  return encodePNG(W * S, H * S, buf);
+}
+// Several pictures side by side on paper, `across` to a row.
+export function contactSheet(items, S = 8, across = 6, pad = 12) {
+  const cw = Math.max(...items.map(([, r]) => r[0].length)) * S + pad, ch = Math.max(...items.map(([, r]) => r.length)) * S + pad;
+  const W = cw * Math.min(across, items.length), H = ch * Math.ceil(items.length / across), buf = new Uint8Array(W * H * 4);
+  for (let i = 0; i < W * H; i++) buf.set([0xF4, 0xEF, 0xE4, 255], i * 4);
+  items.forEach(([, rows], n) => {
+    const ox = (n % across) * cw + pad / 2, oy = Math.floor(n / across) * ch + pad / 2;
+    for (let y = 0; y < rows.length * S; y++) for (let x = 0; x < rows[0].length * S; x++) {
+      const v = parseInt(PALETTE[rows[Math.floor(y / S)][Math.floor(x / S)]].hex.slice(1), 16), o = ((oy + y) * W + ox + x) * 4;
+      buf[o] = v >> 16; buf[o + 1] = (v >> 8) & 255; buf[o + 2] = v & 255;
+    }
+  });
+  return encodePNG(W, H, buf);
+}
+async function writeImported(grids) {
+  const path = new URL('./art-imported.js', import.meta.url);
+  const cur = existsSync(path) ? (await import(path.href + `?t=${Date.now()}`)).ART_IMPORTED : {};
+  Object.assign(cur, grids);
+  const body = Object.entries(cur).map(([k, rs]) => `  ${k}: [\n${rs.map((r) => `    '${r}',`).join('\n')}\n  ],`).join('\n');
+  writeFileSync(path, `// Generated by import-art.mjs from painted source images. Do not edit by hand;\n// re-run: node proto/lift/import-art.mjs --batch <dir> --write (sources: art-sources.js)\n// or: node proto/lift/import-art.mjs <file.png> --id <id> --write\nexport const ART_IMPORTED = {\n${body}\n};\n`);
+}
+async function regenerate(ids) {
+  const { LEVEL_DEFS } = await import(new URL('./chapters.js', import.meta.url).href + `?t=${Date.now()}`);
+  const missing = ids.filter((id) => !LEVEL_DEFS.some((d) => d.id === id));
+  if (missing.length) {
+    console.log(`No painting "${missing.join('", "')}" yet. Add it to a chapter in chapters.js, then run again with --gen:\n  ['${missing[0]}', 'Name', 'noun', { mix: 0.25, link: 0.2, mystery: 0.3 }],`);
+    return 1;
+  }
+  const r = spawnSync(process.execPath, [new URL('./gen-levels.mjs', import.meta.url).pathname], { env: { ...process.env, ONLY: ids.join(',') }, stdio: 'inherit' });
+  return r.status ?? 1;
+}
+
 const here = fileURLToPath(import.meta.url);
 if (process.argv[1] === here) {
   const args = process.argv.slice(2);
   const opt = (k, d) => { const i = args.indexOf(`--${k}`); return i >= 0 ? args[i + 1] : d; };
-  const file = args.find((a, i) => !a.startsWith('--') && !(i > 0 && args[i - 1].startsWith('--') && !['--write', '--gen'].includes(args[i - 1])));
-  if (!file) { console.log('usage: node proto/lift/import-art.mjs <file.png> --id <id> [--size 28x36] [--crop l,t,r,b] [--colors 10] [--palette letters] [--min 3] [--png preview.png] [--write] [--gen]'); process.exit(1); }
-  const [W, H] = opt('size', '28x36').split('x').map(Number);
-  const id = opt('id', 'imported');
-  const rows = importPNG(readFileSync(file), { W, H, crop: opt('crop') ? opt('crop').split(',').map(Number) : undefined, colors: +opt('colors', 10), min: +opt('min', 3), letters: opt('palette') ? [...opt('palette')] : undefined });
-  const used = [...new Set(rows.join(''))].sort().join('');
-  console.log(`${id}: ${W}x${H}, ${used.length} colors (${used})`);
-  if (opt('png')) {
-    const S = 8, buf = new Uint8Array(W * S * H * S * 4);
-    for (let y = 0; y < H * S; y++) for (let x = 0; x < W * S; x++) {
-      const n = parseInt(PALETTE[rows[Math.floor(y / S)][Math.floor(x / S)]].hex.slice(1), 16), o = (y * W * S + x) * 4;
-      buf[o] = n >> 16; buf[o + 1] = (n >> 8) & 255; buf[o + 2] = n & 255; buf[o + 3] = 255;
+  const flags = ['--write', '--gen', '--tone'];
+  const { LEVEL_DEFS } = await import(new URL('./chapters.js', import.meta.url).href);
+  const slotSize = (id) => { const d = LEVEL_DEFS.find((x) => x.id === id); return d && d.size ? d.size : null; };
+  if (opt('batch')) {
+    const { SOURCES } = await import(new URL('./art-sources.js', import.meta.url).href);
+    const dir = opt('batch').replace(/\/?$/, '/');
+    const only = opt('only') ? opt('only').split(',') : null;
+    const grids = {};
+    for (const [id, src] of Object.entries(SOURCES)) {
+      if (only && !only.includes(id)) continue;
+      const size = slotSize(id);
+      if (!size) { console.log(`${id}: no painting with a slot size in chapters.js, skipped`); continue; }
+      const file = dir + src.file;
+      if (!existsSync(file)) { console.log(`${id}: ${src.file} not found, skipped`); continue; }
+      const rows = importPNG(readFileSync(file), { W: size[0], H: size[1], crop: src.crop || undefined, colors: src.colors, min: src.min, chroma: src.chroma || 1, tone: !!src.tone, letters: src.drop ? Object.keys(PALETTE).filter((k) => !src.drop.includes(k)) : undefined });
+      grids[id] = rows;
+      const used = [...new Set(rows.join(''))].sort().join('');
+      console.log(`${id.padEnd(12)} ${size[0]}x${size[1]}  ${used.length} colors (${used})  from ${src.file}`);
     }
-    writeFileSync(opt('png'), encodePNG(W * S, H * S, buf));
-  }
-  if (!args.includes('--write')) {
-    console.log(`  art: [\n${rows.map((r) => `    '${r}',`).join('\n')}\n  ],`);
+    if (opt('png')) {
+      const out = opt('png').replace(/\/?$/, '/');
+      mkdirSync(out, { recursive: true });
+      for (const [id, rows] of Object.entries(grids)) writeFileSync(`${out}${id}.png`, previewPNG(rows));
+      writeFileSync(`${out}_sheet.png`, contactSheet(Object.entries(grids)));
+    }
+    if (args.includes('--write')) { await writeImported(grids); console.log(`wrote ${Object.keys(grids).length} pictures to art-imported.js`); }
+    if (args.includes('--gen')) process.exit(await regenerate(Object.keys(grids)));
   } else {
-    const path = new URL('./art-imported.js', import.meta.url);
-    const cur = existsSync(path) ? (await import(path.href)).ART_IMPORTED : {};
-    cur[id] = rows;
-    const body = Object.entries(cur).map(([k, rs]) => `  ${k}: [\n${rs.map((r) => `    '${r}',`).join('\n')}\n  ],`).join('\n');
-    writeFileSync(path, `// Generated by import-art.mjs from painted source images. Do not edit by hand;\n// re-run: node proto/lift/import-art.mjs <file.png> --id <id> --write\nexport const ART_IMPORTED = {\n${body}\n};\n`);
-    console.log(`wrote ART.${id} to art-imported.js`);
-    if (args.includes('--gen')) {
-      const { LEVEL_DEFS } = await import(new URL('./levels.js', import.meta.url).href + `?t=${Date.now()}`);
-      if (!LEVEL_DEFS.some((d) => d.id === id)) {
-        console.log(`No level "${id}" yet. Add this to LEVEL_DEFS in levels.js, then run again with --gen:\n  { id: '${id}', name: '…', noun: '…', lanes: 4, slots: 3, bench: 3, art: ART.${id}, gen: { target: 0.08, future: 0.4, mix: 0.25, link: 0.2, mystery: 0.3, locks: 1, caps: [10, 12, 15, 20, 25] } },`);
-      } else {
-        const r = spawnSync(process.execPath, [new URL('./gen-levels.mjs', import.meta.url).pathname], { env: { ...process.env, ONLY: id }, stdio: 'inherit' });
-        process.exit(r.status ?? 1);
-      }
+    const file = args.find((a, i) => !a.startsWith('--') && !(i > 0 && args[i - 1].startsWith('--') && !flags.includes(args[i - 1])));
+    if (!file) { console.log('usage: node proto/lift/import-art.mjs <file.png> --id <id> [--size 28x36] [--crop l,t,r,b] [--colors 10] [--palette letters] [--min 3] [--chroma 2] [--tone] [--png preview.png] [--write] [--gen]\n   or: node proto/lift/import-art.mjs --batch <dir> [--only id,id] [--png <dir>] [--write] [--gen]'); process.exit(1); }
+    const id = opt('id', 'imported');
+    const [W, H] = opt('size') ? opt('size').split('x').map(Number) : (slotSize(id) || [28, 36]);
+    const rows = importPNG(readFileSync(file), { W, H, crop: opt('crop') ? opt('crop').split(',').map(Number) : undefined, colors: +opt('colors', 10), min: +opt('min', 3), chroma: +opt('chroma', 1), tone: args.includes('--tone'), letters: opt('palette') ? [...opt('palette')] : undefined });
+    const used = [...new Set(rows.join(''))].sort().join('');
+    console.log(`${id}: ${W}x${H}, ${used.length} colors (${used})`);
+    if (opt('png')) writeFileSync(opt('png'), previewPNG(rows));
+    if (!args.includes('--write')) {
+      console.log(`  art: [\n${rows.map((r) => `    '${r}',`).join('\n')}\n  ],`);
+    } else {
+      await writeImported({ [id]: rows });
+      console.log(`wrote ART.${id} to art-imported.js`);
+      if (args.includes('--gen')) process.exit(await regenerate([id]));
     }
   }
 }

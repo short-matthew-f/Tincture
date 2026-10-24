@@ -9,6 +9,7 @@
 import { h, raw, button } from './kit.js';
 import { unlockTag } from './workshop.js';
 import { gardenIcon } from './garden-art.js';
+import { LEVEL_BY_ID } from '../puzzles/garden-path.js';
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 const CSS = `
@@ -27,6 +28,7 @@ function injectCss() {
 
 function placeName(ctx, id) {
   const p = ctx.puzzles && ctx.puzzles.garden && ctx.puzzles.garden.PLACE_BY_ID[id];
+  if (!p && LEVEL_BY_ID[id]) return `Garden ${LEVEL_BY_ID[id].n} of the Garden Path`;
   return p ? p.name.replace(/^The /, 'the ') : 'the garden';
 }
 
@@ -43,7 +45,7 @@ function lineFor(ctx, sum) {
     const where = placeName(ctx, last.placeId);
     return parts.length ? `Last visit to ${where}: ${parts.join(' and ')}.` : `Last visit to ${where}: ${plural(last.plants, 'plant', 'plants')} gathered.`;
   }
-  return 'Five places to wander, with no clock. A harvest before dusk, if you like.';
+  return 'Five places to wander, with no clock, and a Garden Path of 108 gardens to walk.';
 }
 
 function dots(ctx, state) {
@@ -64,11 +66,11 @@ export function gardenCardHtml(ctx, state) {
 <div class="pz-tiertag">${unlockTag(ctx, 'garden', { cls: 'pz-tag' })}</div>
 </div>`;
   }
-  const stats = sum.visits ? `${plural(sum.visits, 'visit', 'visits')}${sum.spindles ? ` · ${plural(sum.spindles, 'spindle', 'spindles')}` : ''}` : '';
+  const stats = sum.path && sum.path.done ? `Path ${sum.path.done} / ${sum.path.total}` : sum.visits ? `${plural(sum.visits, 'visit', 'visits')}${sum.spindles ? ` · ${plural(sum.spindles, 'spindle', 'spindles')}` : ''}` : '';
   return h`<div class="card gd-card" id="pz-garden" data-coach="garden-card">
 <div class="row between"><div class="h3">Dye Garden</div>${stats ? h`<span class="chip">${stats}</span>` : ''}</div>
 <div class="gd-row"><span class="gd-ic">${raw(gardenIcon(30))}</span><div class="grow"><div class="hint">${lineFor(ctx, sum)}</div>${dots(ctx, state)}</div></div>
-${button(sum.wandering ? 'Keep wandering' : 'Go to the garden', { variant: 'primary', block: true, attrs: { 'data-action': 'open-garden' } })}
+${button(sum.wandering ? (sum.wandering.mode === 'path' ? 'Keep going on the path' : 'Keep wandering') : 'Go to the garden', { variant: 'primary', block: true, attrs: { 'data-action': 'open-garden' } })}
 </div>`;
 }
 
@@ -83,9 +85,9 @@ export function gardenMapCardHtml(ctx, state) {
     return r ? r.name : id;
   };
   const names = G.PLACES.map((p) => `the ${regionName(G.PLACE_REGION[p.id])}`);
-  const where = `Five places to gather dye plants, by ${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}.`;
+  const where = `Five places to gather dye plants, by ${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}, and the Garden Path's 108 gardens.`;
   const action = sum.open
-    ? button(sum.wandering ? 'Keep wandering' : 'Go to the Dye Garden', { block: true, attrs: { 'data-action': 'open-garden', 'data-coach': 'map-garden' } })
+    ? button(sum.wandering ? (sum.wandering.mode === 'path' ? 'Keep going on the path' : 'Keep wandering') : 'Go to the Dye Garden', { block: true, attrs: { 'data-action': 'open-garden', 'data-coach': 'map-garden' } })
     : h`<div class="pz-tiertag">${unlockTag(ctx, 'garden', { cls: 'pz-tag' })}</div>`;
   return h`<div class="card gd-card" id="mp-garden">
 <div class="gd-row"><span class="gd-ic">${raw(gardenIcon(30))}</span><div class="grow"><div class="h3">Dye Garden</div>

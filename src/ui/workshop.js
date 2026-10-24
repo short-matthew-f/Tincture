@@ -622,6 +622,40 @@ ${[[30, '#8BABC5', 9], [54, '#D39B2A', 5], [78, '#758054', 12]].map(([x, c, hh])
 </g>`;
 
 /** The Winding Room's swift (only drawn in the unlock sheet): a wooden yarn swift with a loop of yarn, two twisted hanks beside it. */
+/** The Tangle Basket (only drawn in the unlock sheet): a wicker basket with loops of yarn spilling over the rim, a spool beside it. */
+const TB_YARN = (d, c, e) => `<path d="${d}" fill="none" stroke="${e}" stroke-width="7" stroke-linecap="round"/><path d="${d}" fill="none" stroke="${c}" stroke-width="5" stroke-linecap="round"/>`;
+const artYarnBasket = (f) => `<g filter="url(#${f})">
+<rect x="6" y="92" width="108" height="8" rx="2" fill="#7B5236"/>
+<path d="M18 54 H94 L87 92 H25 Z" fill="#B48A5A"/>
+<path d="M20 64 H92 M22 74 H90 M24 84 H88" stroke="#8E6A42" stroke-width="2.4" fill="none"/>
+<path d="M34 54 L36 92 M50 54 V92 M64 54 V92 M78 54 L76 92" stroke="#A47E50" stroke-width="2" fill="none"/>
+</g>
+<g filter="url(#${f})">
+${TB_YARN('M28 56C20 30 46 16 50 34S70 28 66 52', '#B9473A', '#7A2F27')}
+${TB_YARN('M44 56C44 22 78 14 80 34S92 50 100 70', '#34588E', '#22395C')}
+${TB_YARN('M60 56C62 38 40 34 34 22', '#D6A92E', '#8C6E1E')}
+${TB_YARN('M74 56C70 42 86 40 82 26', '#5F8A3A', '#3D5925')}
+<rect x="14" y="49" width="84" height="8" rx="4" fill="#CFAA77"/>
+<rect x="100" y="76" width="14" height="4" rx="2" fill="#B38A57"/><rect x="100" y="88" width="14" height="4" rx="2" fill="#B38A57"/><rect x="102" y="80" width="10" height="8" rx="2" fill="#B8467A"/>
+</g>`;
+
+/** The Hoop (only drawn in the unlock sheet): a wooden embroidery hoop on a stand, yarn tied across it, two strands hooked. */
+const artHoop = (f) => `<g filter="url(#${f})">
+<rect x="6" y="92" width="108" height="8" rx="2" fill="#7B5236"/>
+<path d="M54 92 L58 80 H62 L66 92 Z" fill="#8E6A42"/>
+<circle cx="60" cy="46" r="36" fill="#EFE6D2"/>
+<circle cx="60" cy="46" r="36" fill="none" stroke="#C9A06A" stroke-width="7"/>
+<circle cx="60" cy="46" r="39.5" fill="none" stroke="#8E6A42" stroke-width="1"/>
+<rect x="56" y="4" width="8" height="9" rx="2" fill="#D7AE52"/>
+</g>
+<g filter="url(#${f})">
+${TB_YARN('M30 24C46 40 64 52 92 58', '#B9473A', '#7A2F27')}
+${TB_YARN('M34 72C50 54 60 40 76 16', '#34588E', '#22395C')}
+${TB_YARN('M26 52C44 50 72 40 94 38', '#D6A92E', '#8C6E1E')}
+${TB_YARN('M55 44C58 46 61 47 64 47', '#B9473A', '#7A2F27')}
+${[[30, 24, '#B9473A'], [92, 58, '#B9473A'], [34, 72, '#34588E'], [76, 16, '#34588E'], [26, 52, '#D6A92E'], [94, 38, '#D6A92E']].map(([x, y, c]) => `<circle cx="${x}" cy="${y}" r="4.2" fill="${c}" stroke="rgba(42,30,20,.45)" stroke-width="1"/>`).join('')}
+</g>`;
+
 const SK_HANK = 'M6 20C6 7 25 5 33 15 41 5 60 7 60 20S41 35 33 25C25 35 6 33 6 20Z';
 const artSwift = (f) => `<g filter="url(#${f})">
 <rect x="6" y="92" width="108" height="8" rx="2" fill="#7B5236"/>
@@ -670,6 +704,14 @@ const UNLOCK_INFO = {
   skeins: {
     object: 'swift', short: 'Winding Room', says: 'Stack yarn in your own colors on a table of pegs: ten of one color on top twist into a hank.',
     vb: '0 0 120 104', art: (f) => artSwift(f),
+  },
+  tangle: {
+    object: 'yarn-basket', short: 'Tangle Basket', says: 'Pull loopy strands of yarn out of a heap, one free strand at a time, and wind them onto spools in your own colors.',
+    vb: '0 0 120 104', art: (f) => artYarnBasket(f),
+  },
+  hoop: {
+    object: 'embroidery-hoop', short: 'The Hoop', says: 'Untangle yarn tied across an embroidery hoop: carry a knot to another peg until each strand crosses nothing and comes free.',
+    vb: '0 0 120 104', art: (f) => artHoop(f),
   },
   commissions: {
     object: 'commissions', short: 'Commissions', says: 'Big projects for the town, delivered a few jars at a time, with trophies for the workshop.',
@@ -1766,6 +1808,8 @@ const UNLOCK_LABEL = {
   garden: 'the Dye Garden',
   skeins: 'the Winding Room',
   lift: 'the Lifting Table',
+  tangle: 'the Tangle Basket',
+  hoop: 'the Hoop',
 };
 
 /** sim.unlocks.status for one id (null when the sim has no such unlock). */
@@ -1935,6 +1979,8 @@ export function unlockCeremony(objectId) {
     else if (key === 'garden-basket') glow(195, 220, 90, 80, 500);
     else if (key === 'swift') glow(195, 220, 90, 80, 500);
     else if (key === 'easel') glow(195, 220, 90, 80, 500);
+    else if (key === 'yarn-basket') glow(195, 220, 90, 80, 500);
+    else if (key === 'embroidery-hoop') glow(195, 220, 90, 80, 500);
     else glow(218, 64, 24, 36, 500);
   } else if (key === 'shelf') {
     audio().knock();
@@ -2036,6 +2082,17 @@ export function unlockCeremony(objectId) {
     glow(195, 220, 110, 96, 1200);
     audio().bell();
     setTimeout(() => audio().cork(), 420);
+  } else if (key === 'yarn-basket') {
+    // The Tangle Basket has no object in the scene: a soft glow over the bench, a bell and a strand plucked free.
+    glow(195, 220, 110, 96, 1200);
+    audio().bell();
+    setTimeout(() => { audio().tink(392); audio().tink(587, 0.12); }, 380);
+  } else if (key === 'embroidery-hoop') {
+    // The Hoop has no object in the scene: a soft glow over the bench, a bell and a knot retied, then a strand slipping free.
+    glow(195, 220, 110, 96, 1200);
+    audio().bell();
+    setTimeout(() => { audio().tink(523); audio().tink(392, 0.1); }, 380);
+    setTimeout(() => audio().chain(2), 720);
   } else {
     const scroll = svgNode('g', { transform: 'translate(205 40)' });
     scroll.innerHTML = artJobs('ws-cut');

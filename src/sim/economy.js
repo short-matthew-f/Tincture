@@ -159,7 +159,16 @@ export function stationOutput(kind, level, id) {
   let b = def.baseOutput;
   if (k === 'source' && id && SOURCES_BY_ID[id]) b = SOURCES_BY_ID[id].baseRate;
   if (k === 'grinder' && id && GRINDER_KINDS_BY_ID[id]) b = GRINDER_KINDS_BY_ID[id].throughput;
-  return b * L * Math.pow(2, milestonesPassed(L));
+  return b * L * milestoneMult(L);
+}
+
+// 2^milestonesPassed(L), remembered for whole levels like growthPow (same value).
+const MILESTONE_MULT = [];
+function milestoneMult(L) {
+  if (!Number.isInteger(L) || L > 4096) return Math.pow(2, milestonesPassed(L));
+  let v = MILESTONE_MULT[L];
+  if (v === undefined) { v = Math.pow(2, milestonesPassed(L)); MILESTONE_MULT[L] = v; }
+  return v;
 }
 
 /** The next milestone level above `level`, or null after the last. */
@@ -290,6 +299,25 @@ export function recipeShares(colorId) {
 
 const SHARES_CACHE = new Map();
 
+/**
+ * recipeShares(colorId) as parallel lists {keys: [pigment], vals: [share]} in the
+ * object's key order (cached per id; read-only), or null. Index loops over plain
+ * arrays: destructuring frozen [pigment, share] pairs was the slowest part of rates().
+ */
+function shareEntries(colorId) {
+  if (typeof colorId !== 'string') return toLists(recipeShares(colorId));
+  let e = ENTRIES_CACHE.get(colorId);
+  if (e === undefined) {
+    e = toLists(recipeShares(colorId));
+    ENTRIES_CACHE.set(colorId, e);
+  }
+  return e;
+}
+function toLists(sh) {
+  return sh ? { keys: Object.keys(sh), vals: Object.values(sh) } : null;
+}
+const ENTRIES_CACHE = new Map();
+
 function computeRecipeShares(colorId) {
   const d = colorDef(colorId);
   const recipe = d?.recipe;
@@ -320,6 +348,61 @@ function computeRecipeShares(colorId) {
  */
 export function rates(state, now) {
   const pm = productionMultiplier(state, now);
+  const st = state?.stations;
+  if (!st || typeof st !== 'object') return computeRates(state, pm);
+  // The flow meter, the Next button, income and every factory sub-step ask for the
+  // rates of an unchanged workshop many times in a row (about 3 of 4 calls repeat the
+  // previous one). The result is a function of a few numbers and ids (ratesKey), so it
+  // is remembered per stations object and reused while that key is unchanged. Callers
+  // share the returned object and must only read it (freezing it cost 7% of a run).
+  const key = ratesKey(state, st, pm);
+  const memo = RATES_MEMO.get(st);
+  if (memo && sameKey(memo.key, key)) return memo.value;
+  const saved = key.slice(); // the scratch key is reused by the next call
+  const value = computeRates(state, pm);
+  RATES_MEMO.set(st, { key: saved, value });
+  return value;
+}
+
+const RATES_MEMO = new WeakMap();
+const RATES_KEY = []; // scratch, refilled by every ratesKey() call
+const HOLE = Object.freeze({});
+
+/** Every input rates() reads besides frozen content: pm, then each station's level/kind/recipe/essence. */
+function ratesKey(state, st, pm) {
+  const k = RATES_KEY;
+  k.length = 0;
+  k.push(pm, st.shop?.level);
+  const sources = st.sources;
+  if (sources && typeof sources === 'object') {
+    for (const id in sources) if (Object.hasOwn(sources, id)) k.push(id, sources[id]?.level);
+  }
+  k.push(HOLE); // end of sources
+  const grinders = st.grinders ?? [];
+  k.push(grinders.length);
+  for (const g of grinders) k.push(g?.level, g?.kind);
+  const mixers = st.mixers ?? [];
+  k.push(mixers.length);
+  for (let i = 0; i < mixers.length; i++) {
+    const m = mixers[i];
+    if (!m) k.push(m, null, null);
+    else k.push(m.level, m.recipe, m.recipe ? essenceOf(state, m.recipe) : null);
+  }
+  const fleet = st.fleet ?? [];
+  k.push(fleet.length);
+  for (const v of fleet) k.push(v?.kind, v?.level);
+  return k;
+}
+
+function sameKey(a, b) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+function computeRates(state, pm) {
+  // Plain loops over cached pigment / share lists (shareEntries); the arithmetic and
+  // the order of every sum are the same as the map/forEach version this replaced.
   const st = state?.stations ?? {};
   const raw = {};
   for (const [id, s] of Object.entries(st.sources ?? {})) {
@@ -329,53 +412,66 @@ export function rates(state, now) {
   let grinderCap = 0;
   for (const g of st.grinders ?? []) grinderCap += stationOutput('grinder', g.level, g.kind) * pm;
 
+  const ppj = MIXER.pigmentPerJar;
   const mixers = st.mixers ?? [];
-  const want = mixers.map((m) => {
-    if (!m || !m.recipe) return 0;
-    if (!recipeShares(m.recipe)) return 0;
-    return stationOutput('mixer', m.level) * pm * (1 + ESSENCE_STEP * essenceOf(state, m.recipe));
-  });
+  const n = mixers.length;
+  const want = new Array(n);
+  const shares = new Array(n);
+  let wantAny = false;
+  for (let i = 0; i < n; i++) {
+    const m = mixers[i];
+    const e = m && m.recipe ? shareEntries(m.recipe) : null;
+    want[i] = e ? stationOutput('mixer', m.level) * pm * (1 + ESSENCE_STEP * essenceOf(state, m.recipe)) : 0;
+    shares[i] = e;
+    if (want[i] > 0) wantAny = true;
+  }
   const demand = {};
-  mixers.forEach((m, i) => {
-    if (!want[i]) return;
-    const sh = recipeShares(m.recipe);
-    for (const [p, w] of Object.entries(sh)) demand[p] = (demand[p] ?? 0) + want[i] * w * MIXER.pigmentPerJar;
-  });
+  for (let i = 0; i < n; i++) {
+    if (!want[i]) continue;
+    const { keys, vals } = shares[i];
+    for (let k = 0; k < keys.length; k++) demand[keys[k]] = (demand[keys[k]] ?? 0) + want[i] * vals[k] * ppj;
+  }
   const factor = {};
   const rawLimited = [];
-  for (const [p, d] of Object.entries(demand)) {
+  for (const p in demand) {
+    const d = demand[p];
     const sup = raw[p] ?? 0;
     factor[p] = d > 0 ? Math.min(1, sup / d) : 1;
     if (factor[p] < 1) rawLimited.push(p);
   }
-  const f = mixers.map((m, i) => {
-    if (!want[i]) return 0;
-    let x = 1;
-    for (const p of Object.keys(recipeShares(m.recipe))) x = Math.min(x, factor[p] ?? 1);
-    return x;
-  });
+  const f = new Array(n);
   let used = 0;
-  mixers.forEach((m, i) => {
-    if (!want[i]) return;
-    const sh = recipeShares(m.recipe);
-    for (const w of Object.values(sh)) used += f[i] * want[i] * w * MIXER.pigmentPerJar;
-  });
+  for (let i = 0; i < n; i++) {
+    if (!want[i]) { f[i] = 0; continue; }
+    let x = 1;
+    const keys = shares[i].keys;
+    for (let k = 0; k < keys.length; k++) x = Math.min(x, factor[keys[k]] ?? 1);
+    f[i] = x;
+  }
+  for (let i = 0; i < n; i++) {
+    if (!want[i]) continue;
+    const vals = shares[i].vals;
+    for (let k = 0; k < vals.length; k++) used += f[i] * want[i] * vals[k] * ppj;
+  }
   const g = used > 0 ? Math.min(1, grinderCap / used) : 1;
-  const mixerJars = mixers.map((m, i) => num(want[i] * f[i] * g));
+  const mixerJars = new Array(n);
+  for (let i = 0; i < n; i++) mixerJars[i] = num(want[i] * f[i] * g);
   const pigment = {};
   const byColor = {};
-  mixers.forEach((m, i) => {
-    if (!mixerJars[i]) return;
-    byColor[m.recipe] = (byColor[m.recipe] ?? 0) + mixerJars[i];
-    for (const [p, w] of Object.entries(recipeShares(m.recipe))) {
-      pigment[p] = (pigment[p] ?? 0) + mixerJars[i] * w * MIXER.pigmentPerJar;
-    }
-  });
-  const jars = mixerJars.reduce((s, x) => s + x, 0);
+  let jars = 0;
+  for (let i = 0; i < n; i++) {
+    const mj = mixerJars[i];
+    jars += mj;
+    if (!mj) continue;
+    const recipe = mixers[i].recipe;
+    byColor[recipe] = (byColor[recipe] ?? 0) + mj;
+    const { keys, vals } = shares[i];
+    for (let k = 0; k < keys.length; k++) pigment[keys[k]] = (pigment[keys[k]] ?? 0) + mj * vals[k] * ppj;
+  }
   const shop = shopSellRate(state);
   const fleet = fleetSellRate(state);
   let limit = null;
-  if (jars > 0 || want.some((x) => x > 0)) {
+  if (jars > 0 || wantAny) {
     if (rawLimited.length) limit = 'raw';
     else if (g < 1) limit = 'grinder';
     else limit = 'mixer';
@@ -410,38 +506,75 @@ export function incomeRate(state, now) {
 
 /** Every upgrade she could buy right now: [{kind, id|index, cost, label}]. */
 export function upgradeOptions(state) {
-  const st = state?.stations ?? {};
   const out = [];
-  for (const [id, s] of Object.entries(st.sources ?? {})) {
-    const L = s?.level ?? 0;
-    const name = SOURCES_BY_ID[id]?.name ?? id;
-    out.push({ kind: 'source', id, cost: stationCost('source', L, id), label: L > 0 ? `${name} to level ${L + 1}` : `Build ${name}` });
+  scanOptions(state, ALL_KINDS, (kind, ref, cost) => { if (Number.isFinite(cost)) out.push(optionOf(state, kind, ref, cost)); });
+  return out;
+}
+
+const ALL_KINDS = Object.freeze({ source: true, grinder: true, mixer: true, vat: true, shop: true, fleet: true, cellar: true });
+
+/**
+ * Visits every upgrade of the given kinds in upgradeOptions order as (kind, ref, cost),
+ * ref = source id or station index. No labels: the flow meter and cheapestUpgrade price
+ * every station on each call (thousands of times per simulated day) and label only
+ * their pick (optionOf).
+ */
+function scanOptions(state, kinds, visit) {
+  const st = state?.stations ?? {};
+  if (kinds.source) for (const [id, s] of Object.entries(st.sources ?? {})) visit('source', id, stationCost('source', s?.level ?? 0, id));
+  if (kinds.grinder) (st.grinders ?? []).forEach((g, index) => visit('grinder', index, stationCost('grinder', g.level)));
+  if (kinds.mixer) (st.mixers ?? []).forEach((m, index) => visit('mixer', index, stationCost('mixer', m.level)));
+  if (kinds.vat) (st.vats ?? []).forEach((v, index) => visit('vat', index, stationCost('vat', v.level)));
+  if (kinds.shop && st.shop) visit('shop', null, stationCost('shop', st.shop.level ?? 1));
+  if (kinds.fleet) (st.fleet ?? []).forEach((v, index) => visit('fleet', index, stationCost('vehicle', v.level, v.kind)));
+  if (kinds.cellar) visit('cellar', null, stationCost('cellar', state?.cellarLevel ?? 1));
+}
+
+/** One upgradeOptions entry: {kind, id|index, cost, label}. */
+function optionOf(state, kind, ref, cost) {
+  const st = state?.stations ?? {};
+  switch (kind) {
+    case 'source': {
+      const L = st.sources[ref]?.level ?? 0;
+      const name = SOURCES_BY_ID[ref]?.name ?? ref;
+      return { kind, id: ref, cost, label: L > 0 ? `${name} to level ${L + 1}` : `Build ${name}` };
+    }
+    case 'grinder': {
+      const g = st.grinders[ref];
+      const name = GRINDER_KINDS_BY_ID[g.kind]?.name ?? 'Grinder';
+      return { kind, index: ref, cost, label: `${name} to level ${g.level + 1}` };
+    }
+    case 'mixer': return { kind, index: ref, cost, label: `Mixer ${ref + 1} to level ${st.mixers[ref].level + 1}` };
+    case 'vat': return { kind, index: ref, cost, label: `Bigger jars to level ${st.vats[ref].level + 1}` };
+    case 'shop': return { kind, cost, label: `Shop counter to level ${(st.shop.level ?? 1) + 1}` };
+    case 'fleet': {
+      const v = st.fleet[ref];
+      const name = VEHICLES_BY_ID[v.kind]?.name ?? 'Vehicle';
+      return { kind, index: ref, cost, label: `${name} to level ${v.level + 1}` };
+    }
+    default: {
+      const cl = state?.cellarLevel ?? 1;
+      return { kind: 'cellar', cost, label: `Cellar to level ${cl + 1}` };
+    }
   }
-  (st.grinders ?? []).forEach((g, index) => {
-    const name = GRINDER_KINDS_BY_ID[g.kind]?.name ?? 'Grinder';
-    out.push({ kind: 'grinder', index, cost: stationCost('grinder', g.level), label: `${name} to level ${g.level + 1}` });
+}
+
+/** The cheapest finite option of `kinds` passing `keep(kind, ref)` (first on ties), labeled, or null. */
+function cheapestOption(state, kinds, keep) {
+  let bk = null;
+  let br = null;
+  let bc = Infinity;
+  scanOptions(state, kinds, (kind, ref, cost) => {
+    if (!Number.isFinite(cost) || (bk !== null && !(cost < bc))) return;
+    if (keep && !keep(kind, ref)) return;
+    bk = kind; br = ref; bc = cost;
   });
-  (st.mixers ?? []).forEach((m, index) => {
-    out.push({ kind: 'mixer', index, cost: stationCost('mixer', m.level), label: `Mixer ${index + 1} to level ${m.level + 1}` });
-  });
-  (st.vats ?? []).forEach((v, index) => {
-    out.push({ kind: 'vat', index, cost: stationCost('vat', v.level), label: `Bigger jars to level ${v.level + 1}` });
-  });
-  if (st.shop) out.push({ kind: 'shop', cost: stationCost('shop', st.shop.level ?? 1), label: `Shop counter to level ${(st.shop.level ?? 1) + 1}` });
-  (st.fleet ?? []).forEach((v, index) => {
-    const name = VEHICLES_BY_ID[v.kind]?.name ?? 'Vehicle';
-    out.push({ kind: 'fleet', index, cost: stationCost('vehicle', v.level, v.kind), label: `${name} to level ${v.level + 1}` });
-  });
-  const cl = state?.cellarLevel ?? 1;
-  out.push({ kind: 'cellar', cost: stationCost('cellar', cl), label: `Cellar to level ${cl + 1}` });
-  return out.filter((o) => Number.isFinite(o.cost));
+  return bk === null ? null : optionOf(state, bk, br, bc);
 }
 
 /** Cheapest upgrade across sources/grinders/mixers/vats/shop/fleet/cellar. */
 export function cheapestUpgrade(state) {
-  let best = null;
-  for (const o of upgradeOptions(state)) if (!best || o.cost < best.cost) best = o;
-  return best ?? { kind: 'shop', cost: stationCost('shop', 1), label: 'Shop counter' };
+  return cheapestOption(state, ALL_KINDS, null) ?? { kind: 'shop', cost: stationCost('shop', 1), label: 'Shop counter' };
 }
 
 /**
@@ -474,11 +607,11 @@ export function tutorialReward(state) {
 // Flow meter
 // ---------------------------------------------------------------------------
 
-function cheapestOf(list) {
-  let best = null;
-  for (const o of list) if (Number.isFinite(o.cost) && (!best || o.cost < best.cost)) best = o;
-  return best;
-}
+const KINDS_SOURCE = Object.freeze({ source: true });
+const KINDS_GRINDER = Object.freeze({ grinder: true });
+const KINDS_MIXER = Object.freeze({ mixer: true });
+const KINDS_SHIP = Object.freeze({ shop: true, fleet: true });
+const KINDS_STORE = Object.freeze({ vat: true, cellar: true });
 
 /**
  * flowMeter(state) -> {make:{rate}, store:{capacity, fillMs, windowMs, targetMs},
@@ -503,7 +636,7 @@ export function flowMeter(state, now) {
   if (r.jars > 0) {
     for (const k of ['make', 'ship', 'store']) if (scores[k] < scores[weakest] - 1e-9) weakest = k;
   }
-  const opts = upgradeOptions(state);
+  // The cheapest option of the weakest stage (the order and ties of upgradeOptions).
   let suggestion = null;
   if (weakest === 'make') {
     const anyRecipe = (state?.stations?.mixers ?? []).some((m) => m && m.recipe);
@@ -511,16 +644,16 @@ export function flowMeter(state, now) {
       suggestion = { label: 'Choose a recipe for a mixer', cost: 0, kind: 'assign', index: 0 };
     } else if (r.limit === 'raw') {
       const src = r.rawLimited.map((p) => Object.keys(state.stations.sources).find((id) => (SOURCES_BY_ID[id]?.pigment ?? id) === p)).filter(Boolean);
-      suggestion = cheapestOf(opts.filter((o) => o.kind === 'source' && src.includes(o.id)));
+      suggestion = cheapestOption(state, KINDS_SOURCE, (kind, id) => src.includes(id));
     } else if (r.limit === 'grinder') {
-      suggestion = cheapestOf(opts.filter((o) => o.kind === 'grinder'));
+      suggestion = cheapestOption(state, KINDS_GRINDER, null);
     } else {
-      suggestion = cheapestOf(opts.filter((o) => o.kind === 'mixer' && state.stations.mixers[o.index]?.recipe));
+      suggestion = cheapestOption(state, KINDS_MIXER, (kind, index) => state.stations.mixers[index]?.recipe);
     }
   } else if (weakest === 'ship') {
-    suggestion = cheapestOf(opts.filter((o) => o.kind === 'shop' || o.kind === 'fleet'));
+    suggestion = cheapestOption(state, KINDS_SHIP, null);
   } else {
-    suggestion = cheapestOf(opts.filter((o) => o.kind === 'vat' || o.kind === 'cellar'));
+    suggestion = cheapestOption(state, KINDS_STORE, null);
   }
   if (!suggestion) suggestion = cheapestUpgrade(state);
   return {

@@ -20,7 +20,7 @@ import {
   newState, nearestAt, wordsError, hookedPairs, canLiftOff,
 } from './rules.js';
 import { layout, plan, distTo, baseOrder, topAt, hookMarks } from './layout.js';
-import { LEVELS, MECHANICS, BANDS, levelById } from './levels.js';
+import { LEVELS, MECHANICS, CHAPTERS, levelById } from './levels.js';
 
 const KEY = 'tincture.proto.hoop';
 const HISTORY_SAVED = 300; // undo is unlimited in a session; the save keeps the last 300 steps
@@ -1500,7 +1500,7 @@ function thumb(Lv, size, st = newState(Lv)) {
   c.strokeStyle = '#C9A06A'; c.lineWidth = Math.max(2.5, size * 0.06); c.beginPath(); c.arc(cx, cy, R, 0, TAU); c.stroke();
   c.lineCap = 'round'; c.lineJoin = 'round';
   let lay;
-  try { lay = layout(Lv, st, { iters: 1500 }); } catch { return cv; }
+  try { lay = layout(Lv, st, { iters: 400, tol: 1e-5 }); } catch { return cv; }
   const T = (p) => [cx + p[0] * (R - 1), cy + p[1] * (R - 1)];
   const curves = {};
   for (const [i, pts] of Object.entries(lay.strands)) curves[i] = pts.map(T);
@@ -1522,12 +1522,12 @@ function openLevels() {
   box.innerHTML = '';
   const firstOf = {};
   LEVELS.forEach((Lv, i) => { for (const m of Lv.mechanics) if (!(m in firstOf)) firstOf[m] = i; });
-  BANDS.forEach((band, bi) => {
-    const to = bi + 1 < BANDS.length ? BANDS[bi + 1].from : LEVELS.length;
+  CHAPTERS.forEach((band, bi) => {
+    const to = bi + 1 < CHAPTERS.length ? CHAPTERS[bi + 1].from : LEVELS.length;
     if (band.from >= LEVELS.length) return;
     const h = document.createElement('h3');
     h.className = 'band';
-    h.textContent = band.name;
+    h.textContent = `${bi + 1} · ${band.name}`;
     const ul = document.createElement('ul');
     ul.className = 'lvls';
     for (let i = band.from; i < Math.min(to, LEVELS.length); i++) {

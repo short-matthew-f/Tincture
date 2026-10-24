@@ -101,6 +101,9 @@
   .jar.waiting .glass { box-shadow: inset 0 0 0 1.5px rgba(42,38,34,.34), 0 0 0 2px rgba(255,248,225,.35); }
   .jar.mystery .glass { background: repeating-linear-gradient(45deg, #D9C7A6 0 4px, #CDB894 4px 8px); }
   .jar.mystery .tint, .jar.mystery .band, .jar.mystery .gl { display: none !important; }
+  .jar.crock .glass { border-radius: 9px 9px 12px 12px; background: #EDE3CD; box-shadow: inset 0 0 0 2.5px #8E6A42, 0 2px 0 rgba(42,38,34,.18); }
+  .jar.crock .neck { left: 7px; right: 7px; background: #C9B08A; box-shadow: inset 0 0 0 1.5px #8E6A42; }
+  .jar.crock .glass::before { content: ''; position: absolute; left: 0; right: 0; top: 22%; height: 3px; background: rgba(62,106,158,.6); z-index: 3; }
   .jar.mystery .glass::after { content: '?'; position: absolute; inset: 0; display: grid; place-items: center; font: 400 18px var(--font-display); color: #6A5235; }
 
   /* message row */
@@ -183,7 +186,7 @@
   <header class="top">
     <a class="iconbtn" href="../" aria-label="Back to the prototypes">&#8592;</a>
     <button type="button" class="btn small levelbtn" id="levelsBtn" aria-haspopup="dialog">
-      <span class="no" id="lvNo">1/27</span><span class="nm" id="lvName">Morning sun</span><span class="chev" aria-hidden="true">&#9662;</span>
+      <span class="no" id="lvNo">1·1</span><span class="nm" id="lvName">Morning sun</span><span class="chev" aria-hidden="true">&#9662;</span>
     </button>
     <button type="button" class="btn small tog" id="soundBtn" aria-pressed="false" aria-label="Soft sounds"></button>
     <button type="button" class="btn small tog" id="glyphBtn" aria-pressed="true" aria-label="Color symbols"></button>
@@ -224,7 +227,7 @@
   <div class="panel">
     <button type="button" class="iconbtn x" data-close aria-label="Close">&#10005;</button>
     <h2 id="lvTitle">The gallery wall</h2>
-    <p class="hint" style="margin:0">Any painting, in any order.</p>
+    <p class="hint" style="margin:0">Any painting, in any order (in the game, each opens after the one before it).</p>
     <div class="settings">
       <button type="button" class="btn small" id="backMenuBtn">Back to solvable</button>
       <button type="button" class="btn small" id="restartBtn">Start this painting over</button>

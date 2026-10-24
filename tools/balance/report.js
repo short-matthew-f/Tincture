@@ -3,10 +3,38 @@
 // Difficulty tiers, Always-progress check, Gallery and Merge Shelf).
 // Medians over seeds; "—" when most runs never got there.
 
+import { createHash } from 'node:crypto';
 import { PROFILES, TIER_MINUTES } from './sim-player.js';
 
 export const PROFILE_ORDER = Object.freeze(['engaged', 'casual', 'forgetful']);
 export const TIER_ORDER = Object.freeze(['relaxed', 'steady', 'tricky', 'master']);
+
+// JSON with Infinity / NaN kept apart from null (worst gaps and windows can be Infinity).
+const exact = (k, v) => (typeof v === 'number' && !Number.isFinite(v) ? String(v) : v);
+const sha256 = (s) => createHash('sha256').update(s).digest('hex');
+
+/** sha256 of one value's JSON (non-finite numbers spelled out). */
+export function jsonDigest(value) {
+  return sha256(JSON.stringify(value, exact));
+}
+
+/**
+ * runsDigest(results) -> hex digest of run summaries in job order, without the
+ * wall-clock `ms` (and any `stateDigest`): equal digests mean every number the
+ * balance tables and tests read is identical. statesDigest(results) does the same
+ * for the final states (runJobs(jobs, {stateDigest: true})). tools/balance/digest.js
+ * prints both; engine speed-ups must leave them unchanged (TUNING.md "Speed").
+ */
+export function runsDigest(results) {
+  return sha256(results.map((r) => {
+    const { ms, stateDigest, ...rest } = r; // eslint-disable-line no-unused-vars
+    return jsonDigest(rest);
+  }).join('\n'));
+}
+
+export function statesDigest(results) {
+  return sha256(results.map((r) => r.stateDigest ?? '').join('\n'));
+}
 
 /** Every job for a report: each profile with and without puzzles, plus Casual at each tier. */
 export function jobsFor({ profiles = PROFILE_ORDER, seeds = 5, days = 21, tiers = true } = {}) {

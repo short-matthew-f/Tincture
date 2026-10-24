@@ -33,38 +33,54 @@
 //   bare (fully lifted).
 // - Key (level `locks`: [lane, row, col]): a lane is locked until the key cell
 //   (row, col) of the picture has been lifted.
+// - Crock ("!r5"): a stoneware jar too heavy for the bench. Once on the belt it
+//   stays there until it fills (it can never be parked).
+// - Left out (level `left`: jar tokens): jars already resting on the bench when
+//   the painting starts. Bring each back to the belt when its color shows.
 
 export const VERSION = 2;
 export const NUDGES = 1; // free extra bench spots per picture
 
 // ---------- level parsing ----------
 
-// Rows are run-length strings ("s5 r2 s5" = five s, two r, five s) or literal
-// runs of letters ("sssss rr sssss").
+// Rows are run-length strings ("s5 r2 s5" = five s, two r, five s), literal
+// runs of letters ("sssss rr sssss"), or both run together ("s5r2s5", "s3rrs2":
+// a letter, then how many of it when more than one).
 export function parseRow(str) {
   let out = '';
   for (const tok of str.trim().split(/\s+/)) {
-    const m = /^([a-z])(\d*)$/.exec(tok);
-    if (m) { out += m[1].repeat(m[2] ? +m[2] : 1); continue; }
-    if (/^[a-z]+$/.test(tok)) { out += tok; continue; }
-    throw new Error(`bad art token "${tok}"`);
+    if (!/^(?:[a-z]\d*)+$/.test(tok)) throw new Error(`bad art token "${tok}"`);
+    for (const m of tok.matchAll(/([a-z])(\d*)/g)) out += m[1].repeat(m[2] ? +m[2] : 1);
+  }
+  return out;
+}
+// The compact form of a row: each run as its letter, plus its length when over 1.
+export function rowString(row) {
+  let out = '';
+  for (let i = 0; i < row.length;) {
+    let j = i + 1;
+    while (j < row.length && row[j] === row[i]) j++;
+    out += row[i] + (j - i > 1 ? j - i : '');
+    i = j;
   }
   return out;
 }
 
-// A jar token: optional "?" (mystery), color, capacity, optional "+color capacity" (mixing).
+// A jar token: optional "?" (mystery), optional "!" (a crock), color, capacity,
+// optional "+color capacity" (mixing).
 export function parseJar(tok) {
-  const m = /^(\?)?([a-z])(\d+)(?:\+([a-z])(\d+))?$/.exec(tok);
+  const m = /^(\?)?(!)?([a-z])(\d+)(?:\+([a-z])(\d+))?$/.exec(tok);
   if (!m) throw new Error(`bad jar token "${tok}"`);
-  const j = { c: m[2], cap: +m[3] };
-  if (m[4]) {
-    if (m[4] === m[2]) throw new Error(`mixing jar "${tok}" needs two colors`);
-    j.c2 = m[4]; j.cap2 = +m[5];
+  const j = { c: m[3], cap: +m[4] };
+  if (m[5]) {
+    if (m[5] === m[3]) throw new Error(`mixing jar "${tok}" needs two colors`);
+    j.c2 = m[5]; j.cap2 = +m[6];
   }
   if (m[1]) j.q = true;
+  if (m[2]) j.heavy = true;
   return j;
 }
-export const jarToken = (j) => `${j.q ? '?' : ''}${j.c}${j.cap}${j.c2 ? `+${j.c2}${j.cap2}` : ''}`;
+export const jarToken = (j) => `${j.q ? '?' : ''}${j.heavy ? '!' : ''}${j.c}${j.cap}${j.c2 ? `+${j.c2}${j.cap2}` : ''}`;
 
 // A lane string: units separated by spaces; a unit is one jar, or two tied with "=".
 export function parseLane(str) {
@@ -84,7 +100,7 @@ export function laneString(lane) {
   return out.join(' ');
 }
 
-// def: { id, name, noun, art: [rows], slots, bench, cover?: [cols], queues?: [lane strings], locks?: [[lane,row,col]] }
+// def: { id, name, noun, art: [rows], slots, bench, cover?: [cols], queues?: [lane strings], locks?: [[lane,row,col]], left?: [jar tokens] }
 export function buildLevel(def) {
   const cells = def.art.map(parseRow);
   const H = cells.length, W = cells[0].length;
@@ -99,10 +115,17 @@ export function buildLevel(def) {
     if (!lanes[i] || r < 0 || r >= H || c < 0 || c >= W) throw new Error(`${def.id}: bad lock ${i},${r},${c}`);
     locks[i] = { r, c };
   }
+  const left = (def.left || []).map((t) => {
+    const j = parseJar(t);
+    if (j.q) throw new Error(`${def.id}: a jar left on the bench always shows its color`);
+    return j;
+  });
+  const bench = def.bench ?? 3;
+  if (left.length > bench) throw new Error(`${def.id}: more jars left out than bench spots`);
   return {
     id: def.id, name: def.name, noun: def.noun || def.name.toLowerCase(),
-    W, H, cells, colors, counts, lanes, cover, locks,
-    slots: def.slots ?? 4, bench: def.bench ?? 3,
+    W, H, cells, colors, counts, lanes, cover, locks, left,
+    slots: def.slots ?? 4, bench,
   };
 }
 
@@ -123,7 +146,7 @@ export function capacityByColor(lanes) {
 }
 
 export function capacitiesMatch(L) {
-  const cap = capacityByColor(L.lanes);
+  const cap = capacityByColor([...L.lanes, L.left || []]);
   const keys = new Set([...Object.keys(cap), ...Object.keys(L.counts)]);
   for (const k of keys) if ((cap[k] || 0) !== (L.counts[k] || 0)) return false;
   return true;
@@ -136,7 +159,9 @@ export function mechanicsOf(L) {
     if (j.q) out.add('mystery');
     if (j.link) out.add('linked');
     if (j.c2) out.add('mixing');
+    if (j.heavy) out.add('crock');
   }
+  if (L.left && L.left.length) out.add('leftover');
   if (L.cover.some(Boolean)) out.add('cloth');
   if (L.locks.some(Boolean)) out.add('key');
   return out;
@@ -155,7 +180,7 @@ export function newState(L) {
     v: VERSION, level: L.id,
     h: Array(L.W).fill(L.H),
     lp: L.lanes.map(() => 0),
-    belt: [], bench: [], shelf: [],
+    belt: [], bench: (L.left || []).map((j, k) => beltJar(`b.${k}`, j)), shelf: [],
     extra: 0, moves: 0,
   };
 }
@@ -201,7 +226,11 @@ export function canLift(L, s, j) {
 
 // ---------- the belt ----------
 
-const beltJar = (id, j) => (j.c2 ? { id, c: j.c, cap: j.cap, n: 0, c2: j.c2, cap2: j.cap2, n2: 0 } : { id, c: j.c, cap: j.cap, n: 0 });
+function beltJar(id, j) {
+  const out = j.c2 ? { id, c: j.c, cap: j.cap, n: 0, c2: j.c2, cap2: j.cap2, n2: 0 } : { id, c: j.c, cap: j.cap, n: 0 };
+  if (j.heavy) out.heavy = true;
+  return out;
+}
 const shelfJar = (j) => (j.c2 ? { id: j.id, c: j.c, cap: j.cap, c2: j.c2, cap2: j.cap2 } : { id: j.id, c: j.c, cap: j.cap });
 
 // Runs passes until one lifts nothing. Mutates s. Returns the events for the
@@ -250,7 +279,7 @@ export function legalMoves(L, s) {
     if (k && k <= free && laneOpen(L, s, i)) out.push({ t: 'place', i });
   }
   if (free > 0) for (let i = 0; i < s.bench.length; i++) out.push({ t: 'unpark', i });
-  if (s.bench.length < benchCap(L, s)) for (let i = 0; i < s.belt.length; i++) out.push({ t: 'park', i });
+  if (s.bench.length < benchCap(L, s)) for (let i = 0; i < s.belt.length; i++) if (!s.belt[i].heavy) out.push({ t: 'park', i });
   return out;
 }
 
@@ -267,6 +296,7 @@ export function blockedReason(L, s, m) {
     if (unitSize(L, s, m.i) > free) return free > 0 ? 'tied' : 'belt';
   }
   if (m.t === 'unpark' && s.belt.length >= L.slots) return 'belt';
+  if (m.t === 'park' && s.belt[m.i] && s.belt[m.i].heavy) return 'crock';
   if (m.t === 'park' && s.bench.length >= benchCap(L, s)) return 'bench';
   return null;
 }
@@ -298,7 +328,7 @@ export function apply(L, s, m) {
 }
 
 // Effective belt room if every belt jar that fits on the bench were rested.
-const reachRoom = (L, s) => L.slots - s.belt.length + Math.min(benchCap(L, s) - s.bench.length, s.belt.length);
+const reachRoom = (L, s) => L.slots - s.belt.length + Math.min(benchCap(L, s) - s.bench.length, s.belt.filter((j) => !j.heavy).length);
 
 // Stuck: nothing can lift, and nothing new can reach the belt, even after resting jars.
 export function isStuck(L, s) {
@@ -357,7 +387,7 @@ export function replay(L, moves, s = newState(L)) {
 
 // ---------- solver ----------
 
-const jarKey = (j) => `${j.c}${j.cap}.${j.n}${j.c2 ? `+${j.c2}${j.cap2}.${j.n2}` : ''}`;
+const jarKey = (j) => `${j.heavy ? '!' : ''}${j.c}${j.cap}.${j.n}${j.c2 ? `+${j.c2}${j.cap2}.${j.n2}` : ''}`;
 // Position only: the spare bench spot is left out, so a hint still finds its
 // place on the stored solution after a nudge.
 export function stateKey(s) {
@@ -622,11 +652,13 @@ export function intendedOrder(L, rng, { caps = CAPS, future = 0, link = 0, mix =
 // Deal ordered units into lanes. Each lane keeps the relative order, so the
 // intended order stays playable by construction. Locked lanes (the last
 // `locks` lanes) only take units from `lockFrom` on.
-export function dealLanes(units, lanes, rng, { locks = 0, lockFrom = 0 } = {}) {
+// `skip`: unit indexes that are not dealt (jars left on the bench; laneOf -1).
+export function dealLanes(units, lanes, rng, { locks = 0, lockFrom = 0, skip = null } = {}) {
   const out = Array.from({ length: lanes }, () => []);
   const first = Array(lanes).fill(-1);
   const laneOf = [];
   units.forEach((u, idx) => {
+    if (skip && skip.has(idx)) { laneOf.push(-1); return; }
     const ok = [...out.keys()].filter((i) => i < lanes - locks || idx >= lockFrom);
     const lens = ok.map((i) => out[i].length);
     const min = Math.min(...lens);
@@ -652,14 +684,41 @@ export function chooseKey(log, t, rng) {
   return pick(last, rng);
 }
 
-// opts: lanes, seed, caps, future, link, mix, mystery, locks.
-export function generateQueues(L, { lanes, seed, caps = CAPS, future = 0, link = 0, mix = 0, mystery = 0, locks = 0 }) {
+// Muslin for `n` columns: interior columns, at least three apart.
+export function chooseCloth(W, n, rng) {
+  const out = [];
+  for (let tries = 0; out.length < n && tries < 200; tries++) {
+    const c = 1 + Math.floor(rng() * Math.max(1, W - 2));
+    if (out.every((x) => Math.abs(x - c) >= 3)) out.push(c);
+  }
+  return out.sort((a, b) => a - b);
+}
+
+// opts: lanes, seed, caps, future, link, mix, mystery, locks; and
+//   cloth: muslin on this many columns (the generator picks them; a level's own
+//          `cover` wins), crock: the chance a jar the intended play never rests
+//          is a crock, left: jars left on the bench at the start.
+// Returns { queues, locks, cover, left, intended, moves }: moves = the intended
+// play as move strings (a solution by construction).
+export function generateQueues(L, { lanes, seed, caps = CAPS, future = 0, link = 0, mix = 0, mystery = 0, locks = 0, cloth = 0, crock = 0, left = 0 }) {
   for (let k = 0; k < 50; k++) {
     const rng = mulberry(seed * 1000 + k + 1);
-    const io = intendedOrder(L, rng, { caps, future, link, mix });
+    const cover = cloth && !L.cover.some(Boolean) ? chooseCloth(L.W, cloth, rng) : null;
+    const LC = cover ? { ...L, cover: L.cover.map((_, c) => cover.includes(c)) } : L;
+    // Jars left out take bench spots from the start, so the intended play keeps those free.
+    const io = intendedOrder(left ? { ...LC, bench: LC.bench - left } : LC, rng, { caps, future, link, mix });
     if (!io) continue;
+    let skip = null;
+    if (left) {
+      const n = io.units.length, lo = Math.floor(n * 0.12), hi = Math.floor(n * 0.6);
+      const pool = [];
+      for (let i = lo; i < hi; i++) if (io.units[i].length === 1) pool.push(i);
+      if (pool.length < left) continue;
+      skip = new Set();
+      while (skip.size < left) skip.add(pool[Math.floor(rng() * pool.length)]);
+    }
     const lockFrom = Math.floor(io.units.length * (0.3 + rng() * 0.2));
-    const dealt = dealLanes(io.units, lanes, rng, { locks, lockFrom });
+    const dealt = dealLanes(io.units, lanes, rng, { locks, lockFrom, skip });
     if (dealt.lanes.some((l) => !l.length)) continue;
     const lockList = [];
     for (let i = lanes - locks; i < lanes; i++) {
@@ -675,9 +734,39 @@ export function generateQueues(L, { lanes, seed, caps = CAPS, future = 0, link =
         }
       }
     }
-    // The intended play, as moves: a solution by construction.
-    const moves = io.acts.map((a) => (a.t === 'place' ? `L${dealt.laneOf[a.u]}` : encodeMove(a)));
-    return { queues: dealt.lanes.map(laneString), locks: lockList, intended: io.units.reduce((a, u) => a + u.length, 0), moves };
+    const leftOf = new Map(skip ? [...skip].sort((a, b) => a - b).map((u, i) => [u, i]) : []);
+    const leftJars = [...leftOf.keys()].map((u) => ({ ...io.units[u][0] }));
+    // The intended play on the dealt level, as moves: a solution by construction.
+    const real = { ...LC, lanes: dealt.lanes, locks: dealt.lanes.map((_, i) => { const x = lockList.find((l) => l[0] === i); return x ? { r: x[1], c: x[2] } : null; }), left: leftJars };
+    const moves = [];
+    const parked = new Set();
+    // Jars left out that are still resting from the start: the intended play's
+    // bench never held those, so its bench indexes skip them.
+    const resting = new Set(leftJars.map((_, k) => `b.${k}`));
+    let s = newState(real);
+    for (const a of io.acts) {
+      let m;
+      if (a.t === 'place' && leftOf.has(a.u)) {
+        const id = `b.${leftOf.get(a.u)}`;
+        resting.delete(id);
+        m = { t: 'unpark', i: s.bench.findIndex((j) => j.id === id) };
+      } else if (a.t === 'place') m = { t: 'place', i: dealt.laneOf[a.u] };
+      else if (a.t === 'park') { m = { t: 'park', i: 0 }; parked.add(s.belt[0].id); }
+      else m = { t: 'unpark', i: s.bench.map((j, i) => [j, i]).filter(([j]) => !resting.has(j.id))[a.i][1] };
+      moves.push(encodeMove(m));
+      try { s = apply(real, s, m).state; } catch { s = null; break; }
+    }
+    if (!s || !isDone(s)) continue;
+    // Crocks: only jars the intended play never rests (single colors, lane jars).
+    if (crock) {
+      dealt.lanes.forEach((lane, i) => lane.forEach((j, p) => {
+        if (!j.c2 && !parked.has(`${i}.${p}`) && rng() < crock) j.heavy = true;
+      }));
+    }
+    return {
+      queues: dealt.lanes.map(laneString), locks: lockList, cover, left: leftJars.map(jarToken),
+      intended: io.units.reduce((a, u) => a + u.length, 0), moves,
+    };
   }
   return null;
 }
@@ -876,7 +965,9 @@ export function* backToSolvableSteps(L, states, { cap = BACK_CAP, budget = BACK_
 // A short fingerprint of everything that shapes play, so a save made on an
 // older version of a picture is set aside instead of misread.
 export function levelSig(L) {
-  const src = JSON.stringify([L.cells, L.lanes.map(laneString), L.locks, L.cover, L.slots, L.bench]);
+  const parts = [L.cells, L.lanes.map(laneString), L.locks, L.cover, L.slots, L.bench];
+  if (L.left && L.left.length) parts.push(L.left.map(jarToken)); // only when used, so older signatures stay
+  const src = JSON.stringify(parts);
   let h = 0x811c9dc5;
   for (let i = 0; i < src.length; i++) { h ^= src.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
   return h.toString(36);

@@ -7,8 +7,10 @@ import {
   levelSig, groupOf, mulberry, pickStrand, validState, VERSION,
 } from '../tangle/rules.js';
 import { makeHeap, dealLevel, candidate, ancestors, APART, OVER_MAX, R_MIN } from '../tangle/gen.js';
-import { LEVELS, LEVEL_DEFS, MECHANICS, BANDS, readSave, levelById } from '../tangle/levels.js';
+import { readFileSync } from 'node:fs';
+import { LEVELS, LEVEL_DEFS, MECHANICS, BANDS, CHAPTERS, readSave, levelById } from '../tangle/levels.js';
 import { HEAPS } from '../tangle/heaps.js';
+import { heapsSource, packPoints } from '../tangle/gen-levels.mjs';
 import { fitView, clampView, toBoard, toScreen, zoomAt, panBy, pinchView, reachUnits, ZMAX } from '../tangle/view.js';
 
 // Straight strands and simple waves make hand-built heaps easy to reason about.
@@ -325,14 +327,15 @@ test('solver: finds an order, proves a dead end, and hints follow the stored sol
 // ---------- the levels ----------
 
 test('the baskets: generated, balanced, one new thing at a time, deep ones late', () => {
-  assert.ok(LEVELS.length >= 26 && LEVELS.length <= 30, `${LEVELS.length} baskets`);
+  assert.ok(LEVELS.length >= 100 && LEVELS.length <= 110, `${LEVELS.length} baskets`);
   assert.equal(LEVEL_DEFS.length, LEVELS.length);
   assert.equal(new Set(LEVELS.map((L) => L.id)).size, LEVELS.length);
   for (const L of LEVELS) {
     assert.ok(unitsBalanced(L), `${L.id}: every color fills whole spools`);
     for (const s of L.strands) assert.ok(COLORS[s.c] && (!s.c2 || COLORS[s.c2]));
     for (const m of L.mechanics) assert.ok(MECHANICS[m], `${L.id}: ${m} has an intro line`);
-    assert.ok(L.slots === 4 || L.slots === 5);
+    assert.ok(L.slots === 3 || L.slots === 4 || L.slots === 5);
+    assert.deepEqual(mechanicsOf(L), HEAPS[L.id].mech, `${L.id}: the stored mechanics are the ones it has`);
     assert.ok(Math.abs(L.board.h / L.board.w - BOARD.h / BOARD.w) < 0.01, `${L.id}: the board keeps its shape`);
   }
   const firstAt = {};
@@ -349,6 +352,35 @@ test('the baskets: generated, balanced, one new thing at a time, deep ones late'
   assert.ok(late.every((L) => L.stats.depth >= 5), 'with strands 5 or more layers down');
   assert.equal(BANDS[0].from, 0);
   for (const b of BANDS) assert.ok(LEVELS[b.from], b.name);
+  // chapters of about ten, each named for a fiber
+  CHAPTERS.forEach((c, k) => {
+    const to = k + 1 < CHAPTERS.length ? CHAPTERS[k + 1].from : LEVELS.length;
+    assert.ok(to - c.from >= 9 && to - c.from <= 11, `${c.name}: ${to - c.from} baskets`);
+  });
+  // the first 29 are the baskets the playtest knew
+  assert.deepEqual(LEVELS.slice(0, 29).map((L) => L.id), ['first', 'scraps', 'leftovers', 'plan', 'cat', 'joins', 'magic', 'pinned', 'blocking', 'snarl', 'stripes', 'festival', 'bottom',
+    'thrift', 'attic', 'deep', 'small', 'swap', 'destash', 'tucked', 'pegboard', 'ring', 'studio', 'guild', 'stash', 'felted', 'moths', 'nest', 'everything']);
+  // each chapter after the first three climbs, after a small reset
+  const avg = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+  for (let k = 3; k < CHAPTERS.length; k++) {
+    const c = CHAPTERS[k], to = k + 1 < CHAPTERS.length ? CHAPTERS[k + 1].from : LEVELS.length;
+    const r = LEVELS.slice(c.from, to).map((L) => L.stats.random);
+    assert.ok(avg(r.slice(0, 5)) > avg(r.slice(5)), `${c.name} climbs`);
+    assert.ok(LEVELS[c.from].stats.random > LEVELS[c.from - 1].stats.random, `${c.name} starts with a small reset`);
+  }
+});
+
+test('heaps.js is exactly what the generator writes from its own decoded data: the packing is lossless and every stored signature is the geometry\'s hash', () => {
+  const entries = LEVEL_DEFS.filter((d) => HEAPS[d.id]).map((d) => ({ id: d.id, ...HEAPS[d.id] }));
+  assert.equal(heapsSource(entries), readFileSync(new URL('../tangle/heaps.js', import.meta.url), 'utf8'));
+  for (const L of LEVELS) assert.equal(levelSig(L), HEAPS[L.id].sig, `${L.id}: signature`);
+  // packing round-trips any tenths, and refuses what it cannot hold
+  const pts = [12.3, 45.6, 19.3, 40.6, 19.3, 40.6, 2.1, 59.9];
+  const S = HEAPS.first.strands[0];
+  assert.ok(S.p.every((v) => Math.abs(v * 10 - Math.round(v * 10)) < 1e-9));
+  assert.ok(packPoints(pts).length === 4 + 3 * 3);
+  assert.throws(() => packPoints([1.25, 2]));
+  assert.throws(() => packPoints([1, 2, 40, 2]));
 });
 
 test('every basket: the stored solution replays to a clear board with no spare slot, and the solver proves it within its cap', () => {

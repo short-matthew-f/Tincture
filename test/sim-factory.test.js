@@ -449,3 +449,36 @@ test('muddy: waiting batches never block All caught up; the Ledger line is optio
   assert.equal(line.text, '3 muddy batches to sort, if you like');
   assert.equal(line.optional, true);
 });
+
+// ---------------------------------------------------------------------------
+// Memos (rates per stations object, capacity, label-free flow meter): every
+// input a test, the UI or a save edits in place must show at once.
+// ---------------------------------------------------------------------------
+
+test('rates, capacity and the flow meter follow in-place edits exactly like a fresh state', () => {
+  const s = orangeState(12);
+  discover(s, { colorId: 'green', method: 'bench' }, NOW);
+  const fresh = () => structuredClone(s); // no memo has seen this copy's stations
+  const same = (why) => {
+    const f = fresh();
+    assert.deepEqual(rates(s, NOW), rates(f, NOW), why + ': rates');
+    assert.deepEqual(capacity(s), capacity(f), why + ': capacity');
+    assert.deepEqual(flowMeter(s, NOW), flowMeter(f, NOW), why + ': flow meter');
+    assert.deepEqual(cheapestUpgrade(s), cheapestUpgrade(f), why + ': cheapest upgrade');
+  };
+  same('start');
+  const before = rates(s, NOW);
+  s.stations.mixers[0].level += 3; same('mixer level');
+  assert.notEqual(rates(s, NOW).jars, before.jars);
+  s.stations.mixers[1].recipe = 'green'; same('recipe');
+  s.catalog.discovered.orange.essence = 4; same('essence');
+  s.stations.sources.madder.level += 2; same('source level');
+  s.stations.grinders[0].level += 1; same('grinder level');
+  s.stations.grinders[0].kind = 'millstone'; same('grinder kind');
+  s.stations.shop.level += 1; same('shop level');
+  s.stations.vats[0].level += 1; same('vat level');
+  s.cellarLevel = (s.cellarLevel ?? 1) + 2; same('cellar level');
+  s.rooms = [...(s.rooms ?? []), 'mill-room']; same('rooms');
+  addBoost(s, { kind: 'production', mult: 0.5, minutes: 10 }, NOW); same('boost');
+  assert.deepEqual(rates(s, NOW + 20 * 60e3), rates(fresh(), NOW + 20 * 60e3), 'boost over');
+});

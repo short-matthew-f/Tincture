@@ -11,6 +11,12 @@
 //    the coins and the jars for the shelves; coins and stock land in the save;
 //  - a short harvest before dusk (debug speed-up): the sun pill, dusk brings the
 //    basket home, the score and a best; leaving a harvest early banks it;
+//  - the Garden Path: its card on the places, the path list (nine chapters,
+//    108 numbered gardens, done ticks and stars, the next one highlighted), a
+//    garden card with its goal and the intro of what is new, a path garden
+//    steered by touch, left and continued, its goal met (the next garden opens
+//    at once), the end card's stars and "Next garden"; then a later garden's
+//    new mechanic (the stream: floating flowers caught);
 //  - the Map's Dye Garden card opens the garden;
 //  - 44 px controls, no horizontal scroll, no page errors.
 // Run: node test/garden.e2e.mjs   (screenshots: $GARDEN_SHOTS or the OS temp dir)
@@ -362,6 +368,105 @@ async function walk(viewport, tag, { reducedMotion = false } = {}) {
     `${tag}: starting elsewhere banks the waiting basket first (${waiting && waiting.got.length} plants)`);
   await tap(page, '#screen-garden [data-action="leave"]');
   await page.waitForSelector('#screen-garden [data-place-card="shore"]', { state: 'visible' });
+
+  // --- the Garden Path ----------------------------------------------------------------------------
+  await page.waitForSelector('#screen-garden [data-pathcard]', { state: 'visible' });
+  const pathCard = await page.locator('#screen-garden [data-pathcard]').textContent();
+  check(/The Garden Path/.test(pathCard) && /108 gardens/.test(pathCard), `${tag}: the places show the Garden Path card`);
+  await page.evaluate(() => document.querySelector('#screen-garden [data-pathcard]').scrollIntoView({ block: 'center' }));
+  await shot('11-path-card');
+  await tap(page, '#screen-garden [data-pathcard] [data-action="path-open"]');
+  await page.waitForSelector('#screen-garden .gd-chap', { state: 'visible' });
+  const list = await page.evaluate(() => ({
+    chapters: [...document.querySelectorAll('#screen-garden .gd-chap h2')].map((h) => h.firstChild.textContent.trim()),
+    tiles: document.querySelectorAll('#screen-garden .gd-tile').length,
+    next: (document.querySelector('#screen-garden .gd-tile.next') || {}).textContent || '',
+    locked: document.querySelectorAll('#screen-garden .gd-tile[aria-disabled="true"]').length,
+  }));
+  check(list.chapters.length === 9 && list.chapters[0] === 'Spring meadow' && list.chapters.includes('Winter hedgerow'), `${tag}: nine chapters (${list.chapters.join(', ')})`);
+  check(list.tiles === 108 && list.locked === 107 && /^1\s*Next/.test(list.next.trim()), `${tag}: 108 gardens, the first one next (${list.tiles}, ${list.locked} waiting)`);
+  await noHScroll(page, `${tag} path list`);
+  await page.evaluate(() => { const b = document.querySelector('#screen-garden .gd-pathbody'); b.scrollTop = 0; });
+  await shot('12-path-list');
+  await tap(page, '#screen-garden .gd-tile[data-level="spring-2"]');
+  check(await page.locator('#screen-garden [data-lvcard]:not([hidden])').count() === 0, `${tag}: a garden further on waits (no card)`);
+  await tap(page, '#screen-garden .gd-tile.next');
+  await page.waitForSelector('#screen-garden [data-lvcard]:not([hidden])', { state: 'visible' });
+  const lvcard = await page.locator('#screen-garden [data-lvcard] .card').textContent();
+  check(/Gather 12 tansy heads/.test(lvcard), `${tag}: the garden card names the goal`);
+  check(/New in this garden/.test(lvcard) && /Tansy/.test(lvcard) && /not for eating/i.test(lvcard), `${tag}: the garden card introduces the new plant, with its note`);
+  await shot('13-garden-card');
+  await tap(page, '#screen-garden [data-lvcard] [data-action="path-start"]');
+  await page.waitForFunction(() => window.__gd.debugGarden().view === 'play' && window.__gd.debugGarden().mode === 'path' && window.__gd.debugGarden().running);
+  const pathHud = await page.evaluate(() => ({ name: document.querySelector('#screen-garden [data-name]').textContent, goal: document.querySelector('#screen-garden [data-goal]').textContent.trim() }));
+  check(/^Garden 1 · First shoots/.test(pathHud.name), `${tag}: the garden's number and name in the HUD ("${pathHud.name}")`);
+  check(/^Goal: Gather 12 tansy heads/.test(pathHud.goal), `${tag}: the goal sits under the growth bar ("${pathHud.goal}")`);
+  await steer(page, cdp, 3500);
+  await page.waitForTimeout(600);
+  const pathGot = (await dbg(page)).got;
+  await tap(page, '#screen-garden [data-action="leave"]');
+  await page.waitForSelector('#screen-garden .gd-pathbody [data-action="path-continue"]', { state: 'visible' });
+  const pcur = (await gstate(page)).cur;
+  check(pcur && pcur.mode === 'path' && pcur.place === 'spring-1' && pcur.got.length === pathGot, `${tag}: leaving a path garden keeps it (${pcur && pcur.got.length} plants)`);
+  check(/Keep going in Garden 1/.test(await page.locator('#screen-garden .gd-pathbody [data-action="path-continue"]').textContent()), `${tag}: the path list offers to keep going`);
+  await tap(page, '#screen-garden .gd-pathbody [data-action="path-continue"]');
+  await page.waitForFunction(() => window.__gd.debugGarden().running && window.__gd.debugGarden().mode === 'path');
+  check((await dbg(page)).got === pathGot, `${tag}: Continue resumes the same basket`);
+  await page.evaluate(() => { window.__gd.gardenTest.speed(4); window.__gd.gardenTest.autopilot(true); });
+  await page.waitForFunction(() => { const d = window.__gd.debugGarden(); return d.path && d.path.met; }, null, { timeout: 60000 });
+  await page.evaluate(() => { window.__gd.gardenTest.autopilot(false); window.__gd.gardenTest.speed(1); });
+  const metToast = await page.locator('#screen-garden .gd-toast').textContent();
+  const metState = await gstate(page);
+  check(!!metState.path.done['spring-1'], `${tag}: the goal met marks Garden 1 done at once`);
+  check(/Garden 1 done! Garden 2 is open/.test(metToast), `${tag}: a kind note says the next garden is open ("${metToast}")`);
+  check(/done!/.test(await page.locator('#screen-garden [data-goal]').textContent()), `${tag}: the goal line turns to the stars`);
+  await shot('14-goal-met');
+  const coinsP = await coins(page);
+  await page.evaluate(() => { window.__gd.gardenTest.speed(6); window.__gd.gardenTest.autopilot(true); });
+  await page.waitForSelector('#screen-garden [data-end]:not([hidden])', { state: 'visible', timeout: 90000 });
+  await page.evaluate(() => { window.__gd.gardenTest.autopilot(false); window.__gd.gardenTest.speed(1); });
+  const pend = await page.evaluate(() => ({
+    title: document.querySelector('#screen-garden [data-end-title]').textContent,
+    stars: (document.querySelector('#screen-garden [data-score] .gd-bigstars') || {}).getAttribute ? document.querySelector('#screen-garden [data-score] .gd-bigstars').getAttribute('aria-label') : '',
+    next: (document.querySelector('#screen-garden [data-end] [data-action="path-next"]') || {}).textContent || '',
+  }));
+  check(/^Garden 1(, done again| done!)/.test(pend.title), `${tag}: the end card ("${pend.title}")`);
+  check(/^[123] of 3 stars$/.test(pend.stars), `${tag}: the end card shows the stars (${pend.stars})`);
+  check(/Next garden/.test(pend.next), `${tag}: the end card offers the next garden`);
+  check((await coins(page)) > coinsP, `${tag}: a path garden pays`);
+  await page.evaluate(() => { const e = document.querySelector('#screen-garden [data-end]'); e.scrollTop = 0; });
+  await shot('15-path-end');
+  await tap(page, '#screen-garden [data-end] [data-action="path-next"]');
+  await page.waitForSelector('#screen-garden [data-lvcard]:not([hidden])', { state: 'visible' });
+  check(/Garden 2/.test(await page.locator('#screen-garden [data-lvcard] .gd-kick').textContent()), `${tag}: Next garden opens Garden 2's card`);
+  await tap(page, '#screen-garden [data-lvcard] [data-action="lv-close"]');
+  check(await page.evaluate(() => !!document.querySelector('#screen-garden .gd-tile.done[data-level="spring-1"]') && !!document.querySelector('#screen-garden .gd-tile.next[data-level="spring-2"]')),
+    `${tag}: the list ticks Garden 1 and highlights Garden 2`);
+
+  // a later garden's new mechanic: the stream (the first 24 gardens marked done)
+  await page.evaluate(async () => {
+    const P = await import('./src/puzzles/garden-path.js');
+    window.tincture.game.act((st, a, now) => { for (const l of P.LEVELS.slice(0, 24)) st.garden.path.done[l.id] = st.garden.path.done[l.id] || { stars: 2, at: now }; return {}; }, {});
+  });
+  await tap(page, '#screen-garden [data-action="places"]');
+  await tap(page, '#screen-garden [data-pathcard] [data-action="path-continue"]');
+  await page.waitForSelector('#screen-garden [data-lvcard]:not([hidden])', { state: 'visible' });
+  const streamCard = await page.locator('#screen-garden [data-lvcard] .card').textContent();
+  check(/Garden 25/.test(streamCard) && /The stream/.test(streamCard) && /float/.test(streamCard), `${tag}: Continue opens Garden 25, which introduces the stream`);
+  await shot('16-stream-card');
+  await tap(page, '#screen-garden [data-lvcard] [data-action="path-start"]');
+  await page.waitForFunction(() => window.__gd.debugGarden().running && window.__gd.debugGarden().path && window.__gd.debugGarden().path.level === 'stream-1');
+  await page.evaluate(() => { window.__gd.gardenTest.speed(2); window.__gd.gardenTest.autopilot(true); });
+  await page.waitForFunction(() => { const d = window.__gd.debugGarden(); return d.path && d.path.prog && d.path.prog.have >= 2; }, null, { timeout: 60000 });
+  await page.evaluate(() => { window.__gd.gardenTest.autopilot(false); window.__gd.gardenTest.speed(1); });
+  const sd = await dbg(page);
+  check(sd.path.floaters > 0 && sd.path.prog.have >= 2, `${tag}: floating marigolds drift past and are caught (${sd.path.prog.have} of ${sd.path.prog.need})`);
+  await page.waitForTimeout(400);
+  await shot('17-stream');
+  await tap(page, '#screen-garden [data-action="leave"]');
+  await page.waitForSelector('#screen-garden .gd-pathbody', { state: 'visible' });
+  await tap(page, '#screen-garden [data-action="places"]');
+  await page.waitForSelector('#screen-garden [data-place-card="meadow"]', { state: 'visible' });
 
   // --- the Map entry ---------------------------------------------------------------------------
   await tap(page, '#screen-garden [data-back]');

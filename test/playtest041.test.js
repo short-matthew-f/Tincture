@@ -284,7 +284,8 @@ test('lift sim: deadEnd and backToSolvable trim her moves to a solvable position
   const states = playIntoDeadEnd(R, L, 1) || playIntoDeadEnd(R, L, 2);
   assert.ok(states);
   // Replay the same moves through the sim (moves are recovered from consecutive states).
-  T.startPainting(s, { levelId: 'village' });
+  for (const P of LEVELS.slice(0, LEVELS.indexOf(L))) s.lift.done[P.id] = 1; // paintings open in order
+  assert.ok(T.startPainting(s, { levelId: 'village' }).ok);
   for (let i = 1; i < states.length; i++) {
     const m = R.legalMoves(L, states[i - 1]).find((x) => JSON.stringify(R.apply(L, states[i - 1], x).state) === JSON.stringify(states[i]));
     assert.ok(m);

@@ -15,15 +15,24 @@
 //   settings: { sound: false, today: false },  // garden sounds (off by default), Today's garden for harvests
 //   paid: 0,                         // coins the garden has paid, all time
 //   last: null | Last,               // the last visit's pay, for the hub card
+//   path: { done: {[levelId]: {stars, at}}, seen: {[introKey]: true} },  // the Garden Path
 // }
 // Score  = { jars, level, units, plants, spare }
-// Resume = { place, mode:'wander', gen, seed, got:[plant ids], x, y, found:[find indices] }
+// Resume = { place, mode:'wander'|'path', gen, seed, got:[plant ids], x, y, found:[find indices], cw?, sw? }
+//          (a path visit: place is the garden's id, gen is PATH_GEN, cw: the cat woke, sw: her biggest sweep)
 // Last   = { placeId, mode, plants, coins, jars, stock:[{colorId, jars}], at }
 //
 // Modes (puzzles/garden.js MODES): Wander has no clock and is the default;
 // Harvest before dusk is opt-in (about two minutes, a fixed garden per place
 // so bests are fair, the neighbor's goat). Neither can fail: every visit pays
 // for what she gathered, however it ends.
+//
+// The Garden Path (puzzles/garden-path.js): 108 numbered gardens in order. A
+// garden is done (and the next one opens) the first time its main goal is
+// met; 1-3 stars never block anything. reachGoal records it the moment the
+// goal is met mid-visit; finishVisit({mode:'path'}) banks the visit (the same
+// pay as a Wander visit, the goal paying like the bonus goal) and keeps her
+// best stars. Path visits resume like Wander visits (state.garden.cur).
 //
 // Pay (kept modest so hand orders stay the best coins per active minute; see
 // tools/balance/TUNING.md "Dye Garden"):
@@ -43,6 +52,7 @@
 // 'spindle' {count}.
 
 import * as R from '../puzzles/garden.js';
+import * as PATH from '../puzzles/garden-path.js';
 import { emit } from './bus.js';
 import { deltaEHex } from '../color.js';
 import { colorHex, incomeMultiplier } from './economy.js';
@@ -70,7 +80,7 @@ export const SPINDLE_KEEP = 60;
 export function initialGarden() {
   return {
     visits: 0, bests: {}, daily: { day: '', bests: {} }, spindles: 0, spindleKeys: [], shelf: {},
-    cur: null, settings: { sound: false, today: false }, paid: 0, last: null,
+    cur: null, settings: { sound: false, today: false }, paid: 0, last: null, path: { done: {}, seen: {} },
   };
 }
 
@@ -88,16 +98,34 @@ function cleanBests(b) {
   return out;
 }
 
-/** A saved Wander visit, or null when it cannot be resumed (another layout version, a bad place). */
+/** A saved Wander or Garden Path visit, or null when it cannot be resumed (another layout version, a bad place). */
 function cleanCur(c) {
-  if (!isObj(c) || c.gen !== R.GEN || !R.PLACE_BY_ID[c.place] || c.mode !== 'wander') return null;
+  if (!isObj(c)) return null;
+  const path = c.mode === 'path';
+  if (path ? c.gen !== PATH.PATH_GEN || !PATH.LEVEL_BY_ID[c.place] : c.gen !== R.GEN || !R.PLACE_BY_ID[c.place] || c.mode !== 'wander') return null;
   const seed = Number(c.seed) >>> 0;
-  if (!seed) return null;
+  if (!seed || (path && seed !== PATH.LEVEL_BY_ID[c.place].seed)) return null;
   const ints = (a) => (Array.isArray(a) ? a.filter((i) => Number.isInteger(i) && i >= 0) : []);
-  return {
-    place: c.place, mode: 'wander', gen: R.GEN, seed, got: ints(c.got),
+  const out = {
+    place: c.place, mode: path ? 'path' : 'wander', gen: path ? PATH.PATH_GEN : R.GEN, seed, got: ints(c.got),
     x: Number.isFinite(c.x) ? c.x : null, y: Number.isFinite(c.y) ? c.y : null, found: ints(c.found),
   };
+  if (path) { out.cw = c.cw === true; out.sw = Math.max(0, Math.floor(num(c.sw))); }
+  return out;
+}
+
+/** state.garden.path repaired: done only for gardens that exist, stars 1..3; seen intro keys. */
+function cleanPath(p) {
+  const out = { done: {}, seen: {} };
+  if (!isObj(p)) return out;
+  if (isObj(p.done)) {
+    for (const [id, d] of Object.entries(p.done)) {
+      if (!PATH.LEVEL_BY_ID[id] || !isObj(d)) continue;
+      out.done[id] = { stars: Math.max(1, Math.min(3, Math.floor(num(d.stars, 1)))), at: num(d.at) };
+    }
+  }
+  if (isObj(p.seen)) for (const [k, v] of Object.entries(p.seen)) if (v === true && typeof k === 'string' && k.length <= 40) out.seen[k] = true;
+  return out;
 }
 
 /**
@@ -125,6 +153,7 @@ export function ensureGarden(state) {
   g.settings.today = g.settings.today === true;
   g.paid = Math.max(0, num(g.paid));
   if (g.last !== null && !isObj(g.last)) g.last = null;
+  g.path = cleanPath(g.path);
   return g;
 }
 
@@ -146,14 +175,17 @@ export function setSetting(state, { key, value } = {}) {
 }
 
 /**
- * saveVisit(state, {place, seed, got, x, y, found}) -> {ok}. Keeps a Wander
- * visit so she picks up where she left off (the jars are banked when she heads
- * home). Harvests are never saved: leaving one banks it at once.
+ * saveVisit(state, {place, seed, got, x, y, found, mode?, cw?, sw?}) -> {ok}. Keeps a Wander
+ * (or Garden Path: mode 'path', place = the garden's id) visit so she picks up where
+ * she left off (the jars are banked when she heads home). Harvests are never
+ * saved: leaving one banks it at once.
  */
 export function saveVisit(state, args = {}) {
   const g = ensureGarden(state);
-  const cur = cleanCur({ ...args, mode: 'wander', gen: R.GEN });
+  const path = args.mode === 'path';
+  const cur = cleanCur({ ...args, mode: path ? 'path' : 'wander', gen: path ? PATH.PATH_GEN : R.GEN });
   if (!cur) return { ok: false, reason: 'visit' };
+  if (path && !pathOpen(state, cur.place)) return { ok: false, reason: 'locked' };
   cur.got = cur.got.slice(0, 5000);
   if (cur.x !== null) cur.x = Math.round(cur.x);
   if (cur.y !== null) cur.y = Math.round(cur.y);
@@ -272,6 +304,7 @@ export function bestOf(state, placeId, { daily = false, day = '' } = {}) {
 export function finishVisit(state, args = {}, now = 0) {
   if (!unlocked(state)) return { ok: false, reason: 'locked' };
   const gs = ensureGarden(state);
+  if (args.mode === 'path') return finishPath(state, gs, args, now);
   const placeId = args.placeId;
   if (!R.PLACE_BY_ID[placeId]) return { ok: false, reason: 'place' };
   const mode = args.mode === 'harvest' ? 'harvest' : 'wander';
@@ -349,6 +382,137 @@ export function finishVisit(state, args = {}, now = 0) {
 }
 
 // ---------------------------------------------------------------------------
+// The Garden Path
+// ---------------------------------------------------------------------------
+
+/** pathOpen(state, levelId) -> can she play this garden (the first, or the one before it is done)? */
+export function pathOpen(state, levelId) {
+  const k = PATH.levelIndex(levelId);
+  if (k < 0) return false;
+  if (k === 0) return true;
+  const done = state && state.garden && isObj(state.garden.path) && isObj(state.garden.path.done) ? state.garden.path.done : {};
+  return !!done[PATH.LEVELS[k - 1].id];
+}
+
+/** Stars flags from the screen (stars are only stars, so they are taken on trust), made safe. */
+function cleanFlags(f) {
+  const o = isObj(f) ? f : {};
+  return {
+    eaten: Math.max(0, Math.floor(num(o.eaten))), sweep: Math.max(0, Math.floor(num(o.sweep))), spindle: o.spindle === true,
+    catWoke: o.catWoke === true, sun: o.sun === true, beforeDusk: o.beforeDusk === true,
+  };
+}
+
+/** Record the main goal: done (and the next garden open) the first time. Returns {first, stars, prev}. */
+function recordPath(state, level, sc, now) {
+  const gs = state.garden;
+  const prev = gs.path.done[level.id] || null;
+  if (!sc.met) return { first: false, stars: 0, prev: prev ? prev.stars : 0 };
+  const stars = Math.max(prev ? prev.stars : 0, sc.stars);
+  gs.path.done[level.id] = { stars, at: prev ? prev.at : num(now) };
+  return { first: !prev, stars, prev: prev ? prev.stars : 0 };
+}
+
+/**
+ * reachGoal(state, {levelId, got, flags}, now) -> {ok, met, first, next}: the main goal met
+ * mid-visit. Checked from the gathered ids; marks the garden done at once, so the
+ * next one opens even if she never heads home. Pays nothing (finishVisit does).
+ */
+export function reachGoal(state, args = {}, now = 0) {
+  if (!unlocked(state)) return { ok: false, reason: 'locked' };
+  ensureGarden(state);
+  const level = PATH.LEVEL_BY_ID[args.levelId];
+  if (!level) return { ok: false, reason: 'place' };
+  if (!pathOpen(state, level.id)) return { ok: false, reason: 'locked' };
+  const g = PATH.pathGarden(level.id);
+  const visit = R.restoreVisit(g, args.got);
+  const flags = cleanFlags(args.flags);
+  // the goal itself never needs the sun; the dusk star is counted when the visit is banked
+  const sc = PATH.score(level, g, visit.got, { ...flags, sun: false });
+  if (!sc.met) return { ok: true, met: false, first: false, next: null };
+  const r = recordPath(state, level, { met: true, stars: 1 }, now);
+  const next = PATH.LEVELS[level.n] || null;
+  if (r.first) emit(state, 'gardenPath', { levelId: level.id, n: level.n, first: true });
+  return { ok: true, met: true, first: r.first, next: next ? next.id : null };
+}
+
+function finishPath(state, gs, args, now) {
+  const level = PATH.LEVEL_BY_ID[args.levelId || args.placeId];
+  if (!level) return { ok: false, reason: 'place' };
+  if (!pathOpen(state, level.id)) return { ok: false, reason: 'locked' };
+  const seed = Number(args.seed ?? level.seed) >>> 0;
+  if (seed !== level.seed) return { ok: false, reason: 'seed' };
+  const g = PATH.pathGarden(level.id);
+  const visit = R.restoreVisit(g, args.got);
+  const haul = R.tally(g, visit.got);
+  const units = haul.reduce((s, t) => s + t.units, 0);
+  const jars = units / R.JAR;
+  const flags = cleanFlags(args.flags);
+  const sc = PATH.score(level, g, visit.got, flags);
+
+  const jarCoins = earn(state, jars * coinsPerJar(state, now));
+  const bonus = sc.met ? earn(state, goalCoins(state, now)) : 0;
+  const coins = jarCoins + bonus;
+  gs.paid = num(gs.paid) + coins;
+  const stock = stockFor(state, haul).map((e) => ({ colorId: e.colorId, jars: e.jars, added: addStock(state, e.colorId, e.jars, 'standard'), dyes: e.dyes }));
+  const stockLeft = stock.reduce((s, e) => s + Math.max(0, e.jars - e.added), 0);
+  for (const t of haul) gs.shelf[t.dye] = num(gs.shelf[t.dye]) + t.units;
+
+  const before = gs.path.done[level.id] || null;
+  const rec = recordPath(state, level, sc, now);
+  const fact = R.pickFact(g, visit.got, gs.visits);
+  gs.visits += 1;
+  if (gs.cur && gs.cur.mode === 'path') gs.cur = null;
+  gs.last = {
+    placeId: level.id, mode: 'path', plants: visit.got.length, coins: Math.round(coins), jars: Math.floor(jars),
+    stock: stock.filter((e) => e.added > 0).map((e) => ({ colorId: e.colorId, jars: Math.round(e.added) })), at: num(now),
+  };
+  if (visit.got.length > 0) {
+    questEvent(state, 'gardenVisit', 1, { placeId: level.id, mode: 'path' });
+    eventPoints(state, 'harvest', 1, { colors: [...new Set(stock.map((e) => e.colorId))] });
+  }
+  // first: done for the first time in this visit (reachGoal may already have recorded it mid-visit)
+  const first = rec.first || (sc.met && !!args.firstMet);
+  if (rec.first) emit(state, 'gardenPath', { levelId: level.id, n: level.n, first: true });
+  emit(state, 'gardenVisit', { placeId: level.id, mode: 'path', coins, jars: Math.floor(jars), isNew: first });
+  const next = PATH.LEVELS[level.n] || null;
+  return {
+    ok: true, placeId: level.id, levelId: level.id, mode: 'path', reason: args.reason || 'home', plants: visit.got.length, units, jars, haul,
+    coins, jarCoins, goalCoins: bonus, goal: { met: sc.met, have: sc.main.have, need: sc.main.need }, stock, stockLeft,
+    score: null, prev: null, isNew: false, daily: false, fact, visits: gs.visits,
+    path: { met: sc.met, stars: sc.met ? sc.stars : 0, best: rec.stars || (before ? before.stars : 0), prevStars: before ? before.stars : 0, first, extras: sc.extras.map((e) => ({ text: e.text, met: e.met && sc.met, have: e.have, need: e.need })), next: next ? next.id : null },
+  };
+}
+
+/** seeIntro(state, {key}) -> {ok}: an intro card (a new plant or a new mechanic) has been shown. */
+export function seeIntro(state, { key } = {}) {
+  const g = ensureGarden(state);
+  if (typeof key !== 'string' || !key || key.length > 40) return { ok: false, reason: 'key' };
+  g.path.seen[key] = true;
+  return { ok: true };
+}
+
+/**
+ * pathSummary(state) -> {total, done, stars, maxStars, next:levelId|null, nextN, chapters:[{id, name, done, total, stars, open}]}.
+ * next: the first garden not done yet (null when every garden is done).
+ */
+export function pathSummary(state) {
+  const p = state && state.garden && isObj(state.garden.path) ? state.garden.path : { done: {} };
+  const done = isObj(p.done) ? p.done : {};
+  let nDone = 0, stars = 0, next = null;
+  for (const l of PATH.LEVELS) {
+    const d = done[l.id];
+    if (d) { nDone++; stars += Math.max(1, Math.min(3, d.stars | 0)); } else if (!next) next = l;
+  }
+  const chapters = PATH.CHAPTERS.map((c) => {
+    const ls = PATH.chapterLevels(c.id);
+    const dn = ls.filter((l) => done[l.id]);
+    return { id: c.id, name: c.name, total: ls.length, done: dn.length, stars: dn.reduce((s, l) => s + Math.max(1, Math.min(3, done[l.id].stars | 0)), 0), open: pathOpen(state, ls[0].id) };
+  });
+  return { total: PATH.LEVELS.length, done: nDone, stars, maxStars: PATH.LEVELS.length * 3, next: next ? next.id : null, nextN: next ? next.n : null, chapters };
+}
+
+// ---------------------------------------------------------------------------
 // Reads
 // ---------------------------------------------------------------------------
 
@@ -363,11 +527,13 @@ export function shelfList(state) {
 /** summary(state) -> a cheap read for the Puzzles hub and Map cards. */
 export function summary(state) {
   const g = state && state.garden;
-  const cur = g && g.cur && R.PLACE_BY_ID[g.cur.place] ? g.cur : null;
+  const cur = g && g.cur && (R.PLACE_BY_ID[g.cur.place] || (g.cur.mode === 'path' && PATH.LEVEL_BY_ID[g.cur.place])) ? g.cur : null;
+  const ps = pathSummary(state);
   return {
     open: unlocked(state),
     visits: g ? num(g.visits) : 0,
-    wandering: cur ? { placeId: cur.place, plants: Array.isArray(cur.got) ? cur.got.length : 0 } : null,
+    wandering: cur ? { placeId: cur.place, plants: Array.isArray(cur.got) ? cur.got.length : 0, ...(cur.mode === 'path' ? { mode: 'path' } : {}) } : null,
+    path: { done: ps.done, total: ps.total, stars: ps.stars, next: ps.next, nextN: ps.nextN },
     harvests: g && isObj(g.bests) ? Object.keys(g.bests).length : 0,
     spindles: g ? num(g.spindles) : 0,
     shelfJars: Math.floor(shelfList(state).reduce((s, x) => s + x.units, 0) / R.JAR),

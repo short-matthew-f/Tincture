@@ -67,6 +67,10 @@ export * as skeins from './skeins.js';
 export * as garden from './garden.js';
 // The Lifting Table: namespace only (move, undo, restart, ... are generic).
 export * as lift from './lift.js';
+// The Tangle Basket: namespace only (pull, undo, restart, ... are generic).
+export * as tangle from './tangle.js';
+// The Hoop: namespace only (move, undo, restart, ... are generic).
+export * as hoop from './hoop.js';
 
 // Explicit resolutions of names exported by more than one module.
 export { unlocked as huntersUnlocked } from './hunters.js';

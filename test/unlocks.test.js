@@ -31,7 +31,7 @@ const events = (s, type) => s._events.filter((e) => e.type === type);
 test('UNLOCKS: the contract table', () => {
   assert.deepEqual(UNLOCKS.map((u) => [u.id, u.revealColors, u.cost]), [
     ['shelf', 8, 400], ['skeins', 12, 1500], ['hunters', 15, 2500], ['lift', 18, 3500], ['tiles', 20, 5000], ['garden', 22, 6000],
-    ['gallery', 25, 8000], ['shipping', 50, 40000], ['commissions', 30, 20000],
+    ['gallery', 25, 8000], ['tangle', 28, 9000], ['hoop', 34, 14000], ['shipping', 50, 40000], ['commissions', 30, 20000],
   ]);
   assert.equal(UNLOCKS.find((u) => u.id === 'gallery').room, 'gallery-wing');
   assert.equal(UNLOCKS.find((u) => u.id === 'shipping').room, 'loading-yard');
@@ -296,7 +296,7 @@ test('Heritage keep-shelf / keep-map / keep-gallery skip the reset for that unlo
   s.phase = 3;
   s.runEarned = 4e8;
   assert.equal(sim.renovate(s, NOW).ok, true);
-  assert.deepEqual(s.unlocks, { shelf: true, hunters: true, gallery: true, shipping: false, commissions: false, tiles: false, skeins: false, lift: false, garden: false });
+  assert.deepEqual(s.unlocks, { shelf: true, hunters: true, gallery: true, shipping: false, commissions: false, tiles: false, skeins: false, lift: false, garden: false, tangle: false, hoop: false });
   assert.deepEqual(s.renovateReopen, []);
   assert.equal(s.gallery.unlocked, true);
   assert.ok(sim.huntersUnlocked(s));

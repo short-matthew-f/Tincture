@@ -11,6 +11,7 @@ import { runJobs } from '../tools/balance/parallel.js';
 import { firstSessions } from '../tools/balance/sim-player.js';
 import {
   jobsFor, group, median, coinsPerActiveMinute, minWindowAfterDay1, admissionByDay14, PROFILE_ORDER, TIER_ORDER,
+  runsDigest,
 } from '../tools/balance/report.js';
 import { createInitialState } from '../src/state.js';
 import { score, SCORE_TIERS } from '../src/puzzles/matching.js';
@@ -31,7 +32,20 @@ const HOUR = 3600e3;
 
 // All 45 runs (3 profiles × with/without puzzles × 5 seeds, plus Casual at
 // Relaxed, Tricky and Master), started once and shared by every test below.
-const runs = runJobs(jobsFor({ seeds: SEEDS, days: DAYS })).then(group);
+const results = runJobs(jobsFor({ seeds: SEEDS, days: DAYS }));
+const runs = results.then(group);
+
+// Fingerprint of every number the tests below read (report.runsDigest). Engine
+// speed-ups (memos, rewritten loops) must leave it unchanged; a rule, content or
+// player change that is meant to move the balance updates it: run
+// `node tools/balance/digest.js` and copy its `runs` line here.
+const BALANCE_DIGEST = '4b4518b071c35a94df9fbacec79f23d90b392047a403d64da7dc4e780e607b57';
+
+test('the 45 balance runs match the pinned digest (speed-ups change no result)', async () => {
+  const digest = runsDigest(await results);
+  assert.equal(digest, BALANCE_DIGEST, 'the balance simulation changed: if a rule change meant that, set BALANCE_DIGEST to '
+    + digest + ' (tools/balance/digest.js); an optimization must not change it');
+});
 
 test('balance runs complete for every profile and tier', async () => {
   const g = await runs;

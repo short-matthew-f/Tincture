@@ -3,10 +3,14 @@
 
 import { parentPort } from 'node:worker_threads';
 import { simulate, summarize } from './sim-player.js';
+import { jsonDigest } from './report.js';
 
-parentPort.on('message', ({ i, job }) => {
+parentPort.on('message', ({ i, job, stateDigest }) => {
   try {
-    parentPort.postMessage({ i, result: summarize(simulate(job)) });
+    const run = simulate(job);
+    const result = summarize(run);
+    if (stateDigest) result.stateDigest = jsonDigest(run.state);
+    parentPort.postMessage({ i, result });
   } catch (e) {
     parentPort.postMessage({ i, error: String((e && e.stack) || e) });
   }

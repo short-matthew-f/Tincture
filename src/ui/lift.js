@@ -1,11 +1,14 @@
 /**
  * lift.js: The Lifting Table (overlay `lift`, fullscreen, home tab Puzzles).
  * Ported from proto/lift/app.js and index.html, the playtested prototype: the
- * same rules, 27 paintings and mechanics, the one painted canvas whose columns
+ * same rules, paintings and mechanics, the one painted canvas whose columns
  * slump like melting sand as paint lifts from the bottom, the grains pouring
  * into the jars, the belt and bench, the lanes, the gallery wall, the hint, the
  * unlimited undo and the free spare bench spot, the mechanic intro cards, the
- * three-step "How this works" sheet and the finish sheet.
+ * three-step "How this works" sheet and the finish sheet. The gallery wall
+ * hangs the paintings room by room (chapters, src/sim/lift.js wall): done ticks,
+ * the next painting ringed, "Continue" on top, closed paintings veiled; a new
+ * room greets her with its own card before its first painting.
  *
  * What changed for the game: every move is a sim action (src/sim/lift.js, run
  * through ctx.game.act), so it is saved at once and a reload mid-painting
@@ -30,7 +33,7 @@
 
 import { h, raw, button, backButton, escapeHtml } from './kit.js';
 import { unlockTag, openUnlockSheet, ensureStyles as ensureWorkshopStyles } from './workshop.js';
-import { LEVELS, PALETTE, MECHANICS, BANDS, levelById } from '../puzzles/lift-levels.js';
+import { LEVELS, PALETTE, MECHANICS, CHAPTERS, levelById, chapterIndex } from '../puzzles/lift-levels.js';
 import * as R from '../puzzles/lift.js';
 
 const {
@@ -207,6 +210,11 @@ const CSS = `
 .lf-jar.lf-waiting .lf-glass { box-shadow: inset 0 0 0 1.5px rgba(42,38,34,.34), 0 0 0 2px rgba(255,248,225,.35); }
 .lf-jar.lf-mystery .lf-glass { background: repeating-linear-gradient(45deg, #D9C7A6 0 4px, #CDB894 4px 8px); }
 .lf-jar.lf-mystery .lf-tint, .lf-jar.lf-mystery .lf-band, .lf-jar.lf-mystery .lf-gl { display: none !important; }
+.lf-jar.lf-crock .lf-glass { border-radius: 9px 9px 12px 12px; background: #EDE3CD; box-shadow: inset 0 0 0 2.5px #8E6A42, 0 2px 0 rgba(42,38,34,.18); }
+.lf-jar.lf-crock .lf-neck { left: 7px; right: 7px; background: #C9B08A; box-shadow: inset 0 0 0 1.5px #8E6A42; }
+.lf-jar.lf-crock .lf-glass::before { content: ''; position: absolute; left: 0; right: 0; top: 22%; height: 3px; background: rgba(62,106,158,.6); z-index: 3; }
+.lf-jar.lf-crock .lf-shine { opacity: .35; }
+.lf-lane .lf-next .lf-jar.lf-crock .lf-glass::before { height: 2px; }
 .lf-jar.lf-mystery .lf-glass::after { content: '?'; position: absolute; inset: 0; display: grid; place-items: center; font: 400 18px var(--font-display); color: #6A5235; }
 
 /* message row */
@@ -254,6 +262,38 @@ const CSS = `
 .lf-gallery button[aria-current="true"] { background: rgba(226,176,74,.22); box-shadow: 0 0 0 2px var(--lf-gold); }
 .lf-tick { position: absolute; right: -6px; bottom: -6px; width: 22px; height: 22px; border-radius: 50%; background: #F3E3B8; box-shadow: 0 0 0 2px #fff, 0 1px 2px rgba(42,38,34,.3); display: grid; place-items: center; color: #6A5A1E; font-size: 13px; font-weight: 800; }
 .lf-chip { font-size: 9.5px; font-weight: 700; color: #6A5A1E; background: #F3E3B8; border-radius: 999px; padding: 2px 6px; }
+.lf-continue { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 64px; margin-top: 10px; padding: 8px 12px; border: 0; border-radius: 14px; background: #FBF6E8; box-shadow: 0 0 0 2px var(--lf-gold), 0 3px 0 rgba(42,38,34,.14); text-align: left; cursor: pointer; color: var(--ink); }
+.lf-continue:active { transform: translateY(2px); }
+.lf-continue .lf-fr { flex: none; padding: 3px; background: linear-gradient(160deg, #CDA978, #9C774A); border-radius: 3px; line-height: 0; }
+.lf-continue canvas { display: block; image-rendering: pixelated; width: 40px; height: auto; }
+.lf-continue .lf-ctext { display: flex; flex-direction: column; min-width: 0; }
+.lf-continue b { font: 400 18px var(--font-display); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lf-continue .lf-sub { font-size: 12px; color: var(--ink-soft); }
+.lf-wallnote { margin: 6px 2px 0; min-height: 0; font-size: 13px; font-weight: 600; color: #6A4E12; }
+.lf-wallnote:empty { display: none; }
+.lf-room { margin-top: 6px; }
+.lf-room + .lf-room { border-top: 1px dashed rgba(140,101,18,.25); padding-top: 6px; }
+.lf-wall .lf-roomhead { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; margin: 6px 2px 8px; }
+.lf-wall .lf-roomhead .lf-roomno { flex-basis: 100%; font: 700 10.5px var(--font-ui); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-soft); }
+.lf-wall .lf-roomhead h3 { font: 400 18px var(--font-display); letter-spacing: 0; text-transform: none; color: var(--ink); margin: 0; }
+.lf-wall .lf-roomhead .lf-roomstat { margin-left: auto; font-size: 11.5px; font-weight: 700; color: #6A5A1E; background: #F3E3B8; border-radius: 999px; padding: 2px 8px; white-space: nowrap; }
+.lf-room.lf-shut .lf-roomhead h3 { color: var(--ink-soft); }
+.lf-room.lf-shut .lf-roomstat { background: rgba(42,38,34,.07); color: var(--ink-soft); }
+.lf-roomline { margin: 0 2px 8px; font-size: 13px; line-height: 1.35; color: var(--ink-soft); }
+.lf-roomshow { margin: 0 2px 8px; }
+.lf-gallery button.lf-closed .lf-fr canvas { filter: sepia(.7) saturate(.4) brightness(1.05); opacity: .45; }
+.lf-gallery button.lf-closed .lf-t { color: var(--ink-soft); }
+.lf-gallery button.lf-nextup .lf-fr { box-shadow: 0 0 0 3px var(--lf-gold), 0 3px 6px rgba(42,38,34,.25); }
+.lf-nextchip { background: #E2B04A; color: #3A2C0E; }
+.lf-lockbadge { position: absolute; left: 50%; top: 50%; width: 22px; height: 25px; transform: translate(-50%, -50%); }
+.lf-roomnote { margin: 4px 0 6px; font: 400 16px var(--font-display); color: #6A4E12; }
+.lf-chapter { text-align: center; }
+.lf-chapter .lf-chno { margin: 6px 0 0; font: 700 11px var(--font-ui); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-soft); }
+.lf-chapter #lf-chLine { font-size: 15px; line-height: 1.45; margin: 4px 0 10px; }
+.lf-chstrip { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin: 0 auto 4px; }
+.lf-chstrip .lf-fr { padding: 2px; background: linear-gradient(160deg, #CDA978, #9C774A); border-radius: 2px; line-height: 0; }
+.lf-chstrip canvas { display: block; image-rendering: pixelated; width: 30px; height: auto; }
+.lf-chstrip .lf-veil canvas { filter: sepia(.7) saturate(.4); opacity: .5; }
 .lf-settings { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 .lf-steps { display: flex; gap: 6px; justify-content: center; margin: 10px 0; }
 .lf-steps i { width: 8px; height: 8px; border-radius: 50%; background: rgba(42,38,34,.18); }
@@ -638,13 +678,13 @@ function jarHTML(j, { n = null, n2 = null, id = j.id, extra = '', hide = false }
   const full = hasFill && n >= j.cap && (!j.c2 || n2 >= j.cap2);
   const label = j.c2 ? (hasFill ? `${n}+${n2}` : `${j.cap}+${j.cap2}`) : hasFill ? `${n}/${j.cap}` : `${j.cap}`;
   const c2 = j.c2 || j.c;
-  const cls = `lf-jar ${j.c2 ? 'lf-mix' : ''} ${full ? 'lf-full' : ''} ${hide ? 'lf-mystery' : ''} ${extra}`;
+  const cls = `lf-jar ${j.c2 ? 'lf-mix' : ''} ${j.heavy ? 'lf-crock' : ''} ${full ? 'lf-full' : ''} ${hide ? 'lf-mystery' : ''} ${extra}`;
   return `<span class="${cls}" data-id="${id}" style="--jc:${PALETTE[j.c].hex};--jc2:${PALETTE[c2].hex};--mix:${jarHex(j)};color:${glyphInk(j.c)}">` +
     '<span class="lf-cork"></span><span class="lf-neck"></span>' +
     `<span class="lf-glass"><span class="lf-tint"></span><span class="lf-fill2" style="transform:scaleY(${f2})"></span><span class="lf-fill" style="transform:scaleY(${f1})"></span><span class="lf-blend"></span><span class="lf-band"></span><span class="lf-shine"></span>${hide ? '' : glyphSvg(j.c) + (j.c2 ? glyphSvg(j.c2) : '')}</span>` +
     `<span class="lf-num">${hide ? '?' : label}</span></span>`;
 }
-const jarName = (j) => (j.c2 ? `${cname(j.c)} and ${cname(j.c2)} mixing jar` : `${cname(j.c)} jar`);
+const jarName = (j) => (j.c2 ? `${cname(j.c)} and ${cname(j.c2)} mixing jar` : `${cname(j.c)} ${j.heavy ? 'crock' : 'jar'}`);
 
 const TIE = '<svg class="lf-tie" viewBox="0 0 30 22" aria-hidden="true"><path d="M2 4 C 10 18, 20 18, 28 6" fill="none" stroke="#8C6512" stroke-width="2" stroke-linecap="round" stroke-dasharray="3 2"/><circle cx="15" cy="15" r="2.6" fill="#B08A5E"/></svg>';
 const LOCK = '<svg class="lf-lock" viewBox="0 0 30 34" aria-hidden="true"><path d="M8 15v-5a7 7 0 0 1 14 0v5" fill="none" stroke="#6A4E12" stroke-width="3.2"/><rect x="4" y="14" width="22" height="18" rx="4" fill="#E2B04A" stroke="#6A4E12" stroke-width="1.6"/><circle cx="15" cy="22" r="2.4" fill="#6A4E12"/><path d="M15 23v4" stroke="#6A4E12" stroke-width="2"/></svg>';
@@ -653,8 +693,9 @@ function render(s = G && G.state) {
   if (!ROOT || !L || !s || !$('#lf-belt')) return;
   const st = set();
   ROOT.classList.toggle('lf-glyphs', !!st.glyphs);
-  const idx = LEVELS.indexOf(L);
-  $('#lf-lvNo').textContent = `${idx + 1}/${LEVELS.length}`;
+  const ci = chapterIndex(L.id), ch = CHAPTERS[ci], inCh = LEVELS.indexOf(L) - ch.from + 1;
+  $('#lf-lvNo').textContent = `${ci + 1}·${inCh}`;
+  $('#lf-levelsBtn').setAttribute('aria-label', `Chapter ${ci + 1}, ${ch.name}: painting ${inCh}, ${L.name}. Open the gallery wall`);
   $('#lf-lvName').textContent = L.name;
   const gb = $('#lf-glyphBtn');
   gb.setAttribute('aria-pressed', String(!!st.glyphs));
@@ -679,7 +720,7 @@ function render(s = G && G.state) {
     const j = s.belt[i];
     if (j) {
       const waiting = !busy && !canLift(L, s, j);
-      bh += `<button type="button" class="lf-slotbtn" data-tap data-where="belt" data-i="${i}" aria-label="${jarName(j)} on the belt, ${j.n + (j.n2 || 0)} of ${j.cap + (j.cap2 || 0)}${waiting ? ', waiting' : ''}. Tap to rest it on the bench.">${jarHTML(j, { n: j.n, n2: j.n2 || 0, extra: waiting ? 'lf-waiting' : '' })}</button>`;
+      bh += `<button type="button" class="lf-slotbtn" data-tap data-where="belt" data-i="${i}" aria-label="${jarName(j)} on the belt, ${j.n + (j.n2 || 0)} of ${j.cap + (j.cap2 || 0)}${waiting ? ', waiting' : ''}. ${j.heavy ? 'A crock rides the belt until it fills.' : 'Tap to rest it on the bench.'}">${jarHTML(j, { n: j.n, n2: j.n2 || 0, extra: waiting ? 'lf-waiting' : '' })}</button>`;
     } else bh += '<span class="lf-spot"></span>';
   }
   belt.innerHTML = bh;
@@ -777,9 +818,10 @@ function message(s) {
   if (dead) return 'This one has gotten tangled: no order of jars clears it from here. Back to solvable takes back just the moves it needs.';
   const waiting = s.belt.filter((j) => !canLift(L, s, j));
   if (s.belt.length >= L.slots) {
-    return s.bench.length < benchCap(L, s)
+    if (s.bench.length >= benchCap(L, s)) return 'Belt and bench are full. A bench jar can swap back in when its color shows.';
+    return s.belt.some((j) => !j.heavy)
       ? 'The belt is full. Tap a waiting jar to rest it on the bench.'
-      : 'Belt and bench are full. A bench jar can swap back in when its color shows.';
+      : 'The belt is full of crocks. Each one rides until it fills.';
   }
   if (!s.moves) return 'Tap a jar at the bottom. It lifts its color from the bottom edge, and the paint above settles down.';
   if (waiting.length === 1) return `${jarName(waiting[0])} waits until its color reaches the bottom edge.`;
@@ -980,6 +1022,7 @@ function explainBlocked(m) {
   note = why === 'locked' ? 'This lane opens when you lift its key cell, the one with the little brass key.'
     : why === 'tied' ? 'These two jars are tied together, so they need two free places on the belt.'
       : why === 'bench' ? 'The bench is full. Bring a jar back to the belt first.'
+        : why === 'crock' ? 'A crock is too heavy for the bench. It rides the belt until it fills.'
         : 'The belt is full. Rest a belt jar on the bench to make room.';
   render();
   if (why === 'locked') {
@@ -987,6 +1030,7 @@ function explainBlocked(m) {
     if (k) { anim($('#lf-frame'), [{ boxShadow: '0 0 0 0 rgba(226,176,74,0)' }, { boxShadow: '0 0 0 5px rgba(226,176,74,.7)' }, { boxShadow: '0 0 0 0 rgba(226,176,74,0)' }], { duration: reduced() ? 0 : 700 }); }
     return;
   }
+  if (why === 'crock') { const el = targetFor(m); anim(el && el.querySelector('.lf-jar'), [{ transform: 'none' }, { transform: 'translateY(-3px)' }, { transform: 'none' }], { duration: reduced() ? 0 : 240 }); return; }
   if (G.state.belt.length >= L.slots || why === 'tied') anim($('#lf-belt'), [{ transform: 'translateX(0)' }, { transform: 'translateX(4px)' }, { transform: 'translateX(-3px)' }, { transform: 'none' }], { duration: reduced() ? 0 : 260 });
 }
 
@@ -1242,47 +1286,134 @@ function thumb(Lv, maxW, maxH) {
   return cv;
 }
 
+// The painting where each mechanic first appears (for the wall's "new:" chips).
+const FIRST_OF = {};
+LEVELS.forEach((Lv, i) => { for (const m of Lv.mechanics) if (!(m in FIRST_OF)) FIRST_OF[m] = i; });
+
+const LOCK_SVG = '<svg class="lf-lockbadge" viewBox="0 0 30 34" aria-hidden="true"><path d="M8 15v-5a7 7 0 0 1 14 0v5" fill="none" stroke="#6A4E12" stroke-width="3.2"/><rect x="4" y="14" width="22" height="18" rx="4" fill="#E2B04A" stroke="#6A4E12" stroke-width="1.6"/><circle cx="15" cy="22" r="2.4" fill="#6A4E12"/></svg>';
+
+/** One painting on the wall: a framed thumbnail, its tick, "next" ring or veil. */
+function wallItem(p, room) {
+  const Lv = levelById(p.id);
+  const k = p.index - CHAPTERS[room.index].from;
+  const li = document.createElement('li');
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.setAttribute('data-tap', '');
+  if (p.open) b.dataset.level = Lv.id; else { b.dataset.closed = Lv.id; b.classList.add('lf-closed'); }
+  if (p.next) b.classList.add('lf-nextup');
+  b.setAttribute('aria-current', String(Lv === L));
+  const fresh = Object.keys(FIRST_OF).filter((m) => FIRST_OF[m] === p.index);
+  const state = p.done ? ', lifted' : p.next ? ', next up' : p.open ? '' : ', opens once the one before it is lifted';
+  b.setAttribute('aria-label', `${k + 1}. ${Lv.name}${state}${fresh.length ? `, introduces ${fresh.map((m) => MECHANICS[m].name.toLowerCase()).join(' and ')}` : ''}`);
+  const fr = document.createElement('span');
+  fr.className = 'lf-fr';
+  fr.append(thumb(Lv, 72, 90));
+  if (p.done) { const t = document.createElement('span'); t.className = 'lf-tick'; t.textContent = '✓'; fr.append(t); }
+  if (!p.open) fr.insertAdjacentHTML('beforeend', LOCK_SVG);
+  b.append(fr);
+  const t = document.createElement('span');
+  t.className = 'lf-t';
+  t.innerHTML = `<b>${k + 1}.</b> ${esc(Lv.name)}`;
+  b.append(t);
+  if (p.next && !p.current) { const c = document.createElement('span'); c.className = 'lf-chip lf-nextchip'; c.textContent = 'next up'; b.append(c); } else if (fresh.length) { const c = document.createElement('span'); c.className = 'lf-chip'; c.textContent = `new: ${MECHANICS[fresh[0]].name.toLowerCase()}`; b.append(c); }
+  li.append(b);
+  return li;
+}
+
+function roomGrid(room) {
+  const ul = document.createElement('ul');
+  ul.className = 'lf-gallery';
+  for (const p of room.paintings) ul.append(wallItem(p, room));
+  return ul;
+}
+
+/**
+ * The gallery wall: "Continue" on top, then the rooms in order. A room she has
+ * finished folds away (one tap shows it again) unless the easel's painting
+ * hangs there; a room not open yet shows only its name and what opens it.
+ */
 function openLevels() {
   const wall = $('#lf-wall');
   wall.innerHTML = '';
-  const done = (S().lift && S().lift.done) || {};
-  const firstOf = {};
-  LEVELS.forEach((Lv, i) => { for (const m of Lv.mechanics) if (!(m in firstOf)) firstOf[m] = i; });
-  BANDS.forEach((band, bi) => {
-    const to = bi + 1 < BANDS.length ? BANDS[bi + 1].from : LEVELS.length;
-    const h3 = document.createElement('h3');
-    h3.textContent = band.name;
-    const ul = document.createElement('ul');
-    ul.className = 'lf-gallery';
-    for (let i = band.from; i < to; i++) {
-      const Lv = LEVELS[i];
-      const li = document.createElement('li');
+  const rooms = LS().wall(S());
+  // Continue: the easel's painting while it waits, else the next one to lift.
+  const nxId = LS().continueId(S());
+  const nx = levelById(nxId) || LEVELS[0];
+  const nci = chapterIndex(nx.id);
+  const cur = LS().current(S());
+  const going = cur && cur.L.id === nx.id && cur.moves.length && !cur.done;
+  const cont = $('#lf-continue');
+  cont.innerHTML = '';
+  const cb = document.createElement('button');
+  cb.type = 'button';
+  cb.className = 'lf-continue';
+  cb.id = 'lf-contBtn';
+  cb.dataset.level = nx.id;
+  cb.setAttribute('data-tap', '');
+  const cfr = document.createElement('span');
+  cfr.className = 'lf-fr';
+  cfr.append(thumb(nx, 44, 56));
+  const ctx = document.createElement('span');
+  ctx.className = 'lf-ctext';
+  const pct = going ? Math.round((1 - R.remaining(cur.s) / (nx.W * nx.H)) * 100) : 0;
+  ctx.innerHTML = `<span class="lf-sub">${going ? 'Continue lifting' : 'Continue with'}</span><b>${esc(nx.name)}</b><span class="lf-sub">Chapter ${nci + 1}, ${esc(CHAPTERS[nci].name)}${going ? ` · ${pct}% lifted` : ''}</span>`;
+  cb.append(cfr, ctx);
+  cb.setAttribute('aria-label', `${going ? 'Continue lifting' : 'Continue with'} ${nx.name}, chapter ${nci + 1}, ${CHAPTERS[nci].name}`);
+  cont.append(cb);
+  $('#lf-wallNote').textContent = '';
+  for (const room of rooms) {
+    const sec = document.createElement('section');
+    sec.className = `lf-room${room.open ? '' : ' lf-shut'}${room.done ? ' lf-roomdone' : ''}`;
+    sec.dataset.room = room.id;
+    const head = document.createElement('div');
+    head.className = 'lf-roomhead';
+    const left = room.total - room.lifted;
+    const prev = room.index > 0 ? rooms[room.index - 1] : null;
+    const stat = room.done ? 'All lifted ✓' : !room.open ? 'Not open yet' : left === room.total ? `${room.total} paintings` : `${left} more to lift`;
+    head.innerHTML = `<span class="lf-roomno">Chapter ${room.index + 1}</span><h3>${esc(room.name)}</h3><span class="lf-roomstat">${esc(stat)}</span>`;
+    sec.append(head);
+    if (!room.open) {
+      const p = document.createElement('p');
+      p.className = 'lf-roomline';
+      p.textContent = `${room.line} Opens once every painting in ${prev ? prev.name : 'the room before'} is lifted.`;
+      sec.append(p);
+    } else if (room.done && !room.paintings.some((p) => p.current || p.next)) {
       const b = document.createElement('button');
       b.type = 'button';
-      b.dataset.level = Lv.id;
+      b.className = 'btn btn-paper small lf-roomshow';
+      b.dataset.roomShow = room.id;
       b.setAttribute('data-tap', '');
-      b.setAttribute('aria-current', String(Lv === L));
-      const fresh = Object.keys(firstOf).filter((m) => firstOf[m] === i);
-      b.setAttribute('aria-label', `${i + 1}. ${Lv.name}${done[Lv.id] ? ', lifted' : ''}${fresh.length ? `, introduces ${fresh.map((m) => MECHANICS[m].name.toLowerCase()).join(' and ')}` : ''}`);
-      const fr = document.createElement('span');
-      fr.className = 'lf-fr';
-      fr.append(thumb(Lv, 72, 90));
-      if (done[Lv.id]) { const t = document.createElement('span'); t.className = 'lf-tick'; t.textContent = '✓'; fr.append(t); }
-      b.append(fr);
-      const t = document.createElement('span');
-      t.className = 'lf-t';
-      t.innerHTML = `<b>${i + 1}.</b> ${esc(Lv.name)}`;
-      b.append(t);
-      if (fresh.length) { const c = document.createElement('span'); c.className = 'lf-chip'; c.textContent = `new: ${MECHANICS[fresh[0]].name.toLowerCase()}`; b.append(c); }
-      li.append(b);
-      ul.append(li);
+      b.textContent = `Show its ${room.total} paintings`;
+      sec.append(b);
+    } else {
+      sec.append(roomGrid(room));
     }
-    wall.append(h3, ul);
-  });
+    wall.append(sec);
+  }
   $('#lf-restartBtn').textContent = 'Start this painting over';
   $('#lf-fastBtn').setAttribute('aria-pressed', String(!!set().fast));
   openSheet('#lf-levelSheet');
-  $('#lf-levelSheet [aria-current="true"]')?.scrollIntoView({ block: 'center' });
+  ($('#lf-wall .lf-nextup') || $('#lf-wall [aria-current="true"]'))?.scrollIntoView({ block: 'center' });
+}
+
+/** A folded room, shown again. */
+function showRoom(id) {
+  const room = LS().wall(S()).find((r) => r.id === id);
+  const sec = $(`#lf-wall [data-room="${id}"]`);
+  if (!room || !sec) return;
+  sec.querySelector('.lf-roomshow')?.remove();
+  sec.append(roomGrid(room));
+}
+
+/** A closed painting tapped: say what opens it. */
+function explainClosed(id) {
+  const idx = LEVELS.findIndex((x) => x.id === id);
+  const ci = chapterIndex(id);
+  const prev = idx > CHAPTERS[ci].from ? LEVELS[idx - 1] : null;
+  $('#lf-wallNote').textContent = prev
+    ? `${LEVELS[idx].name} opens once you lift ${prev.name}.`
+    : `${CHAPTERS[ci].name} opens once every painting in ${CHAPTERS[ci - 1].name} is lifted.`;
 }
 
 function coinsText(n) {
@@ -1319,6 +1450,12 @@ function openFinish() {
   $('#lf-finJars').innerHTML = s.shelf.map((j) => jarHTML(j, { n: j.cap, n2: j.cap2 || 0, id: `f${j.id}` })).join('');
   const next = levelById(LS().nextLevelId(S(), L.id)) || LEVELS[0];
   $('#lf-finNext').textContent = `Next: ${next.name}`;
+  const ci = chapterIndex(L.id);
+  const rooms = LS().wall(S());
+  const room = rooms[ci], after = rooms[ci + 1];
+  const rn = $('#lf-finRoom');
+  rn.hidden = !(room && room.done && after && after.open && after.lifted === 0);
+  if (!rn.hidden) rn.textContent = `Every painting in ${room.name} is lifted. A new room is open: ${after.name}.`;
   $('#lf-finNext').dataset.level = next.id;
   openSheet('#lf-finishSheet');
   if (!reduced()) {
@@ -1337,10 +1474,39 @@ const ICON = {
   cloth: '<svg viewBox="0 0 52 52"><rect x="6" y="8" width="40" height="38" fill="#8babc5"/><rect x="18" y="6" width="14" height="40" fill="rgba(250,244,228,.85)"/><path d="M18 6h14" stroke="#B08A5E" stroke-width="3"/></svg>',
   key: '<svg viewBox="0 0 52 52"><circle cx="18" cy="26" r="8" fill="#F3D27A" stroke="#6A4E12" stroke-width="2"/><path d="M26 26h18M38 26v7M43 26v5" stroke="#6A4E12" stroke-width="3"/></svg>',
   belt3: '<svg viewBox="0 0 52 52"><rect x="4" y="18" width="44" height="18" rx="6" fill="#4A3F36"/><g fill="#eee4c8">' + [10, 22, 34].map((x) => `<rect x="${x}" y="21" width="8" height="12" rx="2"/>`).join('') + '</g></svg>',
+  crock: '<svg viewBox="0 0 52 52"><rect x="16" y="6" width="20" height="8" rx="3" fill="#C9B08A" stroke="#8E6A42" stroke-width="2"/><rect x="11" y="12" width="30" height="34" rx="10" fill="#EDE3CD" stroke="#8E6A42" stroke-width="3"/><rect x="12.5" y="20" width="27" height="4" fill="#3e6a9e" opacity=".7"/><rect x="15" y="29" width="22" height="14" rx="5" fill="#b8433a"/></svg>',
+  leftover: '<svg viewBox="0 0 52 52"><rect x="5" y="29" width="42" height="9" rx="4" fill="#C9B08A"/><path d="M10 38v9M42 38v9" stroke="#8E6A42" stroke-width="3"/><rect x="10" y="9" width="15" height="20" rx="4" fill="#FFFDF6" stroke="#6A5235" stroke-width="1.6"/><rect x="11.5" y="17" width="12" height="11" rx="3" fill="#3e6a9e"/><rect x="30" y="13" width="13" height="16" rx="4" fill="none" stroke="rgba(42,38,34,.32)" stroke-dasharray="3 2" stroke-width="1.6"/></svg>',
   bench2: '<svg viewBox="0 0 52 52"><rect x="8" y="22" width="36" height="10" rx="4" fill="#C9B08A"/><path d="M12 32v10M40 32v10" stroke="#8E6A42" stroke-width="3"/><g fill="#eee4c8"><rect x="13" y="10" width="10" height="12" rx="3"/><rect x="29" y="10" width="10" height="12" rx="3"/></g></svg>',
 };
 let introFresh = [];
+let introChapter = '';
+/** A new room's card, once, before its first painting (not for chapter 1, nor a room she has lifted in already). */
+function maybeChapterIntro() {
+  const ci = chapterIndex(L.id);
+  if (ci <= 0) return false;
+  const ch = CHAPTERS[ci];
+  const key = `chapter:${ch.id}`;
+  const seen = (S().lift && S().lift.seenIntro) || {};
+  if (seen[key]) return false;
+  const room = LS().wall(S())[ci];
+  if (room.lifted > 0) { C.game.act(LS().seeIntro, { mechanics: [key] }); return false; }
+  introChapter = key;
+  $('#lf-chNo').textContent = `Chapter ${ci + 1} of ${CHAPTERS.length}`;
+  $('#lf-chName').textContent = ch.name;
+  $('#lf-chLine').textContent = `${ch.line} ${plural(room.total, 'painting', 'paintings')} hang in this room; each opens once the one before it is lifted.`;
+  const strip = $('#lf-chStrip');
+  strip.innerHTML = '';
+  room.paintings.forEach((p, k) => {
+    const fr = document.createElement('span');
+    fr.className = `lf-fr${k === 0 ? '' : ' lf-veil'}`;
+    fr.append(thumb(levelById(p.id), 34, 44));
+    strip.append(fr);
+  });
+  openSheet('#lf-chapterSheet');
+  return true;
+}
 function maybeIntro() {
+  if (maybeChapterIntro()) return;
   const seen = (S().lift && S().lift.seenIntro) || {};
   const fresh = L.mechanics.filter((m) => !seen[m]);
   if (!fresh.length) return;
@@ -1431,7 +1597,9 @@ ${btn('lf-undoBtn', 'Undo')}
 <div class="lf-panel">
 <button type="button" class="lf-iconbtn lf-x" data-tap data-close aria-label="Close">&#10005;</button>
 <h2 id="lf-lvTitle">The gallery wall</h2>
-<p class="hint" style="margin:0">Any painting, in any order.</p>
+<p class="hint" style="margin:0">Room by room: each painting opens once the one before it is lifted, and each room once the room before it is done.</p>
+<div id="lf-continue"></div>
+<p class="lf-wallnote" id="lf-wallNote" role="status" aria-live="polite"></p>
 <div class="lf-settings">${btn('lf-backMenuBtn', 'Back to solvable')}${btn('lf-restartBtn', 'Start this painting over')}${btn('lf-fastBtn', 'Fast belt', ' aria-pressed="false"')}</div>
 <div class="lf-wall" id="lf-wall"></div>
 </div></div>
@@ -1454,6 +1622,15 @@ ${how}
 <button type="button" class="btn btn-primary" data-tap id="lf-introOk" style="width:100%;margin-top:8px">Lovely, let's lift</button>
 </div></div>
 
+<div class="lf-sheet" id="lf-chapterSheet" role="dialog" aria-modal="true" aria-labelledby="lf-chName" hidden>
+<div class="lf-panel lf-chapter">
+<p class="lf-chno" id="lf-chNo">Chapter</p>
+<h2 id="lf-chName">A new room</h2>
+<p id="lf-chLine"></p>
+<div class="lf-chstrip" id="lf-chStrip" aria-hidden="true"></div>
+<button type="button" class="btn btn-primary" data-tap id="lf-chOk" style="width:100%;margin-top:10px">Into the room</button>
+</div></div>
+
 <div class="lf-sheet" id="lf-finishSheet" role="dialog" aria-modal="true" aria-labelledby="lf-finTitle" hidden>
 <div class="lf-panel lf-finish">
 <h2 id="lf-finTitle">Your painting, lifted</h2>
@@ -1461,6 +1638,7 @@ ${how}
 <canvas id="lf-finThumb"></canvas>
 <div class="lf-jarrow" id="lf-finJars"></div>
 <div class="lf-reward" id="lf-finReward" aria-live="polite" hidden></div>
+<p class="lf-roomnote" id="lf-finRoom" hidden></p>
 ${btn('lf-finNext', 'Next painting').replace('btn-paper', 'btn-primary')}
 ${btn('lf-finAgain', 'Lift this one again')}
 ${btn('lf-finAll', 'The gallery wall')}
@@ -1480,8 +1658,17 @@ function onClick(e) {
   const sh = t.closest('.lf-sheet');
   if (sh && (t === sh || t.closest('[data-close]'))) { closeSheet(sh); return; }
   if (t.closest('[data-guide-replay]')) { closeAllSheets(); return; }
-  const lv = t.closest('#lf-wall [data-level]');
-  if (lv) { closeSheet($('#lf-levelSheet')); if (lv.dataset.level !== L.id) startLevel(lv.dataset.level, { fresh: true }); return; }
+  const lv = t.closest('#lf-wall [data-level], #lf-continue [data-level]');
+  if (lv) {
+    closeSheet($('#lf-levelSheet'));
+    const id = lv.dataset.level;
+    if (id !== L.id) startLevel(id, { fresh: id !== S().lift.cur });
+    return;
+  }
+  const shut = t.closest('#lf-wall [data-closed]');
+  if (shut) { explainClosed(shut.dataset.closed); return; }
+  const rs = t.closest('#lf-wall [data-room-show]');
+  if (rs) { showRoom(rs.dataset.roomShow); return; }
   const id = (t.closest('button[id]') || {}).id || '';
   switch (id) {
     case 'lf-undoBtn': doUndo(); return;
@@ -1500,6 +1687,7 @@ function onClick(e) {
       closeSheet($('#lf-howSheet'));
       return;
     case 'lf-introOk': C.game.act(LS().seeIntro, { mechanics: introFresh }); closeSheet($('#lf-introSheet')); return;
+    case 'lf-chOk': C.game.act(LS().seeIntro, { mechanics: [introChapter] }); closeSheet($('#lf-chapterSheet')); maybeIntro(); return;
     case 'lf-restartBtn':
       if (!restartArmed) {
         restartArmed = setTimeout(() => { restartArmed = 0; const b = $('#lf-restartBtn'); if (b) b.textContent = 'Start this painting over'; }, 3000);
@@ -1530,7 +1718,7 @@ function onClick(e) {
 
 function onKey(e) {
   if (!visible || e.key !== 'Escape') return;
-  for (const sh of $$('.lf-sheet')) if (!sh.hidden && sh.id !== 'lf-finishSheet' && sh.id !== 'lf-introSheet') closeSheet(sh);
+  for (const sh of $$('.lf-sheet')) if (!sh.hidden && sh.id !== 'lf-finishSheet' && sh.id !== 'lf-introSheet' && sh.id !== 'lf-chapterSheet') closeSheet(sh);
 }
 
 let rz = 0;
@@ -1584,9 +1772,10 @@ export function liftCardHtml(ctx, state) {
   const Lv = levelById(sum.levelId) || LEVELS[0];
   const pct = Math.round(sum.progress * 100);
   let line;
+  const where = `Chapter ${sum.chapter + 1}, ${sum.chapterName}`;
   if (sum.cleared) line = `${Lv.name} is lifted. The next painting is ready when you are.`;
-  else if (sum.playing) line = `Painting ${sum.index + 1} of ${sum.total} · ${Lv.name} · ${pct}% lifted`;
-  else line = `Painting ${sum.index + 1} of ${sum.total} · ${Lv.name}. Lift its pigments back into jars, no timers.`;
+  else if (sum.playing) line = `${where} · ${Lv.name} · ${pct}% lifted`;
+  else line = `${where} · ${Lv.name}. Lift its pigments back into jars, no timers.`;
   const stats = sum.done ? `${plural(sum.done, 'painting', 'paintings')} lifted` : '';
   return h`<div class="card lf-card" id="pz-lift" data-coach="lift-card">
 <div class="row between"><div class="h3">Lifting Table</div>${stats ? h`<span class="chip">${stats}</span>` : ''}</div>

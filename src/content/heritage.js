@@ -51,6 +51,10 @@ export const HERITAGE_TREE = Object.freeze([
     blurb: 'The Dye Garden stays open through every Renovate, basket by the gate.' }),
   node({ id: 'keep-swift', name: 'Keep the Swift', maxLevel: 1, cost: [2], effect: { keepUnlock: 'skeins' },
     blurb: 'The Winding Room stays open through every Renovate, yarn still on the swift.' }),
+  node({ id: 'keep-basket', name: 'Keep the Basket', maxLevel: 1, cost: [2], effect: { keepUnlock: 'tangle' },
+    blurb: 'The Tangle Basket stays open through every Renovate, a heap still waiting in it.' }),
+  node({ id: 'keep-hoop', name: 'Keep the Hoop', maxLevel: 1, cost: [2], effect: { keepUnlock: 'hoop' },
+    blurb: 'The Hoop stays open through every Renovate, yarn still tied across it.' }),
 ]);
 
 export const HERITAGE_BY_ID = Object.freeze(Object.fromEntries(HERITAGE_TREE.map((n) => [n.id, n])));
