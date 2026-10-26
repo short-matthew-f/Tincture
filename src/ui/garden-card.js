@@ -10,6 +10,7 @@ import { h, raw, button } from './kit.js';
 import { unlockTag } from './workshop.js';
 import { gardenIcon } from './garden-art.js';
 import { LEVEL_BY_ID } from '../puzzles/garden-path.js';
+import { restBits, restSig } from './rest.js';
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 const CSS = `
@@ -67,10 +68,12 @@ export function gardenCardHtml(ctx, state) {
 </div>`;
   }
   const stats = sum.path && sum.path.done ? `Path ${sum.path.done} / ${sum.path.total}` : sum.visits ? `${plural(sum.visits, 'visit', 'visits')}${sum.spindles ? ` · ${plural(sum.spindles, 'spindle', 'spindles')}` : ''}` : '';
+  const rest = restBits(ctx, state, 'garden');
   return h`<div class="card gd-card" id="pz-garden" data-coach="garden-card">
 <div class="row between"><div class="h3">Dye Garden</div>${stats ? h`<span class="chip">${stats}</span>` : ''}</div>
 <div class="gd-row"><span class="gd-ic">${raw(gardenIcon(30))}</span><div class="grow"><div class="hint">${lineFor(ctx, sum)}</div>${dots(ctx, state)}</div></div>
-${button(sum.wandering ? (sum.wandering.mode === 'path' ? 'Keep going on the path' : 'Keep wandering') : 'Go to the garden', { variant: 'primary', block: true, attrs: { 'data-action': 'open-garden' } })}
+${rest.block || button(sum.wandering ? (sum.wandering.mode === 'path' ? 'Keep going on the path' : 'Keep wandering') : 'Go to the garden', { variant: 'primary', block: true, attrs: { 'data-action': 'open-garden' } })}
+${rest.line}
 </div>`;
 }
 
@@ -86,8 +89,9 @@ export function gardenMapCardHtml(ctx, state) {
   };
   const names = G.PLACES.map((p) => `the ${regionName(G.PLACE_REGION[p.id])}`);
   const where = `Five places to gather dye plants, by ${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}, and the Garden Path's 108 gardens.`;
+  const rest = sum.open ? restBits(ctx, state, 'garden') : { block: '' };
   const action = sum.open
-    ? button(sum.wandering ? (sum.wandering.mode === 'path' ? 'Keep going on the path' : 'Keep wandering') : 'Go to the Dye Garden', { block: true, attrs: { 'data-action': 'open-garden', 'data-coach': 'map-garden' } })
+    ? rest.block || button(sum.wandering ? (sum.wandering.mode === 'path' ? 'Keep going on the path' : 'Keep wandering') : 'Go to the Dye Garden', { block: true, attrs: { 'data-action': 'open-garden', 'data-coach': 'map-garden' } })
     : h`<div class="pz-tiertag">${unlockTag(ctx, 'garden', { cls: 'pz-tag' })}</div>`;
   return h`<div class="card gd-card" id="mp-garden">
 <div class="gd-row"><span class="gd-ic">${raw(gardenIcon(30))}</span><div class="grow"><div class="h3">Dye Garden</div>
@@ -101,5 +105,5 @@ ${action}
 export function gardenCardSig(ctx, state) {
   if (!ctx || !ctx.sim || !ctx.sim.garden) return 0;
   const u = ctx.sim.unlocks.status(state, 'garden');
-  return [u && u.revealed, u && u.affordable, u && u.open, JSON.stringify(ctx.sim.garden.summary(state))];
+  return [u && u.revealed, u && u.affordable, u && u.open, JSON.stringify(ctx.sim.garden.summary(state)), JSON.stringify(restSig(ctx, state, 'garden'))];
 }

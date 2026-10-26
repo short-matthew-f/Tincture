@@ -48,7 +48,14 @@ export function createInitialState(now = 0, seed) {
       notifyVats: false,
       puzzleTier: { grading: 'relaxed', purify: 'relaxed' },
       purifyMurky: false, // Purify's Murky mode (hidden layers), on top of any tier
+      // Responsibility mode (src/sim/limits.js, DESIGN.md "Responsibility mode"): asked for
+      // by the playtester, on by default, her choice in Settings.
+      responsibleMode: true,
+      playLimit: 5,
+      playWindowMin: 60,
     },
+    // Responsibility mode: when each subgame was started, {gameId: [ms]} (pruned to the window).
+    plays: {},
     // `seen`: one entry per subgame guide (src/ui/guide.js) that has run.
     onboarding: { step: 0, done: false, flags: {}, seen: {} },
     era: 1,
@@ -387,6 +394,7 @@ export function mergeDefaults(state, now = 0) {
     if (state.stats[key] === undefined) state.stats[key] = defaults.stats[key];
   }
   if (!isPlainObject(state.activePuzzles)) state.activePuzzles = {};
+  if (!isPlainObject(state.plays)) state.plays = {};
   if (!Array.isArray(state._events)) state._events = [];
   return state;
 }

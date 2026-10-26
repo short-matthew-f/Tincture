@@ -65,6 +65,7 @@ import { orderBasePay } from './orders.js';
 import { questEvent } from './quests.js';
 import { eventPoints } from './events.js';
 import { CATALOG } from '../content/catalog.js';
+import { gate } from './limits.js';
 
 const num = (x, d = 0) => (Number.isFinite(x) ? x : d);
 const isObj = (x) => x !== null && typeof x === 'object' && !Array.isArray(x);
@@ -344,12 +345,16 @@ function park(t) {
  * openHoop(state) -> {ok, levelId}: the hoop on the frame is ready to play:
  * her saved game of state.hoop.cur when there is one, else a fresh one.
  */
-export function openHoop(state) {
+export function openHoop(state, args = {}, now = 0) {
   if (!unlocked(state)) return { ok: false, reason: 'locked' };
   const t = ensureHoop(state);
   const L = levelById(t.cur);
   if (!t.game || t.game.level !== L.id) {
     const waiting = t.other[L.id];
+    if (!(waiting && goodGame(state, waiting))) {
+      const no = gate(state, 'hoop', now); // a fresh one is a new play (Responsibility mode)
+      if (no) return no;
+    }
     delete t.other[L.id];
     t.game = waiting && goodGame(state, waiting) ? waiting : freshGame(state, L);
   }
@@ -361,13 +366,20 @@ export function openHoop(state) {
  * that hoop on the frame. An unfinished hoop she steps away from waits for
  * her; `fresh` starts it over. reasons: 'locked' | 'unknown' | 'closed'.
  */
-export function startHoop(state, { levelId, fresh = false } = {}) {
+export function startHoop(state, { levelId, fresh = false } = {}, now = 0) {
   if (!unlocked(state)) return { ok: false, reason: 'locked' };
   const t = ensureHoop(state);
   const L = levelById(levelId);
   if (!L) return { ok: false, reason: 'unknown' };
   if (!isOpen(state, indexOf(L.id))) return { ok: false, reason: 'closed' };
   if (t.game && t.game.level === L.id && !fresh) { t.cur = L.id; return { ok: true, levelId: L.id, resumed: true }; }
+  // Responsibility mode (src/sim/limits.js): only a new play counts. Resuming one
+  // that waits, or starting an unfinished one over, never counts and never rests.
+  const unfinished = !!(t.game && t.game.level === L.id && !t.game.paid) || !!(t.other[L.id] && goodGame(state, t.other[L.id]));
+  if (!unfinished) {
+    const no = gate(state, 'hoop', now);
+    if (no) return no;
+  }
   park(t);
   t.cur = L.id;
   const waiting = t.other[L.id];
@@ -381,9 +393,9 @@ export function startHoop(state, { levelId, fresh = false } = {}) {
 }
 
 /** restart(state) -> {ok}: the hoop on the frame, fresh. */
-export function restart(state) {
+export function restart(state, args = {}, now = 0) {
   const t = ensureHoop(state);
-  return startHoop(state, { levelId: t.cur, fresh: true });
+  return startHoop(state, { levelId: t.cur, fresh: true }, now);
 }
 
 /**

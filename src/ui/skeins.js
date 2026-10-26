@@ -26,6 +26,7 @@
 
 import { h, raw, backButton, escapeHtml, button } from './kit.js';
 import { unlockTag, openUnlockSheet, ensureStyles as ensureWorkshopStyles } from './workshop.js';
+import { restBits, restingResult, openRestSheet, isResting, restingNote } from './rest.js';
 
 const HOP_MS = 70;   // one tile hop
 const LIFT = 58;     // the stack rides above her finger so she can see the peg
@@ -619,7 +620,8 @@ function skeleton() {
 <div class="sk-shelf" data-shelf></div>
 <p class="sk-earned" data-earned></p>
 <p class="sk-ribbonline" data-ribbonline hidden></p>
-<div class="sk-btnrow">
+<div data-donerest></div>
+<div class="sk-btnrow" data-donebtns>
 <button type="button" class="btn btn-primary" data-act="next" data-nextbtn data-tap>Next level</button>
 <button type="button" class="btn btn-paper" data-act="again" data-tap>Play this level again</button>
 </div>
@@ -949,6 +951,7 @@ function doUndo() {
 
 function startLevel(li, { fresh = false } = {}) {
   const r = C.game.act(K().startLevel, { level: li, fresh });
+  if (restingResult(r)) { openRestSheet(C, 'skeins'); renderAll(); return; } // Responsibility mode
   if (!r || !r.ok) { C.toast('That level opens after the one before it.'); return; }
   U.sel = -1;
   U.clearMode = false;
@@ -1009,11 +1012,17 @@ function showDone() {
   const last = s.level === R().LEVELS.length - 1;
   const nextCh = !last && chEnd ? R().CHAPTERS[ch + 1].name : '';
   $('[data-nextbtn]').textContent = last ? 'Back to level 1' : nextCh ? `Next: ${nextCh}, level ${s.level + 2}` : `Next: level ${s.level + 2}`;
+  // Responsibility mode: resting, the next level waits; the note says until when.
+  const resting = isResting(C, 'skeins');
+  const restBox = $('[data-donerest]');
+  if (restBox) restBox.innerHTML = resting ? String(restingNote(C, 'skeins')) : String(restBits(C, S(), 'skeins').line);
+  const btns = $('[data-donebtns]');
+  if (btns) btns.hidden = resting;
   box.hidden = false;
   safe(() => C.audio.chord([0.45, 0.6, 0.75, 0.9], 0.8));
   safe(() => C.haptics.success());
   if (!reduced()) $$('[data-shelf] .sk svg').forEach((el, i) => waapi(el, [{ opacity: 0, transform: 'translateY(-14px) rotate(-12deg)' }, { opacity: 1, transform: 'none' }], { duration: 380, delay: 120 + i * 70, fill: 'backwards', easing: 'ease-out' }));
-  safe(() => $('[data-nextbtn]').focus());
+  if (!resting) safe(() => $('[data-nextbtn]').focus());
 }
 
 /** The goal of level li in a few words, for the level list. */
@@ -1321,10 +1330,12 @@ export function skeinsCardHtml(ctx, state) {
   const stats = sum.finished ? `${sum.finished} ${sum.finished === 1 ? 'level' : 'levels'} finished` : '';
   const mini = raw(`<div class="sk-mini" aria-hidden="true">${[0, 1, 2].map((k) => skeinSvgHex(hexOfId(ctx, ids[k]))).join('')}</div>`);
   const label = sum.playing ? `Continue level ${sum.level + 1}` : sum.next >= 0 && sum.finished ? `Play level ${sum.next + 1}` : 'Wind some yarn';
+  const rest = restBits(ctx, state, 'skeins');
   return h`<div class="card" id="pz-skeins" data-coach="skeins-card">
 <div class="row between"><div class="h3">Winding Room</div>${stats ? h`<span class="chip">${stats}</span>` : ''}</div>
 <div class="sk-cardrow">${mini}<div class="hint grow">${line}</div></div>
-${button(label, { variant: 'primary', block: true, attrs: { 'data-action': 'open-skeins' } })}
+${rest.block || button(label, { variant: 'primary', block: true, attrs: { 'data-action': 'open-skeins' } })}
+${rest.line}
 </div>`;
 }
 
@@ -1414,6 +1425,8 @@ export default {
       const k = S().skeins;
       const nx = k.sess && k.sess.state.done ? K().nextLevel(S()) : -1;
       if (nx >= 0 && nx !== k.li) C.game.act(K().startLevel, { level: nx });
+      // Nothing on the table and the room resting (Responsibility mode): the gentle sheet, and back.
+      if (!S().skeins.sess && isResting(C, 'skeins')) { setTimeout(() => { if (U.visible) C.back(); openRestSheet(C, 'skeins'); }, 0); return; }
     }
     skeleton();
     renderAll();

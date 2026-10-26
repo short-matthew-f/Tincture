@@ -45,3 +45,4 @@ Conventions:
 - Positive-only feedback sounds come from `ctx.audio`; never add new oscillators in screens.
 - All screens must work at 390 px wide and must not scroll horizontally.
 - Era 2/3 content shows a paper tag "coming in a later update".
+- Responsibility mode (`src/ui/rest.js`): before an action that starts a NEW play of a limited subgame call `guardStart(ctx, gameId)`; a sim start refused with `reason: 'resting'` opens `openRestSheet`. Hub cards put `restBits(...).block` in place of the start button and `restBits(...).line` under it. Continuing a play is never guarded.

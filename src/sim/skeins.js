@@ -48,6 +48,7 @@ import { orderBasePay } from './orders.js';
 import { questEvent } from './quests.js';
 import { eventPoints } from './events.js';
 import { CATALOG } from '../content/catalog.js';
+import { gate } from './limits.js';
 
 const num = (x, d = 0) => (Number.isFinite(x) ? x : d);
 const isObj = (x) => x !== null && typeof x === 'object' && !Array.isArray(x);
@@ -267,14 +268,24 @@ function newSess(state, li) {
  * startLevel(state, {level, fresh}, now) -> {ok, level, resumed} | {ok:false, reason}.
  * The prototype's startLevel: the level in play steps aside (unfinished ones
  * wait in `other`), then level `level` resumes where she left it, or deals
- * fresh (`fresh`, or nothing to resume). reasons: 'locked' | 'level' | 'closed'.
+ * fresh (`fresh`, or nothing to resume). reasons: 'locked' | 'level' | 'closed' |
+ * 'resting' (Responsibility mode, src/sim/limits.js: only a NEW play counts, one
+ * where level `li` has no unfinished try, in play or waiting; resuming it or
+ * starting it over never counts and is never blocked).
  */
-export function startLevel(state, args = {}, now = 0) { // eslint-disable-line no-unused-vars
+export function startLevel(state, args = {}, now = 0) {
   if (!unlocked(state)) return { ok: false, reason: 'locked' };
   const k = ensureSkeins(state);
   const li = Number.isInteger(args.level) ? args.level : k.li;
   if (!(li >= 0 && li < LEVEL_COUNT)) return { ok: false, reason: 'level' };
   if (!isOpen(state, li)) return { ok: false, reason: 'closed' };
+  const playing = !!(k.sess && !k.sess.state.done && k.li === li);
+  const parked = k.other[li];
+  const waitingTry = !!(parked && goodLevel(parked.state, li) && !parked.state.done);
+  if (!playing && !waitingTry) {
+    const no = gate(state, 'skeins', now);
+    if (no) return no;
+  }
   if (k.sess && !k.sess.state.done) {
     const { state: st, stats, paid, paidHanks, bonusPaid } = k.sess;
     k.other[k.li] = { state: st, stats, paid, paidHanks, bonusPaid };

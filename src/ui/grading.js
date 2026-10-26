@@ -25,6 +25,7 @@ import {
 } from './puzzles.js';
 import { howThisWorksHtml, markGuideSeen } from './guide.js';
 import { offerWhatsNext } from './matching.js';
+import { guardStart, openRestSheet } from './rest.js';
 
 const CSS = `
 .gr-body { gap: 12px; }
@@ -648,6 +649,7 @@ ${bonusLine(reward.bonus)}
 }
 
 function again() {
+  if (!guardStart(C, 'grading')) return; // Responsibility mode: the result card stays, the gentle sheet opens
   clearTimers();
   if (G.offer) { G.offer.stop(); G.offer = null; }
   const tier = G.result && G.result.reward && TIER_IDS.includes(G.result.reward.tier) ? G.result.reward.tier : rememberedTier(C.game.state);
@@ -756,6 +758,12 @@ export default {
       C.game.act((s, _a, now) => createGradingBoard(C, s, { tier: rememberedTier(s), own: !!params.own }, now));
     }
     G.board = activeOf(C.game.state).grading;
+    if (!G.board) {
+      // Grading boards are resting (Responsibility mode): the gentle sheet, and back where she was.
+      // (back first: the router's back closes an open sheet before it leaves a screen)
+      setTimeout(() => { if (G.visible && !G.board) C.back(); openRestSheet(C, 'grading'); }, 0);
+      return;
+    }
     G.swapped = false;
     drawAll();
     startGuide();

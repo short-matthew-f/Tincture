@@ -48,6 +48,7 @@ import * as overlay from './ui/overlay.js';
 import * as guides from './ui/guide.js';
 import { createRouter, TABS } from './ui/router.js';
 import { applySettings } from './ui/settings.js';
+import { openRestSheet } from './ui/rest.js';
 import { registerSW, APP_VERSION } from './pwa.js';
 
 import * as apprentices from './content/apprentices.js';
@@ -551,6 +552,9 @@ async function boot() {
     if (e.target.closest('[data-action="settings"]')) router.navigate('settings');
     const ex = e.target.closest('[data-explain]');
     if (ex) explainSheet(ex.dataset.explain);
+    // Responsibility mode: a resting note anywhere (hub card, room, quest) opens the gentle sheet.
+    const rest = e.target.closest('[data-rest]');
+    if (rest) openRestSheet(ctx, rest.dataset.rest);
   });
 
   /** "What is this for?" from anywhere (data-explain="seals" | "closeup" | "banners"): content/explain.js. */
@@ -598,6 +602,7 @@ async function boot() {
  *    opens the Morning Ledger) or ticks.
  *  - discover(colorId): discover a color through the real sim (the naming
  *    ceremony follows as in play).
+ *  - limits(on): turn Responsibility mode on or off (src/sim/limits.js).
  */
 function makeDebug(game) {
   return {
@@ -609,6 +614,10 @@ function makeDebug(game) {
     },
     discover(colorId) {
       return game.act(sim.discover, { colorId, method: 'debug' });
+    },
+    /** limits(on): Responsibility mode on or off (e2e suites that replay a subgame many times). */
+    limits(on) {
+      return game.setSetting('responsibleMode', !!on);
     },
   };
 }

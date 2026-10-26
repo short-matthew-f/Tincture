@@ -33,6 +33,7 @@
 
 import { h, raw, button, backButton, escapeHtml } from './kit.js';
 import { unlockTag, openUnlockSheet, ensureStyles as ensureWorkshopStyles } from './workshop.js';
+import { restBits, restingResult, openRestSheet, isResting, restingNote } from './rest.js';
 import { LEVELS, PALETTE, MECHANICS, CHAPTERS, levelById, chapterIndex } from '../puzzles/lift-levels.js';
 import * as R from '../puzzles/lift.js';
 
@@ -1249,11 +1250,12 @@ function sfx(kind, k = 0) {
 // ---------- level setup ----------
 function startLevel(id, { fresh = false } = {}) {
   if (TL) { TL.skip = true; }
-  if (fresh || id !== S().lift.cur) C.game.act(LS().startPainting, { levelId: id });
-  else C.game.act(LS().openEasel);
+  const r0 = fresh || id !== S().lift.cur ? C.game.act(LS().startPainting, { levelId: id }) : C.game.act(LS().openEasel);
   syncG();
   L = levelById(S().lift.cur) || LEVELS[0];
   if (!G) { C.game.act(LS().startPainting, { levelId: L.id }); syncG(); }
+  if (!G) { setTimeout(() => { if (visible) C.back(); openRestSheet(C, 'lift'); }, 0); return; } // resting with nothing to show (Responsibility mode)
+  if (restingResult(r0)) openRestSheet(C, 'lift'); // the painting on the easel stays
   hinted = null; note = ''; dead = false; pendingHint = false; stepping = false; laidOut = false;
   lastOpen = L.lanes.map((_, i) => laneOpen(L, G.state, i));
   render();
@@ -1457,6 +1459,15 @@ function openFinish() {
   rn.hidden = !(room && room.done && after && after.open && after.lifted === 0);
   if (!rn.hidden) rn.textContent = `Every painting in ${room.name} is lifted. A new room is open: ${after.name}.`;
   $('#lf-finNext').dataset.level = next.id;
+  // Responsibility mode: resting, Next and Again wait; a leaf note says until when.
+  {
+    const resting = isResting(C, 'lift');
+    let rn = $('#lf-finRest');
+    if (!rn) { rn = document.createElement('div'); rn.id = 'lf-finRest'; $('#lf-finNext').before(rn); }
+    rn.innerHTML = resting ? String(restingNote(C, 'lift')) : String(restBits(C, S(), 'lift').line);
+    $('#lf-finNext').hidden = resting;
+    $('#lf-finAgain').hidden = resting;
+  }
   openSheet('#lf-finishSheet');
   if (!reduced()) {
     anim(cv, [{ opacity: 0, transform: 'scale(.94)', filter: 'sepia(1) brightness(1.15)' }, { opacity: 1, transform: 'none', filter: 'none' }], { duration: 700, easing: 'ease-out' });
@@ -1777,10 +1788,12 @@ export function liftCardHtml(ctx, state) {
   else if (sum.playing) line = `${where} · ${Lv.name} · ${pct}% lifted`;
   else line = `${where} · ${Lv.name}. Lift its pigments back into jars, no timers.`;
   const stats = sum.done ? `${plural(sum.done, 'painting', 'paintings')} lifted` : '';
+  const rest = restBits(ctx, state, 'lift');
   return h`<div class="card lf-card" id="pz-lift" data-coach="lift-card">
 <div class="row between"><div class="h3">Lifting Table</div>${stats ? h`<span class="chip">${stats}</span>` : ''}</div>
 <div class="lf-cardrow"><span class="lf-thumb">${raw(thumbSvg(Lv, sum.h))}</span><div class="hint grow">${line}</div></div>
-${button(sum.playing ? 'Continue lifting' : 'Go to the easel', { variant: 'primary', block: true, attrs: { 'data-action': 'open-lift' } })}
+${rest.block || button(sum.playing ? 'Continue lifting' : 'Go to the easel', { variant: 'primary', block: true, attrs: { 'data-action': 'open-lift' } })}
+${rest.line}
 </div>`;
 }
 

@@ -12,6 +12,10 @@ export const SETTING_KEYS = Object.freeze({
   notation: ['short', 'sci'],
   disabledQuestTypes: 'array',
   purifyMurky: 'boolean', // Purify's Murky mode (hidden layers), remembered like her tier
+  // Responsibility mode (src/sim/limits.js): on by default, plays per game, window in minutes.
+  responsibleMode: 'boolean',
+  playLimit: [3, 5, 8, 10],
+  playWindowMin: [30, 60, 120],
 });
 
 export const PUZZLE_TIER_IDS = Object.freeze(['relaxed', 'steady', 'tricky', 'master']);

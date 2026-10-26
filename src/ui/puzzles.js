@@ -29,6 +29,7 @@ import { liftCardHtml, liftCardSig } from './lift.js';
 import { skeinsCardHtml, skeinsCardSig } from './skeins.js';
 import { tangleCardHtml, tangleCardSig } from './tangle.js';
 import { hoopCardHtml, hoopCardSig } from './hoop.js';
+import { restBits, restSig, guardStart } from './rest.js';
 
 // ---------------------------------------------------------------------------
 // Shared constants and small helpers
@@ -155,8 +156,16 @@ export function eventName(ctx, eventId) {
 // Sim-style helpers (all run inside ctx.game.act)
 // ---------------------------------------------------------------------------
 
-/** Make a fresh grading board and store it as the active one. `own` skips the event palette. */
+/**
+ * Make a fresh grading board and store it as the active one. `own` skips the event palette.
+ * Every new board is a play (Responsibility mode, sim.limits.startPlay): while
+ * grading rests this returns null and the board she has (if any) stays.
+ */
 export function createGradingBoard(ctx, s, { tier, own = false } = {}, now = 0) {
+  if (ctx.sim.limits) {
+    const ok = ctx.sim.limits.startPlay(s, { game: 'grading' }, now);
+    if (!ok.ok) return null;
+  }
   const t = TIER_IDS.includes(tier) ? tier : rememberedTier(s);
   const tw = own ? null : boardTwist(ctx, s);
   let palette = [];
@@ -237,6 +246,13 @@ export function murkyChip(on, { action = 'purify-murky', label = '' } = {}) {
 export function createPurifyPuzzle(ctx, s, { batchId, tier, murky } = {}, now = 0) {
   const batch = (s.muddyBatches || []).find((b) => b.id === batchId);
   if (!batch) return null;
+  // Responsibility mode: a new batch is a play; this batch again (another tier,
+  // Murky on) is Start over and never counts. Resting returns null.
+  if (ctx.sim.limits) {
+    const cur = s.activePuzzles && s.activePuzzles.purify;
+    const ok = ctx.sim.limits.startPlay(s, { game: 'purify', restart: !!(cur && cur.batchId === batchId) }, now);
+    if (!ok.ok) return null;
+  }
   const t = TIER_IDS.includes(tier) ? tier : purifyTier(ctx, s);
   const m = typeof murky === 'boolean' ? murky && murkyUnlocked(ctx, s) : purifyMurky(ctx, s);
   const hex = ctx.sim.economy.colorHex(batch.color);
@@ -429,6 +445,7 @@ ${lockedNext ? h`<div class="pz-tiertag" data-tier-tag>${lockTag(`${TIER_LABEL[l
   const underway = pur && batches.some((b) => b.id === pur.batchId) ? pur : null;
   const keepGoing = !!(underway && (underway.puzzle.moves > 0 || underway.puzzle.murkCleared || (underway.tier === tier && !!underway.puzzle.murky === murky)));
   const sortLabel = keepGoing ? 'Continue sorting' : 'Sort one';
+  const rest = restBits(C, state, 'purify');
   let sellAll = '';
   if (confirmSell && batches.length) {
     const coins = C.sim.factory.muddyValue(state, C.game.now());
@@ -439,7 +456,8 @@ ${lockedNext ? h`<div class="pz-tiertag" data-tier-tag>${lockTag(`${TIER_LABEL[l
   const waiting = batches.length
     ? h`<div class="hint" data-muddy-line>${C.sim.ledger && C.sim.ledger.muddyLine ? C.sim.ledger.muddyLine(batches.length) : `${batches.length} muddy batches to sort, if you like`}</div>
 <div class="batches">${rows}</div>
-${button(sortLabel, { variant: 'primary', block: true, attrs: { 'data-action': 'sort-one', 'data-coach': 'purify-sort' } })}
+${rest.block || button(sortLabel, { variant: 'primary', block: true, attrs: { 'data-action': 'sort-one', 'data-coach': 'purify-sort' } })}
+${rest.line}
 ${sellAll}`
     : h`<div class="hint">Muddy batches come from fast mixers. When one is made, it waits here for you.</div>
 ${button('Go to the workshop', { block: true, cls: 'quiet', attrs: { 'data-action': 'to-workshop' } })}`;
@@ -488,10 +506,12 @@ function tilesCardHtml(state) {
   } else if (g && g.over) line = `Your last wall scored ${last ? last.score : sum.score}. A fresh one is ready when you are.`;
   else line = 'A calm wall of glazed tiles, a few turns at a time.';
   const stats = sum.walls ? `${sum.walls} ${sum.walls === 1 ? 'mosaic' : 'mosaics'} \u00b7 best ${sum.best}` : '';
+  const rest = restBits(C, state, 'tiles');
   return h`<div class="card" id="pz-tiles" data-coach="tiles-card">
 <div class="row between"><div class="h3">Tile Room</div>${stats ? h`<span class="chip">${stats}</span>` : ''}</div>
 <div class="pz-tilesrow">${miniWall(colors, wall)}<div class="hint grow">${line}</div></div>
-${button(sum.playing ? 'Continue the wall' : 'Start a wall', { variant: 'primary', block: true, attrs: { 'data-action': 'open-tiles' } })}
+${rest.block || button(sum.playing ? 'Continue the wall' : 'Start a wall', { variant: 'primary', block: true, attrs: { 'data-action': 'open-tiles' } })}
+${rest.line}
 </div>`;
 }
 
@@ -527,6 +547,7 @@ function build(state) {
   const seg = h`<div class="seg-control" role="group" aria-label="Difficulty">${shown.map((t) => h`<button type="button" data-action="tier" data-tier="${t}" data-tap aria-pressed="${t === tier ? 'true' : 'false'}">${TIER_LABEL[t]}</button>`)}</div>
 ${lockedNext ? h`<div class="pz-tiertag" data-tier-tag>${lockTag(`${TIER_LABEL[lockedNext]} at ${needColors} colors \u2014 ${moreToGo} more`, { cls: 'pz-tag' })}</div>` : ''}`;
 
+  const rest = restBits(C, state, 'grading');
   const gradingCard = h`<div class="card" id="pz-grading" data-coach="grading">
 <div class="row between"><div class="h3">Grading boards</div><span class="chip">${GRID[tier]}</span></div>
 <div class="hint">Put a gradient back in order. Solving reveals new tints and a production boost.</div>
@@ -537,9 +558,10 @@ ${seg}
 ${nudge ? h`<div class="pz-nudge"><div class="semi">You are gliding through these. Try Tricky?</div><div class="row"><button type="button" class="btn btn-primary small" data-action="try-tricky" data-tap>Try Tricky</button><button type="button" class="btn small" data-action="dismiss-nudge" data-tap>Maybe later</button></div></div>` : ''}
 ${boardInfo}
 ${board
-    ? h`<div class="row"><div class="grow">${button('Continue board', { variant: 'primary', block: true, attrs: { 'data-action': 'continue-grading' } })}</div>${button('New board', { small: true, attrs: { 'data-action': 'new-grading' } })}</div>`
-    : button('New grading board', { variant: 'primary', block: true, cls: 'tall', attrs: { 'data-action': 'new-grading' } })}
-${tw ? h`<button type="button" class="btn small block quiet" data-action="new-grading" data-mode="own" data-tap>New board in my own colors</button>` : ''}
+    ? h`<div class="row"><div class="grow">${button('Continue board', { variant: 'primary', block: true, attrs: { 'data-action': 'continue-grading' } })}</div>${rest.resting ? '' : button('New board', { small: true, attrs: { 'data-action': 'new-grading' } })}</div>`
+    : rest.block || button('New grading board', { variant: 'primary', block: true, cls: 'tall', attrs: { 'data-action': 'new-grading' } })}
+${tw && !rest.resting ? h`<button type="button" class="btn small block quiet" data-action="new-grading" data-mode="own" data-tap>New board in my own colors</button>` : ''}
+${rest.line}
 </div>`;
 
   const purifyCard = purifyCardHtml(state, active);
@@ -584,6 +606,7 @@ function sigOf(state) {
     skeinsCardSig(C, state),
     tangleCardSig(C, state),
     hoopCardSig(C, state),
+    ['grading', 'purify', 'tiles', 'skeins', 'lift', 'garden', 'tangle', 'hoop'].map((id) => restSig(C, state, id)),
   ]);
 }
 
@@ -644,7 +667,9 @@ function liftNudge() {
 
 function startGrading(mode) {
   const own = mode === 'own';
-  C.game.act((s, _a, now) => createGradingBoard(C, s, { tier: rememberedTier(s), own }, now));
+  if (!guardStart(C, 'grading')) return; // Responsibility mode: the gentle sheet instead
+  const made = C.game.act((s, _a, now) => createGradingBoard(C, s, { tier: rememberedTier(s), own }, now));
+  if (!made) { draw(C.game.state, true); return; }
   C.navigate('grading', { fresh: true });
 }
 
@@ -693,6 +718,8 @@ function onClick(e) {
     let batchId = t.dataset.batch || (cur && batches.some((b) => b.id === cur.batchId) ? cur.batchId : (batches[0] && batches[0].id));
     if (!batchId) { draw(st, true); return; }
     const keep = cur && cur.batchId === batchId && (cur.puzzle.moves > 0 || cur.puzzle.murkCleared || (cur.tier === tier && !!cur.puzzle.murky === murky));
+    // A new batch is a play (Responsibility mode); the batch under way never rests.
+    if (!(cur && cur.batchId === batchId) && !guardStart(C, 'purify')) return;
     if (!keep) {
       const made = C.game.act((s, a, now) => createPurifyPuzzle(C, s, a, now), { batchId, tier });
       if (!made) { C.toast('That batch is already taken care of.'); draw(C.game.state, true); return; }

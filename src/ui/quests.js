@@ -41,6 +41,23 @@ import { h, raw, backButton, button, progressBar, fadeStrip, iconSvg, swatch, sa
 import { pennantSvg } from './map.js';
 import { howThisWorksHtml, markGuideSeen, isSeen } from './guide.js';
 import { questGuide, eventGuide } from '../sim/howto.js';
+import { restStatus, openRestSheet, clockTime } from './rest.js';
+
+/** The limited subgame a "Take me there" destination opens (Responsibility mode), or null. */
+const ROOM_GAMES = ['tiles', 'skeins', 'lift', 'garden', 'tangle', 'hoop', 'grading', 'purify'];
+export function gameOfDestination(screen, params = {}) {
+  if (screen === 'puzzles') return params && (params.puzzle === 'grading' || params.puzzle === 'purify') ? params.puzzle : null;
+  return ROOM_GAMES.includes(screen) ? screen : null;
+}
+
+/** "The Hoop is resting until 3:42 PM." under a how-to whose game rests (the how-to still explains it). */
+function restingHow(go) {
+  const id = go ? gameOfDestination(go.screen, go.params || {}) : null;
+  const s = id ? restStatus(ctx, id) : null;
+  if (!s || !s.resting) return '';
+  const name = { grading: 'Grading boards are', purify: 'Purify is', tiles: 'The Tile Room is', skeins: 'The Winding Room is', lift: 'The Lifting Table is', garden: 'The Dye Garden is', tangle: 'The Tangle Basket is', hoop: 'The Hoop is' }[id];
+  return h`<p class="hint" data-how-resting="${id}">${name} resting until ${clockTime(s.readyAt)}${s.inProgress ? '; the one you started is still yours to finish' : ''}.</p>`;
+}
 
 const CSS = `
 section[data-screen="quests"] .screen-head .title { font-family:var(--font-ui); font-weight:600; font-size:18px; }
@@ -458,6 +475,7 @@ function questSheetHtml(state) {
     <div class="qs-sheet-sub">${status}</div>
     <div class="qs-lbl">How to do it</div>
     <p data-how>${g.how}</p>
+    ${g.done ? '' : restingHow(g.go)}
     ${g.done ? '' : needBox(g.need)}
     ${reward ? h`<div class="qs-reward">${sealIcon(14)}<span>${reward}</span></div>` : ''}
     <div class="qs-sheet-acts">${main}</div>`;
@@ -606,6 +624,10 @@ function onClick(e) {
     try { params = JSON.parse(el.getAttribute('data-params') || '{}') || {}; } catch (err) { params = {}; }
     const screenId = el.getAttribute('data-screen');
     closeSheet();
+    // Responsibility mode: a resting game with nothing to continue gets the same gentle note.
+    const gid = gameOfDestination(screenId, params);
+    const rs = gid ? restStatus(ctx, gid) : null;
+    if (rs && rs.resting && !rs.inProgress) { openRestSheet(ctx, gid); return; }
     if (screenId) ctx.navigate(screenId, params);
     return;
   }

@@ -1,8 +1,8 @@
 /**
  * settings.js: the Settings screen.
  *
- * Owns: sound, haptics, reduced motion, colorblind, number notation, quest
- * type opt-outs, the two notification toggles, "Check for updates", "Add to
+ * Owns: sound, haptics, reduced motion, colorblind, number notation,
+ * Responsibility mode (on/off, plays per game, window), quest type opt-outs, the two notification toggles, "Check for updates", "Add to
  * home screen", export / import / reset, and the credits line. Implements
  * ARCHITECTURE.md "UI" and "PWA and updates" and DESIGN.md "UX, notifications
  * and accessibility".
@@ -107,12 +107,30 @@ function toggleRow(key, label, hint, on, extra = '') {
   </div>`;
 }
 
-function segRow(key, label, hint, options, current) {
+function segRow(key, label, hint, options, current, { num = false } = {}) {
   return h`<div class="setting stacked">
     <div><div class="label">${label}</div>${hint ? h`<div class="hint">${hint}</div>` : ''}</div>
     <div class="seg-control" role="group" aria-label="${label}">
-      ${options.map(([value, text]) => h`<button type="button" data-tap data-seg="${key}" data-value="${value}" aria-pressed="${current === value ? 'true' : 'false'}">${text}</button>`)}
+      ${options.map(([value, text]) => h`<button type="button" data-tap data-seg="${key}" data-value="${value}"${raw(num ? ' data-num' : '')} aria-pressed="${current === value ? 'true' : 'false'}">${text}</button>`)}
     </div>
+  </div>`;
+}
+
+/**
+ * Responsibility mode (src/sim/limits.js, DESIGN.md "Responsibility mode"): on by
+ * default, asked for by the playtester. Each puzzle room can be started this many
+ * times in the window; the workshop, orders, shelf, map and gallery never are.
+ */
+function restCard(s) {
+  const on = s.responsibleMode !== false;
+  const limit = [3, 5, 8, 10].includes(s.playLimit) ? s.playLimit : 5;
+  const win = [30, 60, 120].includes(s.playWindowMin) ? s.playWindowMin : 60;
+  return h`<div class="card" id="st-rest" data-settings-rest>
+    <div class="card-title section-label">Responsibility mode</div>
+    <div class="hint">Each game can be played this many times in this window, then it rests until the window has passed.</div>
+    ${toggleRow('responsibleMode', 'Rest each game after a few plays', 'For the puzzle rooms only. Your workshop always keeps going.', on)}
+    ${segRow('playLimit', 'Plays per game', null, [[3, '3'], [5, '5'], [8, '8'], [10, '10']], limit, { num: true })}
+    ${segRow('playWindowMin', 'Within', null, [[30, '30 minutes'], [60, '1 hour'], [120, '2 hours']], win, { num: true })}
   </div>`;
 }
 
@@ -184,6 +202,8 @@ function body(settings) {
     ${toggleRow('colorblind', 'Colorblind aids', 'Adds symbols to grading tiles and patterns to tubes and crates', !!s.colorblind)}
     ${segRow('notation', 'Number style', null, [['short', '1.2K'], ['sci', '1.2e3']], s.notation || 'short')}
   </div>
+
+  ${restCard(s)}
 
   <div class="card">
     <div class="card-title section-label">Daily quests</div>
@@ -343,7 +363,7 @@ function onClick(e) {
     else setSetting(key, on);
     return;
   }
-  if (t.dataset.seg) { setSetting(t.dataset.seg, t.dataset.value); return; }
+  if (t.dataset.seg) { setSetting(t.dataset.seg, t.hasAttribute('data-num') ? Number(t.dataset.value) : t.dataset.value); return; }
 
   switch (t.dataset.action) {
     case 'check-update': runCheck(); break;
@@ -410,7 +430,7 @@ const screen = {
     render(ctx.game && ctx.game.state);
   },
 
-  show() {
+  show(params = {}) {
     if (!root) return;
     root.hidden = false;
     ui.confirm = null;
@@ -419,6 +439,9 @@ const screen = {
     refresh();
     const b = root.querySelector('[data-settings-body]');
     if (b) b.scrollTop = 0;
+    // From the rest sheet's "Change this in Settings": straight to Responsibility mode.
+    const card = params && params.section === 'rest' ? root.querySelector('[data-settings-rest]') : null;
+    if (b && card) b.scrollTop = Math.max(0, card.offsetTop - b.offsetTop - 8);
   },
 
   hide() {

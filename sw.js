@@ -24,7 +24,7 @@
 //                                                     first online load
 //   any other cross-origin request, non-GET           ignored
 
-var CACHE_VERSION = '0.5.0';
+var CACHE_VERSION = '0.5.1';
 var CACHE_NAME = 'tincture-v' + CACHE_VERSION;
 var FONT_CACHE = 'tincture-fonts';
 
@@ -102,6 +102,7 @@ var SHELL = [
   'src/sim/index.js',
   'src/sim/ledger.js',
   'src/sim/lift.js',
+  'src/sim/limits.js',
   'src/sim/next.js',
   'src/sim/offline.js',
   'src/sim/orders.js',
@@ -150,6 +151,7 @@ var SHELL = [
   'src/ui/purify.js',
   'src/ui/puzzles.js',
   'src/ui/quests.js',
+  'src/ui/rest.js',
   'src/ui/router.js',
   'src/ui/settings.js',
   'src/ui/shelf.js',

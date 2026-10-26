@@ -66,6 +66,7 @@ import { orderBasePay } from './orders.js';
 import { addStock } from './storage.js';
 import { questEvent } from './quests.js';
 import { eventPoints } from './events.js';
+import { gate } from './limits.js';
 
 const num = (x, d = 0) => (Number.isFinite(x) ? x : d);
 const isObj = (x) => x !== null && typeof x === 'object' && !Array.isArray(x);
@@ -239,21 +240,34 @@ export function ensureLift(state) {
  * openEasel(state) -> {ok, levelId}: the painting on the easel is ready to
  * play: her saved game of state.lift.cur when there is one, else a fresh one.
  */
-export function openEasel(state) {
+export function openEasel(state, args = {}, now = 0) {
   if (!unlocked(state)) return { ok: false, reason: 'locked' };
   const t = ensureLift(state);
   const L = levelById(t.cur);
-  if (!t.game || t.game.level !== L.id) t.game = freshGame(L);
+  if (!t.game || t.game.level !== L.id) {
+    const no = gate(state, 'lift', now); // a fresh painting is a new play (Responsibility mode)
+    if (no) return no;
+    t.game = freshGame(L);
+  }
   return { ok: true, levelId: L.id };
 }
 
-/** startPainting(state, {levelId}) -> {ok, levelId} | {ok:false, reason:'closed'}: that painting, fresh, on the easel (an open one: paintingOpen). */
-export function startPainting(state, { levelId } = {}) {
+/**
+ * startPainting(state, {levelId}, now) -> {ok, levelId} | {ok:false, reason:'closed'|'resting'}:
+ * that painting, fresh, on the easel (an open one: paintingOpen). Starting the
+ * painting already on the easel, unfinished, over again is Start over: it never
+ * counts as a new play (Responsibility mode, src/sim/limits.js) and never rests.
+ */
+export function startPainting(state, { levelId } = {}, now = 0) {
   if (!unlocked(state)) return { ok: false, reason: 'locked' };
   const t = ensureLift(state);
   const L = levelById(levelId);
   if (!L) return { ok: false, reason: 'unknown' };
   if (!paintingOpen(state, L.id)) return { ok: false, reason: 'closed' };
+  if (!(t.game && t.game.level === L.id && !t.game.paid)) {
+    const no = gate(state, 'lift', now);
+    if (no) return no;
+  }
   t.cur = L.id;
   t.game = freshGame(L);
   remember(t.game, L, [R.newState(L)]);
@@ -261,9 +275,9 @@ export function startPainting(state, { levelId } = {}) {
 }
 
 /** restart(state) -> {ok}: the painting on the easel, fresh. */
-export function restart(state) {
+export function restart(state, args = {}, now = 0) {
   const t = ensureLift(state);
-  return startPainting(state, { levelId: t.cur });
+  return startPainting(state, { levelId: t.cur }, now);
 }
 
 /**

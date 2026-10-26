@@ -32,6 +32,7 @@
 import { h, raw, backButton, escapeHtml } from './kit.js';
 import { injectStyle, coinsText, lightnessOf } from './puzzles.js';
 import { unlockTag, openUnlockSheet, ensureStyles as ensureWorkshopStyles } from './workshop.js';
+import { guardStart, isResting, restingNote, restingResult, openRestSheet, restStatus, clockTime, restSig } from './rest.js';
 
 const GLYPH_SVG = {
   dot: '<circle cx="12" cy="12" r="4.8"/>',
@@ -470,6 +471,13 @@ function renderBar() {
       msg = U.note || hintFor(ids);
     }
   }
+  // Responsibility mode: with no wall under way and the room resting, the bar says so and when.
+  if (!(g && !g.over) && isResting(C, 'tiles')) {
+    const s = restStatus(C, 'tiles');
+    msg = g && g.over ? `Final score ${R().finalScore(g).total}. Well made. The Tile Room rests until ${clockTime(s.readyAt)}.` : `The Tile Room rests until ${clockTime(s.readyAt)}.`;
+    act = String(restingNote(C, 'tiles'));
+    undo = '';
+  }
   bar.innerHTML = `<span class="msg" role="status">${esc(msg)}</span>${undo}${act}`;
 }
 
@@ -632,7 +640,7 @@ function renderAll() {
 
 function sigOf(st) {
   const t = st.tiles || {};
-  return [unlocked(), t.game, t.pending, t.undo, t.settings && t.settings.rival, (t.mosaics || []).length, !!(st.settings && st.settings.colorblind)];
+  return [unlocked(), t.game, t.pending, t.undo, t.settings && t.settings.rival, (t.mosaics || []).length, !!(st.settings && st.settings.colorblind), JSON.stringify(restSig(C, st, 'tiles'))];
 }
 const sameSig = (a, b) => Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((x, i) => x === b[i]);
 
@@ -674,7 +682,11 @@ function pickColor(id) {
 function startWall() {
   const p = U.pick;
   const colors = p ? p.colors.slice() : undefined;
+  const g0 = G();
+  // A new wall is a play (Responsibility mode); starting the wall under way over never rests.
+  if (!(g0 && !g0.over) && !guardStart(C, 'tiles')) return;
   let r = C.game.act(T().startWall, { colors });
+  if (restingResult(r)) { openRestSheet(C, 'tiles'); return; }
   if (!r || !r.ok) r = C.game.act(T().startWall, {});
   if (!r || !r.ok) { C.toast('The kiln needs a moment. Try again.'); return; }
   U.view = 'play';

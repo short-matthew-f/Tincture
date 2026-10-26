@@ -190,6 +190,8 @@ const STROKE_ICONS = {
   sound: ['0 0 24 24', '<path d="M4 9.5 H8 L13 5.5 V18.5 L8 14.5 H4 Z"/><path d="M16.5 9 C18.2 10.6 18.2 13.4 16.5 15"/><path d="M19 6.5 C22 9.5 22 14.5 19 17.5"/>', 1.8],
   'sound-off': ['0 0 24 24', '<path d="M4 9.5 H8 L13 5.5 V18.5 L8 14.5 H4 Z"/><path d="M17 9.5 L22 14.5 M22 9.5 L17 14.5"/>', 1.8],
   pin: ['0 0 20 20', '<path d="M10 17.5 V11.5"/><path d="M6.5 11.5 H13.5 L12.5 4.5 H7.5 Z"/>', 1.8],
+  // Responsibility mode: a resting game (src/ui/rest.js).
+  leaf: ['0 0 20 20', '<path d="M4 16 C4 8.5 8.5 4 16.5 3.5 C16.5 11 12 15.5 4 16 Z"/><path d="M4 16 L11 9"/>', 1.6],
 };
 
 const FILLED_ICONS = {

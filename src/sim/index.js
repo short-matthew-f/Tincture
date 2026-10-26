@@ -71,6 +71,8 @@ export * as lift from './lift.js';
 export * as tangle from './tangle.js';
 // The Hoop: namespace only (move, undo, restart, ... are generic).
 export * as hoop from './hoop.js';
+// Responsibility mode: namespace only (canStart, recordStart, playsLeft, readyAt, status, ...).
+export * as limits from './limits.js';
 
 // Explicit resolutions of names exported by more than one module.
 export { unlocked as huntersUnlocked } from './hunters.js';

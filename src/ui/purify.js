@@ -44,6 +44,7 @@
 
 import { h, raw, backButton, button, swatch, iconSvg, safeHex } from './kit.js';
 import { markGuideSeen } from './guide.js';
+import { guardStart, isResting, restingNote, restBits } from './rest.js';
 import {
   injectStyle, PZ_CSS, ensureActive, activeOf, createPurifyPuzzle, patternFill, ensureDefs, lightnessOf, coinsText,
   TIER_IDS, TIER_LABEL, murkyUnlocked, murkyChip, purifyMurky,
@@ -400,6 +401,11 @@ function updateTools() {
 }
 
 function emptyHtml() {
+  // Responsibility mode: batches are waiting but Purify rests; they stay safe until then.
+  if ((C.game.state.muddyBatches || []).length && isResting(C, 'purify')) {
+    return h`<div class="screen-head">${backButton('Back to the puzzle table')}<div class="titles"><div class="title">Purify</div></div><div class="spacer"></div></div>
+<div class="screen-body pz-body"><div class="card pz-empty" data-purify-resting><div class="h2">Purify is resting</div><div class="hint">Your muddy batches wait here, safe and sound, until it is ready again.</div>${restingNote(C, 'purify')}<div class="pu-empty-actions">${button('Back to the table', { variant: 'primary', block: true, attrs: { 'data-action': 'done' } })}${button('Go to the workshop', { block: true, cls: 'is-quiet', attrs: { 'data-action': 'to-workshop' } })}</div></div></div>`;
+  }
   return h`<div class="screen-head">${backButton('Back to the puzzle table')}<div class="titles"><div class="title">Purify</div></div><div class="spacer"></div></div>
 <div class="screen-body pz-body"><div class="card pz-empty"><div class="h2">All batches are sparkling</div><div class="hint">Muddy batches come from fast mixers. When one is made, it waits for you on the puzzle table.</div><div class="pu-empty-actions">${button('Back to the table', { variant: 'primary', block: true, attrs: { 'data-action': 'done' } })}${button('Go to the workshop', { block: true, cls: 'is-quiet', attrs: { 'data-action': 'to-workshop' } })}</div></div></div>`;
 }
@@ -805,7 +811,9 @@ function finalize() {
 <li>${iconSvg('check', { size: 18 })}<span>${jarsIn} ${jarsIn === 1 ? 'jar' : 'jars'} of ${pc.head.toLowerCase()} ${P.name} added to your stock</span></li>
 <li class="coinline">${iconSvg('coin', { size: 18 })}<span>+<b data-roll>0</b> coins${r.coins > r.bonus + 0.0001 ? ', with jars that did not fit' : ' for sorting it'}${r.murky ? ', with the Murky bonus' : ''}</span></li>
 </ul>
-<div class="pz-actions">${more.length ? button('Next batch', { variant: 'primary', attrs: { 'data-action': 'next-batch', 'data-batch': more[0].id } }) : ''}${button('Back to the table', { variant: more.length ? 'paper' : 'primary', attrs: { 'data-action': 'done' } })}</div>
+${more.length && isResting(C, 'purify') ? restingNote(C, 'purify') : ''}
+<div class="pz-actions">${more.length && !isResting(C, 'purify') ? button('Next batch', { variant: 'primary', attrs: { 'data-action': 'next-batch', 'data-batch': more[0].id } }) : ''}${button('Back to the table', { variant: more.length && !isResting(C, 'purify') ? 'paper' : 'primary', attrs: { 'data-action': 'done' } })}</div>
+${more.length && !isResting(C, 'purify') ? restBits(C, C.game.state, 'purify').line : ''}
 </div>`;
   let cardEl = null;
   if (P.el.status) {
@@ -992,6 +1000,7 @@ function onClick(e) {
     P.result = null;
     C.navigate('workshop', {});
   } else if (act === 'next-batch') {
+    if (!guardStart(C, 'purify')) return; // Responsibility mode: the gentle sheet instead
     const batchId = a.dataset.batch;
     const tier = P.tier;
     P.result = null;

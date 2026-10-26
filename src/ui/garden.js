@@ -53,6 +53,7 @@
 
 import { h, raw, backButton, escapeHtml, iconSvg } from './kit.js';
 import { unlockTag, openUnlockSheet, ensureStyles as ensureWorkshopStyles } from './workshop.js';
+import { guardStart, restingResult, openRestSheet, restBits, restSig } from './rest.js';
 import {
   PLACES, PLACE_BY_ID, PLACE_REGION, SPECIES, DYES, FACTS, MODES, R0, OPENING, TEETER, GOAT, FIND_KINDS,
   gardenFor, newVisit, gather, isDone, restoreVisit, basketRadius, fits, over, buildGrid, queryGrid,
@@ -320,7 +321,14 @@ function chooseSig() {
   const g = gstate();
   return JSON.stringify([u.revealed, u.affordable, u.open, g.visits, g.cur && [g.cur.place, (g.cur.got || []).length], g.settings,
     g.bests, g.daily, g.spindles, g.shelf, todayKey(), Math.round(safe(() => SG().coinsPerJar(st, C.game.now())) || 0), U.sub, g.path && g.path.done,
-    !!(st.onboarding && st.onboarding.seen && st.onboarding.seen.garden)]);
+    !!(st.onboarding && st.onboarding.seen && st.onboarding.seen.garden), restSig(C, st, 'garden')]);
+}
+
+/** Responsibility mode on the places and the path list: a leaf note while resting, else the quiet plays-left line. */
+function restBanner() {
+  const r = restBits(C, S(), 'garden');
+  if (r.block) return `<div class="gd-rest" data-garden-resting>${String(r.block)}<p class="hint" style="margin:6px 0 0;text-align:center">${gstate().cur ? 'The visit you left off is still yours to finish.' : 'Your dye shelf and bests are all kept.'}</p></div>`;
+  return r.line ? String(r.line) : '';
 }
 
 function renderChoose(force = false) {
@@ -371,6 +379,7 @@ function renderChoose(force = false) {
   box.innerHTML = `${head}<div class="screen-body gd-body">
 <p class="gd-intro">Steer a basket and gather real dye plants. Start with the little ones; the basket grows as it fills, until even the cart and the shed fit. Wander with no clock, or try a harvest before dusk. Nothing to lose either way.</p>
 <div class="gd-pay">${gardenIcon(24)}<span>Each jar of dye brings about ${esc(per)} home, plus a few jars of your nearest colors for the shelves.</span></div>
+${restBanner()}
 ${cur ? `<button type="button" class="btn btn-primary block gd-continue" data-action="continue" data-tap>Keep wandering in ${esc(theName(PLACE_BY_ID[cur.place]))}</button>` : ''}
 ${guideSeen ? pathCardHtml(curPath) : ''}
 <div class="gd-today"><button type="button" class="btn btn-paper small" data-action="today" aria-pressed="${today}" data-tap>&#9728; Today's garden</button>
@@ -447,6 +456,7 @@ function renderPathList(box) {
   const go = curPath ? `Keep going in ${levelLabel(LEVEL_BY_ID[curPath.place])}` : nx ? `Continue: ${levelLabel(nx)}, ${nx.name}` : '';
   box.innerHTML = `${head}<div class="screen-body gd-body gd-pathbody">
 <p class="gd-intro">Each garden has one goal. Meet it and the next garden opens; stars are a little extra and never hold you back.</p>
+${restBanner()}
 ${go ? `<button type="button" class="btn btn-primary block gd-continue" data-action="path-continue" data-tap>${esc(go)}</button>` : ''}
 ${chapters}
 </div>
@@ -547,9 +557,11 @@ function startPath(id, { sun = false, resume = false } = {}) {
   const intro = introFor(id);
   for (const s2 of intro.plants) C.game.act(SG().seeIntro, { key: 'p:' + s2 });
   for (const m of intro.mechanics) C.game.act(SG().seeIntro, { key: 'm:' + m });
-  closeLevelCard();
   const c = gstate().cur;
-  if (resume && c && c.mode === 'path' && c.place === id) { startVisit(id, 'path', c.seed, c); return; }
+  const resuming = !!(resume && c && c.mode === 'path' && c.place === id);
+  if (!resuming && !guardStart(C, 'garden')) return; // Responsibility mode: the gentle sheet instead
+  closeLevelCard();
+  if (resuming) { startVisit(id, 'path', c.seed, c); return; }
   const banked = bankSaved();
   startVisit(id, 'path', l.seed, null, { sun: !!(sun && l.dusk) });
   if (banked && U.view === 'play') showToast(banked, true, 3);
@@ -725,6 +737,11 @@ function setView(v) {
 function startVisit(placeId, modeId, seed, resume = null, opts = {}) {
   const isPath = modeId === 'path';
   if (!unlocked() || (isPath ? !LEVEL_BY_ID[placeId] : !PLACE_BY_ID[placeId])) return;
+  // A new visit is a play (Responsibility mode, sim.garden.beginVisit); resuming one never is.
+  if (!resume) {
+    const ok = C.game.act(SG().beginVisit, { mode: modeId, place: placeId });
+    if (restingResult(ok)) { openRestSheet(C, 'garden'); return; }
+  }
   playSkeleton();
   stop();
   if (isPath) {
@@ -1879,6 +1896,7 @@ function onClick(e) {
     case 'unlock-open': ensureWorkshopStyles(); openUnlockSheet(C, 'garden', { host: ROOT }); return;
     case 'visit': {
       const id = a.dataset.place;
+      if (!guardStart(C, 'garden')) return; // Responsibility mode: the gentle sheet instead
       const banked = bankSaved();
       if (a.dataset.mode === 'harvest') startVisit(id, 'harvest', harvestSeed(id, gstate().settings && gstate().settings.today ? todayKey() : ''));
       else startVisit(id, 'wander', freshSeed());

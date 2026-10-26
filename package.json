@@ -5,7 +5,7 @@
   "scripts": {
     "test": "node --test \"test/**/*.test.js\"",
     "serve": "python3 -m http.server 8000",
-    "e2e": "node test/shell.e2e.mjs && node test/first-ten-minutes.e2e.mjs && node test/update-flow.e2e.mjs && node test/drag.e2e.mjs && node test/commissions.e2e.mjs && node test/tiles.e2e.mjs && node test/workshop-stations.e2e.mjs && node test/purify.e2e.mjs && node test/skeins.e2e.mjs && node test/garden.e2e.mjs && node test/lift.e2e.mjs && node test/tangle.e2e.mjs && node test/hoop.e2e.mjs",
+    "e2e": "node test/shell.e2e.mjs && node test/first-ten-minutes.e2e.mjs && node test/update-flow.e2e.mjs && node test/drag.e2e.mjs && node test/commissions.e2e.mjs && node test/tiles.e2e.mjs && node test/workshop-stations.e2e.mjs && node test/purify.e2e.mjs && node test/skeins.e2e.mjs && node test/garden.e2e.mjs && node test/lift.e2e.mjs && node test/tangle.e2e.mjs && node test/hoop.e2e.mjs && node test/limits.e2e.mjs",
     "test:proto": "node --test \"proto/test/*.test.js\"",
     "test:all": "npm test && npm run test:proto"
   }

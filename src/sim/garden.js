@@ -62,6 +62,7 @@ import { addStock } from './storage.js';
 import { questEvent } from './quests.js';
 import { eventPoints } from './events.js';
 import { dayKey } from '../format.js';
+import { gate } from './limits.js';
 
 const num = (x, d = 0) => (Number.isFinite(x) ? x : d);
 const isObj = (x) => x !== null && typeof x === 'object' && !Array.isArray(x);
@@ -191,6 +192,19 @@ export function saveVisit(state, args = {}) {
   if (cur.y !== null) cur.y = Math.round(cur.y);
   g.cur = cur;
   return { ok: true };
+}
+
+/**
+ * beginVisit(state, {mode, place}, now) -> {ok:true} | {ok:false, reason:'locked'|'resting'}.
+ * A NEW garden visit is starting (Wander, Harvest or a Garden Path garden): the
+ * screen calls this before it builds the garden, so Responsibility mode
+ * (src/sim/limits.js) can count it. Resuming a saved visit never calls it.
+ */
+export function beginVisit(state, args = {}, now = 0) {
+  if (!unlocked(state)) return { ok: false, reason: 'locked' };
+  const no = gate(state, 'garden', now);
+  if (no) return no;
+  return { ok: true, mode: typeof args.mode === 'string' ? args.mode : 'wander' };
 }
 
 /** clearVisit(state) -> {ok}: drops the saved Wander visit (nothing was banked yet). */

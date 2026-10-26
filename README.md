@@ -35,7 +35,7 @@ python3 -m http.server 8000      # from the repo root (or: npm run serve)
 ```sh
 npm test       # node --test "test/**/*.test.js": unit tests + the balance suite (about 17 s)
 npm run test:proto  # the craft prototypes under proto/ (proto/test/*.test.js, about 3 s)
-npm run e2e    # Playwright: shell smoke, the first-ten-minutes walk, the update flow, the drag harness, commissions, the Tile Room, workshop stations
+npm run e2e    # Playwright: shell smoke, the first-ten-minutes walk, the update flow, the drag harness, commissions, workshop stations, every puzzle room, Responsibility mode
 ```
 
 The e2e scripts are not dependencies of the game. They import `playwright`
@@ -111,6 +111,19 @@ and its offline cache: https://short-matthew-f.github.io/Tincture/proto/
 
 ## Status
 
+- **0.5.1** (the playtester asked for it): **Responsibility mode**, on by
+  default in Settings. Each puzzle room (grading boards, Purify, the Tile
+  Room, the Winding Room, the Lifting Table, the Dye Garden, the Tangle
+  Basket, the Hoop) can be started 5 times within an hour (3, 5, 8 or 10;
+  30 minutes, 1 hour or 2 hours), then it rests until the oldest play ages
+  out. Only new levels, boards, batches, walls, paintings, baskets, hoops and
+  garden visits count; continuing, Undo and Start over never do, and a game
+  in progress is always hers to finish. A gentle sheet says when it is ready
+  again ("Time for a rest from the Hoop … ready again at 3:42 PM"), hub cards
+  show "2 plays left this hour" and a leaf "Rests until 3:42 PM". The
+  workshop, orders, shelf, map, gallery and commissions are never limited.
+  The one sanctioned exception to the no-energy rule (DESIGN.md
+  "Responsibility mode").
 - **0.5.0** (100+ levels each, two more rooms): the Tangle Basket (28 colors
   / 9,000; 109 baskets in 11 chapters) and the Hoop (34 colors / 14,000;
   103 hoops in 11 chapters, real hooking topology, yarn pulls taut) join

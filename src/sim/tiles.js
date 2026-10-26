@@ -44,6 +44,7 @@ import { orderBasePay } from './orders.js';
 import { questEvent } from './quests.js';
 import { eventPoints } from './events.js';
 import { CATALOG } from '../content/catalog.js';
+import { gate } from './limits.js';
 
 const num = (x, d = 0) => (Number.isFinite(x) ? x : d);
 const isObj = (x) => x !== null && typeof x === 'object' && !Array.isArray(x);
@@ -235,12 +236,18 @@ export function phase(state) {
  * A new wall in her five glazes (default nextGlazes). A wall in progress is
  * replaced (the screen confirms first). reasons: 'locked' | glaze reasons.
  */
-export function startWall(state, args = {}, now = 0) { // eslint-disable-line no-unused-vars
+export function startWall(state, args = {}, now = 0) {
   if (!unlocked(state)) return { ok: false, reason: 'locked' };
   const t = ensureTiles(state);
   const colors = Array.isArray(args.colors) ? args.colors.slice() : nextGlazes(state);
   const chk = checkGlazes(state, colors);
   if (!chk.ok && Array.isArray(args.colors)) return chk;
+  // Responsibility mode (src/sim/limits.js): a new wall is a play; starting the
+  // wall in progress over ("Start over with these") never counts and never rests.
+  if (!(t.game && !t.game.over)) {
+    const no = gate(state, 'tiles', now);
+    if (no) return no;
+  }
   const use = chk.ok ? colors : defaultGlazes(state);
   if (typeof args.rival === 'boolean') t.settings.rival = args.rival;
   const seed = Math.floor(stateRng(state)() * 4294967296) >>> 0;

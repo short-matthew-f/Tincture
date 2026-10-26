@@ -41,6 +41,7 @@
 
 import { h, raw, button, backButton, escapeHtml } from './kit.js';
 import { unlockTag, openUnlockSheet, ensureStyles as ensureWorkshopStyles } from './workshop.js';
+import { restBits, restingResult, openRestSheet, isResting, restingNote } from './rest.js';
 import {
   W, SPOOL, COLORS, HIDDEN_HEX, whyNot, canPull, isUncovered, isPinned, isPegged, showsColor, isDone, isStuck, canNudge,
   hint, groupOf, colorsOf, knitsInto, remaining, pickStrand, nearDist,
@@ -1901,6 +1902,8 @@ function startLevel(id, { fresh = false } = {}) {
   if (r && !r.ok && r.reason === 'closed') C.game.act(TS().openBasket);
   syncG();
   if (!G) { C.game.act(TS().startBasket, { levelId: S().tangle.cur, fresh: true }); syncG(); }
+  if (!G) { setTimeout(() => { if (visible) C.back(); openRestSheet(C, 'tangle'); }, 0); return; } // resting with nothing to show (Responsibility mode)
+  if (restingResult(r)) openRestSheet(C, 'tangle'); // what is on the table stays
   L = levelById(S().tangle.cur) || LEVELS[0];
   skip = false;
   hinted = -1; note = ''; tangled = false;
@@ -2057,6 +2060,15 @@ function openFinish() {
   const next = levelById(TS().nextLevelId(S(), L.id)) || LEVELS[0];
   $('#tb-finNext').textContent = `Next: ${next.name}`;
   $('#tb-finNext').dataset.level = next.id;
+  // Responsibility mode: resting, Next and Again wait; a leaf note says until when.
+  {
+    const resting = isResting(C, 'tangle');
+    let rn = $('#tb-finRest');
+    if (!rn) { rn = document.createElement('div'); rn.id = 'tb-finRest'; $('#tb-finNext').before(rn); }
+    rn.innerHTML = resting ? String(restingNote(C, 'tangle')) : String(restBits(C, S(), 'tangle').line);
+    $('#tb-finNext').hidden = resting;
+    $('#tb-finAgain').hidden = resting;
+  }
   openSheet('#tb-finishSheet');
   if (!reduced()) $$('#tb-finShelf .tb-sk svg').forEach((el, i) => anim(el, [{ opacity: 0, transform: 'translateY(-14px) rotate(-12deg)' }, { opacity: 1, transform: 'none' }], { duration: 380, delay: 120 + i * 60, fill: 'backwards', easing: 'ease-out' }));
   if (rw && C.audio && set().sound) { try { C.audio.coins(4); } catch { /* fine */ } }
@@ -2345,10 +2357,12 @@ export function tangleCardHtml(ctx, state) {
   else if (sum.playing) line = `Basket ${sum.index + 1} of ${sum.total} · ${sum.name} · ${plural(sum.left, 'strand', 'strands')} to go`;
   else line = `Basket ${sum.index + 1} of ${sum.total} · ${sum.name}. ${sum.chapter}: pull free strands, no timers.`;
   const stats2 = sum.done ? `${plural(sum.done, 'basket', 'baskets')} untangled` : '';
+  const rest = restBits(ctx, state, 'tangle');
   return h`<div class="card tb-card" id="pz-tangle" data-coach="tangle-card">
 <div class="row between"><div class="h3">Tangle Basket</div>${stats2 ? h`<span class="chip">${stats2}</span>` : ''}</div>
 <div class="tb-cardrow"><span class="tb-thumb">${raw(thumbSvg(sum.levelId, sum.out))}</span><div class="hint grow">${line}</div></div>
-${button(sum.playing ? 'Continue untangling' : 'Go to the basket', { variant: 'primary', block: true, attrs: { 'data-action': 'open-tangle' } })}
+${rest.block || button(sum.playing ? 'Continue untangling' : 'Go to the basket', { variant: 'primary', block: true, attrs: { 'data-action': 'open-tangle' } })}
+${rest.line}
 </div>`;
 }
 

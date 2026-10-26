@@ -52,6 +52,7 @@
 
 import { h, raw, button, backButton, escapeHtml } from './kit.js';
 import { unlockTag, openUnlockSheet, ensureStyles as ensureWorkshopStyles } from './workshop.js';
+import { restBits, restingResult, openRestSheet, isResting, restingNote } from './rest.js';
 import {
   COLORS, canLift, whyNotTo, targets, endsAt, isDone, remaining, movers, totalCrossings, yarnLine,
   newState, nearestAt, hookedPairs, canLiftOff, solutionStep, wayFrom, stateKey, parseMoves, formatMoves, move,
@@ -1867,6 +1868,8 @@ function startLevel(id, { fresh = false } = {}) {
   if (r && !r.ok && r.reason === 'closed') C.game.act(HS().openHoop);
   syncG();
   if (!G) { C.game.act(HS().startHoop, { levelId: S().hoop.cur, fresh: true }); syncG(); }
+  if (!G) { setTimeout(() => { if (visible) C.back(); openRestSheet(C, 'hoop'); }, 0); return; } // resting with nothing to show (Responsibility mode)
+  if (restingResult(r)) openRestSheet(C, 'hoop'); // what is on the table stays
   L = levelById(S().hoop.cur) || LEVELS[0];
   skip = false;
   held = -1; drag = null; view = null; note = ''; tangled = false;
@@ -2069,6 +2072,15 @@ function openFinish() {
   const next = levelById(HS().nextLevelId(S(), L.id)) || LEVELS[0];
   $('#hp-finNext').textContent = `Next: ${next.name}`;
   $('#hp-finNext').dataset.level = next.id;
+  // Responsibility mode: resting, Next and Again wait; a leaf note says until when.
+  {
+    const resting = isResting(C, 'hoop');
+    let rn = $('#hp-finRest');
+    if (!rn) { rn = document.createElement('div'); rn.id = 'hp-finRest'; $('#hp-finNext').before(rn); }
+    rn.innerHTML = resting ? String(restingNote(C, 'hoop')) : String(restBits(C, S(), 'hoop').line);
+    $('#hp-finNext').hidden = resting;
+    $('#hp-finAgain').hidden = resting;
+  }
   openSheet('#hp-finishSheet');
   if (!reduced()) $$('#hp-finShelf .hp-sk svg').forEach((el, i) => anim(el, [{ opacity: 0, transform: 'translateY(-14px) rotate(-12deg)' }, { opacity: 1, transform: 'none' }], { duration: 380, delay: 120 + i * 60, fill: 'backwards', easing: 'ease-out' }));
   if (rw && C.audio && set().sound) { try { C.audio.coins(4); } catch { /* fine */ } }
@@ -2346,10 +2358,12 @@ export function hoopCardHtml(ctx, state) {
   else if (sum.playing) line = `Hoop ${sum.index + 1} of ${sum.total} · ${sum.name} · ${plural(sum.left, 'strand', 'strands')} to go`;
   else line = `Hoop ${sum.index + 1} of ${sum.total} · ${sum.name}. ${sum.chapter}: retie knots, no timers.`;
   const stats2 = sum.done ? `${plural(sum.done, 'hoop', 'hoops')} cleared` : '';
+  const rest = restBits(ctx, state, 'hoop');
   return h`<div class="card hp-card" id="pz-hoop" data-coach="hoop-card">
 <div class="row between"><div class="h3">The Hoop</div>${stats2 ? h`<span class="chip">${stats2}</span>` : ''}</div>
 <div class="hp-cardrow"><span class="hp-thumb">${raw(thumbSvg(state))}</span><div class="hint grow">${line}</div></div>
-${button(sum.playing ? 'Continue untangling' : 'Go to the hoop', { variant: 'primary', block: true, attrs: { 'data-action': 'open-hoop' } })}
+${rest.block || button(sum.playing ? 'Continue untangling' : 'Go to the hoop', { variant: 'primary', block: true, attrs: { 'data-action': 'open-hoop' } })}
+${rest.line}
 </div>`;
 }
 

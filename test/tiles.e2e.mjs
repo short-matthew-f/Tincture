@@ -111,6 +111,7 @@ async function seed(page) {
     const { game, ctx } = window.tincture;
     game.act((st, a, now) => {
       st.onboarding.done = true;
+      st.settings.responsibleMode = false; // replays the room far more than 5 times (test/limits.e2e.mjs covers the mode)
       st.onboarding.step = 99;
       st.onboarding.seen = { ...(st.onboarding.seen || {}), workshop: true, shelf: true, map: true, hunters: true, gallery: true, purify: true, grading: true };
       const fams = new Set();

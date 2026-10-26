@@ -117,6 +117,15 @@ Target for the first ten minutes: 5 colors, 1 named color, 8 to 10 purchases inc
 
 Energy meters, login streaks, "you'll lose this" warnings, countdown pressure on rewards, gacha, paid rerolls, nagging notifications, leaderboards and expiring progress. If a future feature needs one of these to work, the feature is wrong.
 
+### Responsibility mode (the one sanctioned exception)
+
+Asked for by the playtester (Candace) and approved by the owner in 0.5.1: "a 'responsibility mode' where you can only play each game 5 times before locking you out of the game for a certain amount of time with a gentle popup telling you that you've hit your limit. Put it in the settings and default it to be on, and 5 times within an hour." It looks like an energy system, so it is written down here to keep it from being "fixed" away. **Do not remove it, and do not turn it off by default.** It differs from a banned energy meter in every way that matters: she asked for it, she controls it, it protects her time instead of selling it back, and nothing can be bought, earned or lost through it.
+
+- **Settings** (`state.settings`): `responsibleMode` (on by default, new and old saves), `playLimit` 3 / **5** / 8 / 10, `playWindowMin` 30 / **60** / 120. One plain line: "Each game can be played this many times in this window, then it rests until the window has passed." Off removes every limit at once; on again keeps the plays already noted.
+- **Limited, each on its own:** grading boards, Purify, the Tile Room, the Winding Room, the Lifting Table, the Dye Garden (Wander, Harvest or a Garden Path visit), the Tangle Basket and the Hoop. **Never limited:** the core idle loop (workshop, orders and Matching, the Mixing bench, shipping and Packing, the Merge Shelf, the Map and hunters, the Gallery and painting, commissions, quests, the catalog). Packing is part of shipping and Matching part of orders, so both stay free.
+- **A play** is starting a new level, board, batch, wall, painting, basket, hoop or garden visit, noted at the start (`state.plays = {gameId: [ms]}`, pruned to the window; `src/sim/limits.js`). Continuing, resuming or reloading never counts and is never blocked; Undo, Start over and Back to solvable on the same level do not count; a game in progress is always hers to finish. Timestamps are absolute (offline time counts), a timestamp from the future (the clock went back) is dropped, and the save is the only record (many tabs share it).
+- **The rest sheet**, when she tries a new play past the limit: "Time for a rest from the Hoop. You've played it 5 times this hour. It'll be ready again at 3:42 PM. Your workshop keeps making color while you're away." with "Back to the workshop" and a small "Change this in Settings" link. No red, no ticking countdown: only the clock time it is ready. Before the limit, a quiet "2 plays left this hour" from 3 of 5; a resting game's hub card and room show a leaf and "Rests until 3:42 PM" instead of a start button. A quest whose how-to points at a resting game still explains it and says when it is ready; nothing breaks and nothing is ever lost.
+
 ### What this pass changed
 
 | System | Problem | Change |
@@ -1015,6 +1024,7 @@ The first playable build is Era 1 only, with all four puzzles, three hunters and
 | Phase 1 idle discovery | Happy accidents about every 3 h | Discovery only from puzzles | Simulation: idle-only players stalled for 19 days |
 | Mill Room gate | 10 colors | 12 colors | Simulation: smoother Phase 2 for light players |
 | Heritage divisor | 10^7 | 10^6 | Simulation: Renovate came too early (tried 8×10^6 first; the new zones sped Renovate up again) |
+| Responsibility mode (0.5.1) | Per-game play limit, on by default (5 within an hour), player-controlled, gentle rest sheet with the clock time | No limit (the energy ban); a global session timer | Asked for by the playtester as a wellbeing tool and approved by the owner; per game keeps the idle loop and the other rooms open. The one sanctioned exception to "Banned patterns" (see "Responsibility mode") |
 
 **Fourth zone (added 2026-10-01).** Two zones were added together; the other candidates are recorded as rejected.
 

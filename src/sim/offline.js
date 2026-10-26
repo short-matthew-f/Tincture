@@ -34,7 +34,8 @@ export function catchUp(state, a, b) {
  * into the past: the loop clocks (lastTick, lastSeenAt) and everything that
  * waits on an absolute time (order refresh and Order Clerk, shelf spillover, muddy clock,
  * collector visit and offer, gallery admission, hunter trips and scouting
- * calls, fleet trips, Rush cooldowns, boosts, the coach-mark gap).
+ * calls, fleet trips, Rush cooldowns, boosts, the coach-mark gap, and the
+ * Responsibility mode plays).
  *
  * Two callers: Game._fixClock when the device clock went backwards (shift by
  * how far the saved clocks are ahead, so trips and cooldowns keep the time
@@ -61,5 +62,11 @@ export function shiftClock(state, ms) {
   for (const v of (state.stations && state.stations.fleet) || []) { back(v, 'departedAt'); back(v, 'arrivesAt'); }
   for (const m of (state.stations && state.stations.mixers) || []) back(m, 'rushedAt');
   for (const b of state.boosts || []) back(b, 'until');
+  // Responsibility mode: each play moves back too, so time passing frees it (src/sim/limits.js).
+  if (state.plays && typeof state.plays === 'object') {
+    for (const list of Object.values(state.plays)) {
+      if (Array.isArray(list)) for (let i = 0; i < list.length; i++) if (Number.isFinite(list[i]) && list[i] > 0) list[i] -= d;
+    }
+  }
   return state;
 }

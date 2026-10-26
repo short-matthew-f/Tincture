@@ -37,6 +37,7 @@ injectStyle('overlay-style', `
 .sheet .actions.stacked { flex-direction: column; }
 .modal .modal-body, .sheet .modal-body { color: var(--ink-soft); font-size: 15px; line-height: 1.4; }
 .modal .actions.stacked { flex-direction: column; }
+.modal .actions > .overlay-link, .sheet .actions > .overlay-link { align-self: center; flex: 0 0 auto; }
 `);
 
 // ---------------------------------------------------------------------------
@@ -338,6 +339,8 @@ function modalEl() {
 
 function actionsHtml(actions, stacked) {
   return h`<div class="actions${stacked ? ' stacked' : ''}">${actions.map((a, i) => {
+    // variant 'link': a small underlined text link under the buttons (e.g. "Change this in Settings").
+    if (a.variant === 'link') return h`<button type="button" class="how-link overlay-link" data-tap data-overlay-action="${i}">${a.label}</button>`;
     const cls = a.variant === 'primary' ? 'btn-primary' : a.variant === 'wood' ? 'btn-wood' : 'btn-paper';
     return h`<button type="button" class="btn ${cls}" data-tap data-overlay-action="${i}">${a.label}</button>`;
   })}</div>`;
@@ -414,7 +417,7 @@ function enqueue(kind, opts = {}) {
 }
 
 /**
- * modal({title, body (html string), actions:[{label, variant, value}], dismissable=true, cls})
+ * modal({title, body (html string), actions:[{label, variant ('primary'|'wood'|'paper'|'link'), value}], dismissable=true, cls})
  * -> Promise<value> (null when dismissed by backdrop / Escape / back).
  */
 export function modal(opts) {
