@@ -90,3 +90,14 @@ Swapped subjects (same n and filename):
 - 391: maypole -> a green Christmas tree with a gold star
 - 392: birthday cake -> a pink birthday cake with candles on top
 - 396: fireworks -> a red Christmas cracker
+
+## Round 4 (final)
+
+Swapped (seeds 7409/7410, one solid body color plus one or two accents, background snapped as before):
+65 purple butterfly; 67 straw beehive skep; 77 leaf with a bite out of it; 78 wooden bug hotel; 97 ginger cat curled up; 99 black sheep;
+109 blue watering can; 121 hedgehog; 125 acorn; 137 hollow tree stump; 141 yellow canary; 158 grey pigeon; 179 wooden duck house on a post;
+182 pink flip-flop; 190 orange ice lolly; 204 yellow tang fish; 217 whale tail; 219 pink conch shell; 226 chocolate-chip cookie; 239 loaf of bread;
+259 blue mug with a white star; 274 big red button; 289 red bucket of dye; 294 green bottle of dye; 303 golden church bell; 336 yellow lightning bolt;
+341 green camper van; 345 blue suitcase; 372 yellow toy duck on wheels; 380 green toy dinosaur; 394 holly leaf with berries.
+Redrawn fully inside the frame: 175 red canoe, 359 yellow taxi. 334: deep orange-yellow sun, background forced to Pale Sky #c3d4df.
+Skipped (slots left empty, files removed): 89 (cow face), 130 (pine cone), 189 (striped beach umbrella), 234 (lemon cake slice).
