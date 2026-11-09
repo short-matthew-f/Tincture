@@ -693,7 +693,7 @@ export function simulate(opts = {}) {
     drain();
     if (opts.trace) {
       opts.trace({
-        at: sinceStart(now), colors: discovery.discoveredCount(state), coins: state.coins, phase: state.phase,
+        state, now, at: sinceStart(now), colors: discovery.discoveredCount(state), coins: state.coins, phase: state.phase,
         rooms: [...(state.rooms ?? [])], unlocks: { ...state.unlocks }, mixers: state.stations.mixers.length,
         income: economy.incomeRate(state, now), buys: { ...ctx.buys },
       });

@@ -39,7 +39,7 @@ const runs = results.then(group);
 // speed-ups (memos, rewritten loops) must leave it unchanged; a rule, content or
 // player change that is meant to move the balance updates it: run
 // `node tools/balance/digest.js` and copy its `runs` line here.
-const BALANCE_DIGEST = '4b4518b071c35a94df9fbacec79f23d90b392047a403d64da7dc4e780e607b57';
+const BALANCE_DIGEST = 'f417f51735331c999c09ffa273b892b65361c37ea76ffad01caee6e424b403f7';
 
 test('the 45 balance runs match the pinned digest (speed-ups change no result)', async () => {
   const digest = runsDigest(await results);

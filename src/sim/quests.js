@@ -17,7 +17,9 @@ import { dayKey, isoWeekKey } from '../format.js';
 import { stateRng, randInt, weightedPick, pick, uuid } from '../rng.js';
 import { emit } from './bus.js';
 import { addBoost } from './factory.js';
-import { discover, discoverableColors } from './discovery.js';
+import { discover } from './discovery.js';
+import { findableInFamily } from './needs.js';
+import { FAMILY_WORDS } from '../content/events.js';
 import {
   unlocked as huntersUnlocked, familyOfColor, colorInfo, knowsColor, postcardsForRegion, addPostcard,
 } from './hunters.js';
@@ -252,28 +254,13 @@ const STEP_NEEDS = {
 };
 
 /**
- * Could she find this color with what she has open now (0.3.1 audit: "Discover 5 new blues" for a
- * player with no hunters yet)? Commission colors wait for Phase 3; wild, hunted and event colors
- * for the map window; a mixed color needs every pigment's source, or hunters to bring them.
+ * Colors of a hue family she can still find with what is open now (sim/needs.js, the
+ * same test commissions use: a commission's signature color, a limited event color or
+ * a pigment no open region sells does not count; playtest: "Discover 5 new blues"
+ * was dealt with one blue left to find).
  */
-function reachableNow(state, c, u) {
-  if (c.foundBy === 'commission') return u.phase >= 3;
-  if (c.tier === 'wild' || c.foundBy === 'hunt' || c.event || c.foundBy === 'event') return u.hunters;
-  if (c.foundBy === 'mix' && Array.isArray(c.recipe)) {
-    if (u.hunters) return true;
-    const owned = new Set(Object.entries(state.stations?.sources ?? {}).filter(([, v]) => (v?.level ?? 0) > 0)
-      .map(([id]) => SOURCES_BY_ID[id]?.pigment ?? id));
-    return c.recipe.every((r) => owned.has(r.pigment));
-  }
-  return true;
-}
-
-/** Colors of a hue family she can still discover this era and reach with what is open now. */
 function undiscoveredInFamily(state, family) {
-  try {
-    const u = unlocksOf(state);
-    return discoverableColors(state).filter((c) => familyOfColor(c.id) === family && reachableNow(state, c, u)).length;
-  } catch { return 0; }
+  try { return findableInFamily(state, family).length; } catch { return 0; }
 }
 
 function weeklyFeasible(state, wq) {
@@ -318,11 +305,66 @@ export const WEEKLY_STAND_INS = Object.freeze([
   Object.freeze({ event: 'colorDiscovered', n: 2, text: 'Discover 2 new colors' }),
 ]);
 
+const reviewKeys = new WeakMap();
+function reviewKey(state, steps) {
+  const src = Object.entries(state.stations?.sources ?? {}).filter(([, v]) => (v?.level ?? 0) > 0).map(([k]) => k).sort().join(',');
+  return [Object.keys(state.catalog?.discovered ?? {}).length, src, (state.hunters?.regionsUnlocked ?? []).join(','),
+    !!state.unlocks?.hunters, state.era ?? 1, (state.commissions?.done ?? []).length,
+    steps.map((s) => s.family + s.progress + '/' + s.n).join(',')].join('|');
+}
+
+/** "Discover 3 new blues" / "Discover 1 new blue". */
+export function familyStepText(n, family) {
+  const many = FAMILY_WORDS[family] || `${family}s`;
+  const one = family === 'neutral' ? 'white, grey or black' : (FAMILY_WORDS[family] ? many.replace(/s$/, '') : family);
+  return `Discover ${n} new ${n === 1 ? one : many}`;
+}
+/**
+ * reviewWeekly(state) — a "Discover N new <family>" step she can no longer finish
+ * (fewer of that family left to find than it still asks for) asks only for what is
+ * left to find, or, with none left, becomes a stand-in she can do. Runs every tick
+ * (cheap: only when what she has found or opened changed), so older saves heal too.
+ */
+export function reviewWeekly(state) {
+  const w = state?.quests?.weekly;
+  if (!w || w.done || !Array.isArray(w.steps)) return false;
+  const open = w.steps.filter((s) => s && !s.done && s.event === 'colorDiscovered' && s.family);
+  if (!open.length) return false;
+  const key = reviewKey(state, open);
+  if (reviewKeys.get(state) === key) return false;
+  let changed = false;
+  const u = unlocksOf(state);
+  const regions = (state.hunters && state.hunters.regionsUnlocked) || [];
+  for (const s of open) {
+    const left = Math.max(0, fin(s.n) - fin(s.progress));
+    const can = undiscoveredInFamily(state, s.family);
+    if (can >= left) continue;
+    changed = true;
+    if (can > 0 || fin(s.progress) > 0) {
+      s.n = fin(s.progress) + can;
+      s.text = familyStepText(s.n, s.family);
+      if (fin(s.progress) >= s.n) s.done = true;
+    } else {
+      const used = new Set(w.steps.map((x) => x.event));
+      const sub = WEEKLY_STAND_INS.find((x) => !used.has(x.event) && stepDoable(state, x, u, regions));
+      if (!sub) continue;
+      s.event = sub.event; s.n = sub.n; s.text = sub.text; s.progress = 0; s.standIn = true;
+      delete s.family;
+    }
+  }
+  if (changed && w.steps.every((s) => s.done) && !w.done) {
+    w.done = true;
+    emit(state, 'weeklyDone', { weeklyId: w.id });
+  }
+  reviewKeys.set(state, reviewKey(state, w.steps.filter((s) => s && !s.done && s.event === 'colorDiscovered' && s.family)));
+  return changed;
+}
+
 /** rollWeekly(state, now) — a new weekly quest each ISO week (rotation, skipping ones she can't do yet). */
 export function rollWeekly(state, now = 0) {
   const q = ensureQuests(state);
   const wk = isoWeekKey(now);
-  if (q.weeklyKey === wk) return null;
+  if (q.weeklyKey === wk) { reviewWeekly(state); return null; }
   if (q.weeklyKey && String(q.weeklyKey) > String(wk)) return null; // clock went back across a week: keep this one
   const first = weeklyQuestForWeek(wk);
   const start = Math.max(0, WEEKLY_QUESTS.indexOf(first));

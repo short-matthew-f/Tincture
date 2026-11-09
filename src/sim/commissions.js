@@ -125,9 +125,13 @@ export function howToFind(state, colorId) {
   return { how: 'bench' };
 }
 
-/** Can she end up with this color's jars (stock steps) or containers (shelf steps)? */
+/**
+ * Can she keep making this color's jars (stock steps) or containers (shelf steps)?
+ * Jars she already holds but cannot make more of are counted by commissionFeasible
+ * against what the step still needs (playtest: a 12-jar step was offered on 1 jar).
+ */
 function canSupply(state, colorId, shelf) {
-  if (isMine(state, colorId)) return shelf ? true : (canMix(state, colorId) || stockOf(state, colorId) >= 1);
+  if (isMine(state, colorId)) return shelf ? true : canMix(state, colorId);
   const f = howToFind(state, colorId);
   if (!f) return false;
   if (shelf) return true;
@@ -145,9 +149,15 @@ export function commissionFeasible(state, commissionId, rec = null) {
     const shelf = usesShelf(st);
     const used = Object.keys(p.colors || {}).filter((k) => p.colors[k] > 0);
     const more = Math.max(0, (st.distinct ?? 1) - used.length);
-    const supply = stepCandidates(st).filter((id) => canSupply(state, id, shelf));
-    if (!supply.length) return false;
-    return supply.filter((id) => !used.includes(id)).length >= more;
+    const cands = stepCandidates(st);
+    const supply = cands.filter((id) => canSupply(state, id, shelf));
+    // Jars on hand of colors she cannot make more of count when, together, they cover the rest of the step.
+    const kept = shelf ? [] : cands.filter((id) => !supply.includes(id) && stockOf(state, id) >= 1);
+    const left = Math.max(0, fin(st.jars) - fin(p.delivered));
+    const keptJars = kept.reduce((n, id) => n + Math.floor(stockOf(state, id) + 1e-9), 0);
+    const all = supply.length ? supply.concat(kept) : (keptJars >= left ? kept : []);
+    if (!all.length) return false;
+    return all.filter((id) => !used.includes(id)).length >= more;
   });
 }
 
@@ -226,7 +236,10 @@ function refreshKey(state, c) {
     .filter(([, v]) => v && fin(v.level) > 0 && !v.eventLoan).map(([k]) => k).sort().join(',');
   const regions = ((state.hunters && state.hunters.regionsUnlocked) || []).join(',');
   const u = state.unlocks || {};
-  return [state.era ?? 1, state.phase ?? 1, discoveredCount(state), src, regions, !!u.hunters, !!u.shelf,
+  // Stock matters for colors she cannot make more of (commissionFeasible counts their jars).
+  const held = Object.keys(state.stock || {}).filter((id) => !canMix(state, id))
+    .map((id) => id + ':' + Math.floor(stockOf(state, id))).sort().join(',');
+  return [state.era ?? 1, state.phase ?? 1, discoveredCount(state), src, regions, !!u.hunters, !!u.shelf, held,
     c.open.map((x) => x.id + (hasProgress(x) ? '+' : '')).join(','), c.later.map((x) => x.id).join(','), c.done.join(',')].join('|');
 }
 

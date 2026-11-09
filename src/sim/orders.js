@@ -9,7 +9,7 @@
 // open (ΔE ≥ 8), at most 2 per hue family, about half are real catalog colors
 // she can discover by matching, and no customer appears twice.
 //
-// Order {id, kind:'match'|'any'|'container'|'bouquet', target, recipe, pay, minutes,
+// Order {id, kind:'match'|'any'|'container'|'bouquet', target, recipe, colorId? (a catalog color it asks for), pay, minutes,
 //        container:null|{color, tier}, postedAt, customer,
 //        flowers?:[{target, recipe, colorId?, filled, tier, coins}], event?}
 //
@@ -22,14 +22,15 @@
 // times BOUQUET_BONUS, and the finished bouquet counts as one filled order and
 // earns the 'bouquet' event points. The Order Clerk never fills a bouquet.
 
-import { createOrder, blend, score } from '../puzzles/matching.js';
+import { createOrder, blend, score, TARGET_RULES } from '../puzzles/matching.js';
 import { getEvent } from '../content/events.js';
 import { CUSTOMER_NAMES } from '../content/names.js';
-import { deltaEHex, hueFamily } from '../color.js';
+import { deltaEHex, hueFamily, hexToOklch } from '../color.js';
 import { mixableColors } from '../content/catalog.js';
 import { stateRng, uuid, pick, shuffle } from '../rng.js';
 import { emit } from './bus.js';
 import { questEvent } from './quests.js';
+import { wantedColors, eventFamilies } from './needs.js';
 import { eventPoints } from './events.js';
 import {
   incomeRate, incomeMultiplier, cheapestUpgrade, colorDef, colorTier, flowMeter, tutorialReward,
@@ -177,6 +178,44 @@ export function bouquetStock(state, flower) {
   return out.sort((a, b) => a.de - b.de);
 }
 
+/** Does a target sit well beside the open board (createOrder's spacing and muted rules)? */
+function fitsBoard(hex, ctx) {
+  if (ctx.avoidHexes.some((h) => deltaEHex(h, hex) < 8)) return false;
+  const muted = (h) => hexToOklch(h).C < TARGET_RULES.minChroma;
+  return !(muted(hex) && ctx.avoidHexes.some(muted));
+}
+
+/** Chance a new match order leans toward what her goals need (sim/needs.js). */
+export const LEAN_CHANCE = 0.4;
+
+/**
+ * leanRecipes(state, catalog, rng) -> recipes or null. Playtest (Candace): "I
+ * can't get orders that line up with the colors I need." About LEAN_CHANCE of new
+ * match orders ask for a color her open goals point at: an undiscovered color a
+ * weekly "Discover new blues" step or a commission step needs (matching it finds
+ * it), else, while an event runs, a color of the event's families (its orders earn
+ * event points). Only one such needed color waits on the board at a time.
+ */
+export function leanRecipes(state, catalog, rng) {
+  if (!catalog.length) return null;
+  let wanted = [];
+  try { wanted = wantedColors(state, { via: 'order' }); } catch { wanted = []; }
+  const fams = eventFamilies(state);
+  // Nothing to lean toward: no draw, so the board deals exactly as before.
+  if (!wanted.length && !fams.length) return null;
+  if (rng() >= LEAN_CHANCE) return null;
+  if (wanted.length) {
+    const onBoard = (state.orders?.open ?? []).some((o) => o && o.colorId && wanted.includes(o.colorId));
+    const list = catalog.filter((c) => wanted.includes(c.id));
+    if (list.length && !onBoard) return list;
+  }
+  if (fams.length) {
+    const list = catalog.filter((c) => fams.includes(hueFamily(c.hex)));
+    if (list.length) return list;
+  }
+  return null;
+}
+
 /** generateOrder(state, rng, now) -> Order (not yet posted), chosen to sit well beside the open board. */
 export function generateOrder(state, rng = stateRng(state), now = 0) {
   const ctx = boardContext(state);
@@ -204,14 +243,20 @@ export function generateOrder(state, rng = stateRng(state), now = 0) {
     }
   }
   const difficulty = Math.min(1, 0.3 * ((state.phase ?? 1) - 1) + 0.02 * num(state.orders?.reputation));
-  const o = createOrder({
+  const catalogRecipes = orderCatalogRecipes(state);
+  const lean = leanRecipes(state, catalogRecipes, rng);
+  const make = (leaning) => createOrder({
     pigments: orderPigments(state),
     difficulty,
     avoidHexes: ctx.avoidHexes,
-    avoidFamilies: ctx.avoidFamilies,
-    catalogRecipes: orderCatalogRecipes(state),
+    avoidFamilies: leaning ? [] : ctx.avoidFamilies,
+    catalogRecipes: leaning || catalogRecipes,
+    ...(leaning ? { catalogChance: 1 } : {}),
   }, rng);
-  return { ...base, kind: 'match', target: o.target, recipe: o.recipe };
+  let o = make(lean);
+  // A leaning order still has to sit well on the board (distinct from every open target, one muted at most).
+  if (lean && !(o.colorId && lean.some((c) => c.id === o.colorId) && fitsBoard(o.target, ctx))) o = make(null);
+  return { ...base, kind: 'match', target: o.target, recipe: o.recipe, ...(o.colorId ? { colorId: o.colorId } : {}) };
 }
 
 /**

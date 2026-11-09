@@ -119,7 +119,7 @@ export function questGuide(state, quest = {}) {
     cta = `Go to the ${regionName(quest.region)}`;
   } else if (event === 'colorDiscovered' && quest.family) {
     const w = FAMILY_WORDS[quest.family] || `${quest.family}s`;
-    how = `Find new ${w}: mix them at the bench and watch for the shimmer, or solve grading boards in those shades.`;
+    how = `Find new ${w}: while this step is open, some orders ask for ${w} you have not found yet (match one to find it) and every grading board you solve reveals one. You can also mix at the bench and watch for the shimmer.`;
   } else if (event === 'commissionDone' && quest.commission) {
     const c = getCommission(quest.commission);
     if (c) how = `Open Commissions and deliver each step of ${c.name} from your stock. It completes when the last step is in.`;

@@ -59,6 +59,7 @@ export * as closeUp from './closeUp.js';
 export * as settings from './settings.js';
 export * as unlocks from './unlocks.js';
 export * as seals from './seals.js';
+export * as needs from './needs.js';
 // The Tile Room (docs/PLAN-v0.3.md): namespace only, its action names (take, undo, deal, ...) are generic.
 export * as tiles from './tiles.js';
 // The Winding Room (Skein Stacks): namespace only, like the Tile Room (place, undo, ... are generic).

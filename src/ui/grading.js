@@ -139,7 +139,8 @@ function settle(ctx, s, board, now) {
     s.stats.fastSolves = (Number.isFinite(s.stats.fastSolves) ? s.stats.fastSolves : 0) + 1;
   }
   const rng = stateRng(s);
-  const tints = ctx.puzzles.grading.revealedTints(board, rng);
+  // A goal that needs a color a board can reveal gets one (sim/needs.js steerTints).
+  const tints = sim.needs.steerTints(s, ctx.puzzles.grading.revealedTints(board, rng), rng);
   const a = ensureActive(s);
   a.pendingTints = tints.slice();
   a.grading = null;
