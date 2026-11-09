@@ -2854,11 +2854,11 @@
   },
   {
    "n": 354,
-   "file": "b2_354_wheelbarrow.png",
-   "id": "wheelbarrow",
+   "file": "b2_354_littleredpostvan.png",
+   "id": "littleredpostvan",
    "theme": "travel",
-   "subject": "wheelbarrow",
-   "prompt": "A cozy gouache painting for a children's picture book: wheelbarrow. One clear subject, large and centered, bold simple shapes, large flat areas of saturated color, a strong silhouette against a plain background of two or three soft color bands, gentle even light, no text, no border, no tiny details. Portrait 3:4."
+   "subject": "little red post van",
+   "prompt": "A cozy gouache painting for a children's picture book: little red post van. One clear subject, large and centered, bold simple shapes, large flat areas of saturated color, a strong silhouette against a plain background of two or three soft color bands, gentle even light, no text, no border, no tiny details. Portrait 3:4."
   },
   {
    "n": 355,
