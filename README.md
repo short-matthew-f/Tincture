@@ -111,6 +111,20 @@ and its offline cache: https://short-matthew-f.github.io/Tincture/proto/
 
 ## Status
 
+- **0.6.0** (390 new paintings): the Lifting Table grows to 494 paintings in
+  50 chapters. Forty new rooms, two per theme (the orchard, the vegetable
+  patch, flowers, little creatures, farm animals, the farmyard, the woods,
+  birds, the pond, the seaside, under the sea, baking, the pantry, the sewing
+  room, the dye house, the village, sky and weather, travel, toys,
+  celebrations), each opening gently and climbing to 27x36 pictures, with
+  the mechanics of chapters 4 to 10 in turn. Pictures painted by a local
+  image model in four review rounds (`proto/lift/art-batch2.json`); the
+  gallery wall folds rooms past the next one into a single line.
+- **0.5.2** (playtest: "I can't make the colors the quests ask for"): weekly
+  "Discover new blues" steps count only colors she can really find now, and
+  shrink or swap when fewer are left; orders and grading boards lean toward
+  the colors her quest, commission or event needs; commissions count jars on
+  hand only when they cover the step.
 - **0.5.1** (the playtester asked for it): **Responsibility mode**, on by
   default in Settings. Each puzzle room (grading boards, Purify, the Tile
   Room, the Winding Room, the Lifting Table, the Dye Garden, the Tangle

@@ -1,5 +1,5 @@
-// The Lifting Table: the shipped data matches the playtested prototype (104
-// paintings in 10 chapters; the first 27 exactly as they shipped before, so her
+// The Lifting Table: the shipped data matches the playtested prototype (494
+// paintings in 50 chapters; the first 27 exactly as they shipped before, so her
 // saves keep their marks and games), a sample of stored solutions replays with
 // the shipped rules (proto/test/lift.test.js covers every painting), crocks and
 // jars left out, and the sim: unlock, chapters and which paintings are open,
@@ -29,8 +29,8 @@ const NOW = Date.UTC(2026, 9, 23, 9);
 // one of them is only kept while its signature matches, so these never change.
 const SIGS_0_4_1 = { sun: 't16rvk', tulip: '1yf8lqr', teacup: 'rb3zum', sail: 'w04wfg', skein: '9jsmhh', mushrooms: '1dwlyvt', sheep: '1dzf3v1', cherries: '99bstz', cottage: '1yn7ank', apple: '12cepfc', lighthouse: '1cl3s63', cat: '14e095m', teapot: 'erp6lq', quilt: '1wjlsjg', hedgehog: 'zu1daw', bee: '1td1enx', birdhouse: 'kiiukn', loom: '1jqsnj4', owl: 'm36ba6', fox: '18ap8hq', harbor: '1n0i406', wheel: '16iyyim', dyepot: '1eygqub', strawberries: '1i131i', mittens: 'pz0whm', village: '13zjqms', sampler: '7w60pa' };
 
-test('104 paintings in 10 chapters, the same as the prototype: art cell for cell, lanes, keys, solutions, signatures', () => {
-  assert.ok(LEVELS.length >= 100 && LEVELS.length <= 110, `${LEVELS.length} paintings`);
+test('494 paintings in 50 chapters, the same as the prototype: art cell for cell, lanes, keys, solutions, signatures', () => {
+  assert.ok(LEVELS.length >= 490 && LEVELS.length <= 510, `${LEVELS.length} paintings`);
   assert.equal(P.LEVELS.length, LEVELS.length);
   assert.equal(new Set(LEVEL_IDS).size, LEVELS.length, 'ids are unique');
   LEVELS.forEach((L, i) => {
@@ -53,12 +53,14 @@ test('104 paintings in 10 chapters, the same as the prototype: art cell for cell
   // The first 27 are exactly as they shipped: ids, order and signatures.
   assert.deepEqual(LEVEL_IDS.slice(0, 27), Object.keys(SIGS_0_4_1));
   for (const [id, sig] of Object.entries(SIGS_0_4_1)) assert.equal(levelById(id).sig, sig, `${id} keeps its signature`);
-  // Chapters tile the list: 10 to 12 paintings from chapter 4 on, each painting in its own chapter.
-  assert.equal(CHAPTERS.length, 10);
+  // Chapters tile the list: 10 to 12 paintings in chapters 4 to 10, 8 to 10 in the batch 2
+  // chapters after them, each painting in its own chapter.
+  assert.equal(CHAPTERS.length, 50);
   CHAPTERS.forEach((c, i) => {
     assert.equal(c.from, i ? CHAPTERS[i - 1].to : 0);
     assert.ok(c.name && c.line && c.id);
-    if (i >= 3) assert.ok(c.to - c.from >= 10 && c.to - c.from <= 12, `${c.id}: ${c.to - c.from} paintings`);
+    if (i >= 3 && i < 10) assert.ok(c.to - c.from >= 10 && c.to - c.from <= 12, `${c.id}: ${c.to - c.from} paintings`);
+    if (i >= 10) assert.ok(c.to - c.from >= 8 && c.to - c.from <= 10, `${c.id}: ${c.to - c.from} paintings`);
     for (let k = c.from; k < c.to; k++) { assert.equal(LEVELS[k].chapter, c.id); assert.equal(chapterIndex(LEVELS[k].id), i); }
   });
   assert.equal(CHAPTERS[CHAPTERS.length - 1].to, LEVELS.length);

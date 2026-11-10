@@ -281,6 +281,7 @@ const CSS = `
 .lf-room.lf-shut .lf-roomhead h3 { color: var(--ink-soft); }
 .lf-room.lf-shut .lf-roomstat { background: rgba(42,38,34,.07); color: var(--ink-soft); }
 .lf-roomline { margin: 0 2px 8px; font-size: 13px; line-height: 1.35; color: var(--ink-soft); }
+.lf-roomsmore { border-top: 1px dashed rgba(140,101,18,.25); padding-top: 8px; margin-top: 6px; }
 .lf-roomshow { margin: 0 2px 8px; }
 .lf-gallery button.lf-closed .lf-fr canvas { filter: sepia(.7) saturate(.4) brightness(1.05); opacity: .45; }
 .lf-gallery button.lf-closed .lf-t { color: var(--ink-soft); }
@@ -1364,7 +1365,21 @@ function openLevels() {
   cb.setAttribute('aria-label', `${going ? 'Continue lifting' : 'Continue with'} ${nx.name}, chapter ${nci + 1}, ${CHAPTERS[nci].name}`);
   cont.append(cb);
   $('#lf-wallNote').textContent = '';
+  // Rooms not open yet past the next one fold into a single line (the wall
+  // hangs fifty rooms; a long list of shut doors helps nobody).
+  const firstShut = rooms.findIndex((r) => !r.open);
   for (const room of rooms) {
+    if (firstShut >= 0 && room.index > firstShut) {
+      if (room.index === firstShut + 1) {
+        const later = rooms.slice(firstShut + 1);
+        const p = document.createElement('p');
+        p.className = 'lf-roomline lf-roomsmore';
+        p.textContent = `${later.length} more ${later.length === 1 ? 'chapter' : 'chapters'} after that, from ${later[0].name} to ${later[later.length - 1].name}, ${later.reduce((n, r) => n + r.total, 0)} paintings in all. Each opens once the one before it is lifted.`;
+        if (later.length === 1) p.textContent = `One more chapter after that: ${later[0].name}, ${later[0].total} paintings.`;
+        wall.append(p);
+      }
+      continue;
+    }
     const sec = document.createElement('section');
     sec.className = `lf-room${room.open ? '' : ' lf-shut'}${room.done ? ' lf-roomdone' : ''}`;
     sec.dataset.room = room.id;

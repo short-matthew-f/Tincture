@@ -338,12 +338,13 @@ async function walk(viewport, tag) {
   const wall = await page.evaluate(() => ({
     rooms: document.querySelectorAll('#lf-wall .lf-room').length,
     shut: document.querySelectorAll('#lf-wall .lf-room.lf-shut').length,
+    more: document.querySelector('#lf-wall .lf-roomsmore')?.textContent || '',
     open: [...document.querySelectorAll('#lf-wall [data-level]')].map((b) => b.dataset.level),
     closed: document.querySelectorAll('#lf-wall [data-closed]').length,
     next: document.querySelector('#lf-wall .lf-nextup')?.dataset.level,
     cont: document.querySelector('#lf-contBtn')?.dataset.level,
   }));
-  check(wall.rooms === 10 && wall.shut === 9, `${tag}: the gallery wall hangs ten rooms, the first one open (${wall.rooms}, ${wall.shut} not open yet)`);
+  check(wall.rooms === 2 && wall.shut === 1 && /^48 more chapters after that/.test(wall.more), `${tag}: the gallery wall hangs the open room and the next, the other 48 folded into a line (${wall.rooms}, ${wall.shut} not open yet; "${wall.more.slice(0, 60)}")`);
   check(wall.open.join() === 'sun,tulip' && wall.closed === 8, `${tag}: in the first room, the lifted painting and the next are open, the rest veiled (${wall.open.join()}; ${wall.closed} veiled)`);
   check(await page.locator('#lf-wall .lf-tick').count() === 1, `${tag}: painting 1 carries its tick`);
   check(wall.next === 'tulip' && wall.cont === 'tulip', `${tag}: the next painting is ringed and Continue leads to it`);
@@ -620,7 +621,7 @@ async function chapterWalk(viewport, tag) {
   await tap(page, '#lf-contBtn');
   await page.waitForSelector('#lf-chapterSheet:not([hidden])', { state: 'visible', timeout: 4000 });
   const ch = await page.evaluate(() => ({ no: document.querySelector('#lf-chNo').textContent, name: document.querySelector('#lf-chName').textContent, thumbs: document.querySelectorAll('#lf-chStrip canvas').length }));
-  check(ch.name === 'The kitchen garden' && /Chapter 4 of 10/.test(ch.no) && ch.thumbs === 11, `${tag}: chapter 4's card (${ch.no}, ${ch.name}, ${ch.thumbs} paintings)`);
+  check(ch.name === 'The kitchen garden' && /Chapter 4 of 50/.test(ch.no) && ch.thumbs === 11, `${tag}: chapter 4's card (${ch.no}, ${ch.name}, ${ch.thumbs} paintings)`);
   await page.waitForTimeout(300);
   await shot('c3-chapter-intro');
   await tap(page, '#lf-chOk');

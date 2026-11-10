@@ -6,6 +6,8 @@
 // art-gen.mjs) and art-imported.js (painted sources, import-art.mjs).
 import { ART as ART_GEN } from './art.js';
 import { ART_IMPORTED } from './art-imported.js';
+import { ART_BATCH2 } from './art-batch2.js';
+import { BOOK2, slotSize } from './book-batch2.js';
 import { PALETTE } from './palette.js';
 
 // Pictures composed by art-gen.mjs, plus any imported from painted sources by
@@ -97,7 +99,7 @@ function slots(range, rows) {
   });
 }
 
-const GARDEN = slots({ from: 0.45, to: 0.04 }, [
+const GARDEN_ROWS = [
   ['sunflower', 'Sunflower', 'sunflower', { lanes: 3, mystery: 0.2 }],
   ['carrots', 'Carrots', 'carrots', { lanes: 3, link: 0.25 }],
   ['snail', 'Snail', 'snail', { mix: 0.25, mystery: 0.2 }],
@@ -109,8 +111,9 @@ const GARDEN = slots({ from: 0.45, to: 0.04 }, [
   ['wheelbarrow', 'Wheelbarrow of seedlings', 'wheelbarrow', { slots: 3, cloth: 1, mix: 0.2, link: 0.15, mystery: 0.3 }],
   ['well', 'Stone well', 'well', { slots: 3, locks: 1, cloth: 1, mix: 0.25, link: 0.2, mystery: 0.3 }],
   ['gardengate', 'Garden gate', 'garden gate', { slots: 3, bench: 2, locks: 1, cloth: 1, mix: 0.25, link: 0.2, mystery: 0.3 }],
-]);
-const COUNTRY = slots({ from: 0.4, to: 0.035 }, [
+];
+const GARDEN = slots({ from: 0.45, to: 0.04 }, GARDEN_ROWS);
+const COUNTRY_ROWS = [
   ['rainbow', 'Rainbow over the hill', 'rainbow', { lanes: 3, link: 0.2 }],
   ['sunrise', 'Sunrise over the field', 'sunrise', { lanes: 3, mystery: 0.3 }],
   ['goose', 'Goose', 'goose', { mix: 0.3 }],
@@ -122,8 +125,9 @@ const COUNTRY = slots({ from: 0.4, to: 0.035 }, [
   ['windmill', 'Windmill', 'windmill', { slots: 3, locks: 1, mix: 0.25, link: 0.2, mystery: 0.3 }],
   ['cottagedoor', 'Cottage door', 'cottage door', { bench: 2, cloth: 2, mix: 0.2, link: 0.2, mystery: 0.3 }],
   ['bridge', 'Covered bridge', 'covered bridge', { slots: 3, bench: 2, locks: 2, mix: 0.25, link: 0.2, mystery: 0.3 }],
-]);
-const KITCHEN = slots({ from: 0.4, to: 0.03 }, [
+];
+const COUNTRY = slots({ from: 0.4, to: 0.035 }, COUNTRY_ROWS);
+const KITCHEN_ROWS = [
   ['pear', 'Pear', 'pear', { lanes: 3, mix: 0.2, link: 0.2 }],
   ['crock', 'Butter crock', 'butter crock', { lanes: 3, crock: 0.3 }],
   ['strawberry', 'Strawberry', 'strawberry', { crock: 0.25, mystery: 0.25 }],
@@ -135,8 +139,9 @@ const KITCHEN = slots({ from: 0.4, to: 0.03 }, [
   ['jam', 'Jar of jam', 'jam jar', { slots: 3, crock: 0.2, cloth: 1, locks: 1, mystery: 0.3 }],
   ['eggs', 'Basket of eggs', 'basket of eggs', { bench: 2, crock: 0.25, mix: 0.25, link: 0.2, mystery: 0.3 }],
   ['cake', 'Slice of cake', 'cake', { slots: 3, bench: 2, crock: 0.2, locks: 1, cloth: 1, mix: 0.25, link: 0.2, mystery: 0.3 }],
-]);
-const WOOL = slots({ from: 0.35, to: 0.025 }, [
+];
+const KITCHEN = slots({ from: 0.4, to: 0.03 }, KITCHEN_ROWS);
+const WOOL_ROWS = [
   ['pincushion', 'Pincushion', 'pincushion', { lanes: 3, crock: 0.2, mystery: 0.25 }],
   ['reels', 'Cotton reels', 'cotton reels', { lanes: 3, left: 1 }],
   ['sweater', 'Yellow sweater', 'sweater', { left: 1, mystery: 0.25 }],
@@ -148,8 +153,9 @@ const WOOL = slots({ from: 0.35, to: 0.025 }, [
   ['workbasket', 'Workbasket', 'workbasket', { slots: 3, left: 1, crock: 0.2, mystery: 0.3 }],
   ['buttons', 'Jar of buttons', 'button jar', { bench: 2, locks: 1, cloth: 1, mix: 0.25, link: 0.2 }],
   ['sewing', 'Sewing machine', 'sewing machine', { slots: 3, left: 2, locks: 1, crock: 0.2, mix: 0.2, link: 0.2, mystery: 0.3 }],
-]);
-const WATER = slots({ from: 0.3, to: 0.02 }, [
+];
+const WOOL = slots({ from: 0.35, to: 0.025 }, WOOL_ROWS);
+const WATER_ROWS = [
   ['starfish', 'Starfish', 'starfish', { lanes: 3, link: 0.25, mystery: 0.25 }],
   ['whale', 'Whale tail', 'whale', { lanes: 3, crock: 0.25, mix: 0.2 }],
   ['seashell', 'Scallop shell', 'shell', { left: 1, mix: 0.25 }],
@@ -161,8 +167,9 @@ const WATER = slots({ from: 0.3, to: 0.02 }, [
   ['anchor', 'Anchor', 'anchor', { slots: 3, cloth: 2, crock: 0.2, link: 0.2 }],
   ['koi', 'Koi', 'koi', { slots: 3, left: 1, locks: 1, mix: 0.25, mystery: 0.3 }],
   ['rowboat', 'Rowing boat', 'rowing boat', { slots: 3, bench: 2, locks: 1, cloth: 1, crock: 0.2, mix: 0.25, link: 0.2, mystery: 0.3 }],
-]);
-const WOODLAND = slots({ from: 0.25, to: 0.015 }, [
+];
+const WATER = slots({ from: 0.3, to: 0.02 }, WATER_ROWS);
+const WOODLAND_ROWS = [
   ['acorn', 'Acorn', 'acorn', { lanes: 3, mix: 0.25, link: 0.2 }],
   ['rabbit', 'Rabbit', 'rabbit', { lanes: 3, left: 1, mystery: 0.3 }],
   ['pinecone', 'Pine cone', 'pine cone', { crock: 0.25, cloth: 1 }],
@@ -174,8 +181,9 @@ const WOODLAND = slots({ from: 0.25, to: 0.015 }, [
   ['woodpecker', 'Woodpecker', 'woodpecker', { slots: 3, left: 1, locks: 1, mystery: 0.3 }],
   ['deer', 'Deer', 'deer', { slots: 3, cloth: 1, crock: 0.2, mix: 0.25, link: 0.2, mystery: 0.3 }],
   ['market', 'Market stall', 'market stall', { slots: 3, bench: 2, locks: 2, crock: 0.15, mix: 0.25, link: 0.2, mystery: 0.3 }],
-]);
-const WINTER = slots({ from: 0.2, to: 0.01 }, [
+];
+const WOODLAND = slots({ from: 0.25, to: 0.015 }, WOODLAND_ROWS);
+const WINTER_ROWS = [
   ['candle', 'Candle', 'candle', { lanes: 3, link: 0.2, mystery: 0.3 }],
   ['snowflake', 'Snowflake', 'snowflake', { lanes: 3, left: 1, mix: 0.2 }],
   ['moon', 'Moon over the hills', 'moon', { cloth: 1, crock: 0.2, mystery: 0.25 }],
@@ -187,7 +195,33 @@ const WINTER = slots({ from: 0.2, to: 0.01 }, [
   ['sleepycat', 'Cat asleep', 'sleeping cat', { slots: 3, cloth: 1, locks: 1, mix: 0.25, mystery: 0.3 }],
   ['gingerbread', 'Gingerbread house', 'gingerbread house', { slots: 3, bench: 2, left: 1, crock: 0.2, mix: 0.25, link: 0.2 }],
   ['carousel', 'Carousel horse', 'carousel horse', { slots: 3, bench: 2, locks: 2, cloth: 1, crock: 0.2, mix: 0.25, link: 0.2, mystery: 0.3 }],
-]);
+];
+const WINTER = slots({ from: 0.2, to: 0.01 }, WINTER_ROWS);
+
+// ---- chapters 11 to 50: the batch 2 paintings (book-batch2.js) ----
+// Each chapter borrows the mechanics of one of chapters 4 to 10 in turn (its
+// knobs, slot by slot, stretched to the chapter's length), sizes its pictures
+// 18x24 up to 27x36 (slotSize), and eases its clear-rate range: the first
+// chapter of a theme from 0.45 to 0.05, the second from 0.35 to 0.03, so the
+// long run past Winter evenings keeps a gentle start in every room.
+const unrun = (row) => row.replace(/([a-z])(\d*)/g, (m, c, n) => c.repeat(n ? +n : 1));
+const TEMPLATES = [GARDEN_ROWS, COUNTRY_ROWS, KITCHEN_ROWS, WOOL_ROWS, WATER_ROWS, WOODLAND_ROWS, WINTER_ROWS];
+const BATCH2 = BOOK2.map((ch, k) => {
+  const rows = TEMPLATES[k % TEMPLATES.length];
+  const range = k % 2 === 0 ? { from: 0.45, to: 0.05 } : { from: 0.35, to: 0.03 };
+  const n = ch.items.length;
+  const defs = ch.items.map((it, i) => {
+    const f = n > 1 ? i / (n - 1) : 0;
+    const [W, H] = slotSize(i, n);
+    const { lanes = 4, slots: belt, bench, ...gen } = rows[Math.round(f * (rows.length - 1))][3];
+    return {
+      id: it.id, name: it.name, noun: it.noun, lanes, ...(belt ? { slots: belt } : {}), ...(bench ? { bench } : {}),
+      size: [W, H], art: ART_BATCH2[it.id].split('/').map(unrun), batch2: true,
+      gen: { target: r3(range.from * (range.to / range.from) ** f), future: r3(0.15 + 0.3 * f), caps: CAPS[W], ...gen },
+    };
+  });
+  return { id: ch.id, name: ch.name, line: ch.line, defs };
+});
 
 // The gallery wall's rooms. A chapter opens once every painting of the one
 // before is lifted; inside a chapter, each painting opens once the one before it
@@ -203,6 +237,7 @@ const BOOK = [
   { id: 'water', name: 'By the water', line: 'Boats, swans and the things that live in the shallows.', defs: WATER },
   { id: 'woodland', name: 'Woodland and autumn', line: 'Acorns, robins and a walk through the falling leaves.', defs: WOODLAND },
   { id: 'winter', name: 'Winter evenings', line: 'Candlelight, snow, and a carousel at the winter fair.', defs: WINTER },
+  ...BATCH2,
 ];
 
 export const LEVEL_DEFS = BOOK.flatMap((ch) => ch.defs.map((d) => ({ ...d, chapter: ch.id })));

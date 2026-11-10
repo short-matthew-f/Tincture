@@ -10,6 +10,7 @@ import { LEVELS, LEVEL_DEFS, PALETTE, MECHANICS, CHAPTERS } from '../lift/levels
 import { SOURCES } from '../lift/art-sources.js';
 import { ART as ART_GEN } from '../lift/art.js';
 import { ART_IMPORTED } from '../lift/art-imported.js';
+import { ART_BATCH2 } from '../lift/art-batch2.js';
 import { QUEUES } from '../lift/queues.js';
 import { decodePNG, encodePNG, importPNG, quantize, downsample } from '../lift/import-art.mjs';
 import { deflateSync } from 'node:zlib';
@@ -20,8 +21,8 @@ const run = (L, str, s = newState(L)) => replay(L, str, s);
 
 // ---------- the level list ----------
 
-test('the level list: 100 to 110 paintings, palette colors, capacities match, mechanics known', () => {
-  assert.ok(LEVELS.length >= 100 && LEVELS.length <= 110, `${LEVELS.length} levels`);
+test('the level list: 104 paintings and the batch 2 chapters, palette colors, capacities match, mechanics known', () => {
+  assert.ok(LEVELS.length >= 490 && LEVELS.length <= 510, `${LEVELS.length} levels`);
   assert.equal(new Set(LEVELS.map((L) => L.id)).size, LEVELS.length, 'ids are unique');
   for (const L of LEVELS) {
     assert.ok(L.colors.length >= 3 && L.colors.length <= 10, `${L.id} has ${L.colors.length} colors`);
@@ -33,41 +34,62 @@ test('the level list: 100 to 110 paintings, palette colors, capacities match, me
   }
   // later pictures are denser: the first chapters' mid and late levels are at
   // least 22 columns and 24 rows; from chapter 4 on, every picture is at least
-  // 18x24 with 6 to 10 colors, and each chapter ends on big pictures
+  // 18x24 with 6 to 10 colors (3 to 10 in the batch 2 chapters, 11 on, whose
+  // calmer painted pictures open each room), and each chapter ends on big pictures
   for (const L of LEVELS.slice(8, 27)) assert.ok(L.W >= 22 && L.H >= 24, `${L.id} is ${L.W}x${L.H}`);
   assert.ok(LEVELS.slice(19, 27).every((L) => L.W * L.H >= 800), 'the whole table: big pictures');
   for (const c of CHAPTERS.slice(3)) {
     const ls = LEVELS.slice(c.from, c.to);
     for (const L of ls) {
       assert.ok(L.W >= 18 && L.H >= 24, `${L.id} is ${L.W}x${L.H}`);
-      assert.ok(L.colors.length >= 6 && L.colors.length <= 10, `${L.id} has ${L.colors.length} colors`);
+      const least = CHAPTERS.indexOf(c) >= 10 ? 3 : 6;
+      assert.ok(L.colors.length >= least && L.colors.length <= 10, `${L.id} has ${L.colors.length} colors`);
     }
-    assert.ok(ls.slice(-3).every((L) => L.W * L.H >= 900), `${c.id} ends on big pictures`);
+    assert.ok(ls.slice(CHAPTERS.indexOf(c) >= 10 ? -2 : -3).every((L) => L.W * L.H >= 900), `${c.id} ends on big pictures`);
   }
 });
 
-test('chapters: ten rooms that tile the list; each new painting has a picture, a slot size and knobs', () => {
-  assert.equal(CHAPTERS.length, 10);
+test('chapters: fifty rooms that tile the list; each new painting has a picture, a slot size and knobs', () => {
+  assert.equal(CHAPTERS.length, 50);
   CHAPTERS.forEach((c, i) => {
     assert.equal(c.from, i ? CHAPTERS[i - 1].to : 0);
     for (const L of LEVELS.slice(c.from, c.to)) assert.equal(L.chapter, c.id);
   });
-  assert.equal(CHAPTERS[9].to, LEVELS.length);
+  assert.equal(CHAPTERS[CHAPTERS.length - 1].to, LEVELS.length);
+  assert.equal(CHAPTERS[10].from, 104, 'the batch 2 chapters come after the first 104 paintings');
   assert.deepEqual(CHAPTERS.slice(0, 3).map((c) => c.to - c.from), [10, 9, 8], 'the first 27 keep their order');
   for (const d of LEVEL_DEFS.slice(27)) {
     assert.ok(Array.isArray(d.size) && d.art.length === d.size[1] && d.art[0].length >= d.size[0], `${d.id}: drawn at its slot size`);
-    assert.ok(ART_GEN[d.id] || ART_IMPORTED[d.id], `${d.id} has a picture`);
+    assert.ok(ART_GEN[d.id] || ART_IMPORTED[d.id] || ART_BATCH2[d.id], `${d.id} has a picture`);
     assert.ok(!(ART_GEN[d.id] && ART_IMPORTED[d.id] && SOURCES[d.id] === undefined), `${d.id}: one source of truth`);
     assert.ok(d.gen && d.gen.target > 0 && d.gen.target < 1 && d.gen.caps.length, `${d.id} has knobs`);
   }
   for (const id of Object.keys(SOURCES)) assert.ok(LEVEL_DEFS.some((d) => d.id === id && d.size), `${id}: an imported picture has a painting and a slot size`);
-  // no near-duplicates among the pictures: no two share more than half their cells at the same size
+  // no near-duplicates among the first 104 pictures: no two share more than half their cells at the same size
   const sameSize = {};
-  for (const L of LEVELS) (sameSize[`${L.W}x${L.H}`] ||= []).push(L);
+  for (const L of LEVELS.slice(0, 104)) (sameSize[`${L.W}x${L.H}`] ||= []).push(L);
   for (const group of Object.values(sameSize)) for (let a = 0; a < group.length; a++) for (let b = a + 1; b < group.length; b++) {
     let same = 0;
     for (let r = 0; r < group[a].H; r++) for (let c = 0; c < group[a].W; c++) if (group[a].cells[r][c] === group[b].cells[r][c]) same++;
     assert.ok(same / (group[a].W * group[a].H) < 0.5, `${group[a].id} and ${group[b].id} look alike`);
+  }
+  // The batch 2 pictures share flat cream grounds, so they are compared without
+  // them, inside a chapter: no two keep more than 60% of their subjects' cells alike.
+  const bgOf = (L) => { const n = {}; for (const r of L.cells) for (const x of r) n[x] = (n[x] || 0) + 1; return Object.entries(n).sort((a, b) => b[1] - a[1])[0][0]; };
+  for (const c of CHAPTERS.slice(10)) {
+    const ls = LEVELS.slice(c.from, c.to);
+    for (let a = 0; a < ls.length; a++) for (let b = a + 1; b < ls.length; b++) {
+      const A = ls[a], B = ls[b];
+      if (A.W !== B.W || A.H !== B.H) continue;
+      const ba = bgOf(A), bb = bgOf(B);
+      let same = 0, union = 0;
+      for (let r = 0; r < A.H; r++) for (let k = 0; k < A.W; k++) {
+        const x = A.cells[r][k], y = B.cells[r][k];
+        if (x === ba && y === bb) continue;
+        union++; if (x === y) same++;
+      }
+      assert.ok(same / union < 0.6, `${A.id} and ${B.id} look alike`);
+    }
   }
 });
 
@@ -122,7 +144,7 @@ test('difficulty climbs across the first 27 paintings\' mechanic bands (casual c
 
 test('chapters 4 to 10: each starts gentler than the last ended, then climbs', () => {
   const mean = (xs, k) => xs.reduce((s, x) => s + x[k], 0) / xs.length;
-  CHAPTERS.slice(3).forEach((c, i) => {
+  CHAPTERS.slice(3, 10).forEach((c, i) => {
     const st = LEVELS.slice(c.from, c.to).map((L) => L.stats);
     const first = st.slice(0, 4), last = st.slice(-4);
     assert.ok(mean(first, 'casual') > 2 * mean(last, 'casual'), `${c.id}: casual clears fall`);
