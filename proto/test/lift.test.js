@@ -158,6 +158,18 @@ test('chapters 4 to 10: each starts gentler than the last ended, then climbs', (
   });
 });
 
+test('chapters 11 to 50 (batch 2): each opens gently and climbs to a painting that needs planning', () => {
+  const mean = (xs, k) => xs.reduce((s, x) => s + x[k], 0) / xs.length;
+  for (const c of CHAPTERS.slice(10)) {
+    const st = LEVELS.slice(c.from, c.to).map((L) => L.stats);
+    const first = st.slice(0, 3), last = st.slice(-3);
+    assert.ok(mean(first, 'casual') > 2 * mean(last, 'casual'), `${c.id}: casual clears fall`);
+    assert.ok(mean(first, 'moves') < mean(last, 'moves'), `${c.id}: longer paintings`);
+    assert.ok(st[st.length - 1].casual <= 0.15, `${c.id}: its last painting needs planning`);
+    assert.ok(st[0].casual >= 0.25, `${c.id}: its first painting is gentle`);
+  }
+});
+
 test('stored casual rates are honest (recomputed for two levels)', () => {
   for (const id of ['sun', 'skein']) {
     const L = LEVELS.find((x) => x.id === id);
